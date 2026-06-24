@@ -1,0 +1,65 @@
+/* src/assets/styles/global.css */
+@import "tailwindcss";
+
+@layer base {
+    :root {
+        --bg-primary: #0a0e17;
+        --bg-panel: rgba(13, 17, 33, 0.8);
+        --border-glow: rgba(34, 211, 238, 0.3);
+        --text-primary: #e2e8f0;
+        --text-accent: #22d3ee;
+        --accent-green: #22c55e;
+        --accent-red: #ef4444;
+        --accent-orange: #f59e0b;
+    }
+
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    body {
+        font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+        background-color: #0a0e17;
+        background-image:
+                radial-gradient(ellipse at 20% 20%, rgba(34, 211, 238, 0.04) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 70%, rgba(34, 211, 238, 0.03) 0%, transparent 50%),
+                linear-gradient(rgba(34, 211, 238, 0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(34, 211, 238, 0.02) 1px, transparent 1px);
+        background-size: 100% 100%, 100% 100%, 40px 40px, 40px 40px;
+        color: var(--text-primary);
+        overflow: hidden;
+        -webkit-font-smoothing: antialiased;
+    }
+
+    /* 滚动条风格 */
+    ::-webkit-scrollbar {
+        width: 4px;
+    }
+    ::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+        background: rgba(34, 211, 238, 0.3);
+        border-radius: 2px;
+    }
+}
+
+/* 数字翻牌器动画 */
+@keyframes flipIn {
+    0% { transform: rotateX(90deg); opacity: 0; }
+    100% { transform: rotateX(0deg); opacity: 1; }
+}
+.digital-flop {
+    animation: flipIn 0.4s ease-out;
+}
+
+/* 预警闪烁 */
+@keyframes alertPulse {
+    0%, 100% { border-color: rgba(239, 68, 68, 0.3); }
+    50% { border-color: rgba(239, 68, 68, 0.9); box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
+}
+.alert-flash {
+    animation: alertPulse 1.5s infinite;
+}
