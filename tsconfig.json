@@ -10,7 +10,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
-    }
+    },
+    "jsx": "react"
   },
   "include": ["src/**/* Corresponding file is not included in tsconfig.json"],
 
