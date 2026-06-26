@@ -1,21 +1,36 @@
-import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { geoMercator } from 'd3-geo';
 
+export type ChinaMap3DHandle = {
+    riseCity: (cityName: string) => void;
+    fallCity: (cityName: string) => void;
+    flyToCity: (cityName: string) => void;
+    addFlyLine: (lineId: string, fromCoords: [number, number], toCoords: [number, number]) => void;
+    removeFlyLine: (lineId: string) => void;
+};
+
 const BASE_URL = 'https://geo.datav.aliyun.com/areas_v3/bound/';
 const DIRECT_CITY_ADCODES = [110000, 120000, 310000, 500000];
+const RISE_HEIGHT = -1.5;
+const FOSHAN = '\u4f5b\u5c71';
 
 async function loadCityGeoJson(): Promise<any> {
     const provResp = await fetch(`${BASE_URL}100000_full.json`);
     const provData = await provResp.json();
     const municipalityFeatures: any[] = [];
     const provinceAdcodes: number[] = [];
-    provData.features.forEach((f: any) => {
-        const adcode = f.properties.adcode;
-        if (DIRECT_CITY_ADCODES.includes(adcode)) municipalityFeatures.push(f);
-        else if (/^\d+$/.test(String(adcode))) provinceAdcodes.push(adcode);
+
+    provData.features.forEach((feature: any) => {
+        const adcode = feature.properties.adcode;
+        if (DIRECT_CITY_ADCODES.includes(adcode)) {
+            municipalityFeatures.push(feature);
+        } else if (/^\d+$/.test(String(adcode))) {
+            provinceAdcodes.push(adcode);
+        }
     });
+
     const cityFeatures: any[] = [];
     await Promise.all(
         provinceAdcodes.map(async (adcode) => {
@@ -23,183 +38,311 @@ async function loadCityGeoJson(): Promise<any> {
                 const resp = await fetch(`${BASE_URL}${adcode}_full.json`);
                 const data = await resp.json();
                 if (data.features) cityFeatures.push(...data.features);
-            } catch (e) {}
+            } catch {
+                // Ignore one failed province file and keep the map usable.
+            }
         })
     );
+
     return { type: 'FeatureCollection', features: [...municipalityFeatures, ...cityFeatures] };
 }
 
-const ChinaMap3D = forwardRef((_props: {}, ref: any) => {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const meshMapRef = useRef<Record<string, THREE.Group>>({});
-    const cityStatusRef = useRef<Map<string, number>>(new Map());       // 0: 地面, 1: 凸起
-    const animFramesRef = useRef<Map<string, number>>(new Map());       // 每个城市当前动画帧ID
-    const foShanNameRef = useRef<string>('佛山市');
-    const coordDivRef = useRef<HTMLDivElement>(null);
+function normalizeCityName(cityName: string) {
+    return cityName.endsWith('\u5e02') ? cityName.slice(0, -1) : cityName;
+}
 
-    const RISE_HEIGHT = -1.5; // 向上凸起的距离（负 Z 轴方向为世界 Y 轴正方向）
+function easeInOutCubic(t: number) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
 
-    const easeInOutCubic = (t: number) =>
-        t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-
-    // 单个城市升降动画（独立帧管理）
-    const animateCity = useCallback(
-        (cityName: string, targetZ: number, duration: number = 1500) => {
-            const group = meshMapRef.current[cityName];
-            if (!group) return;
-
-            // 取消该城市已有的动画
-            const oldFrame = animFramesRef.current.get(cityName);
-            if (oldFrame !== undefined) {
-                cancelAnimationFrame(oldFrame);
-                animFramesRef.current.delete(cityName);
+function disposeObject3D(object: THREE.Object3D) {
+    object.traverse((child) => {
+        if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
+            child.geometry.dispose();
+            const material = child.material;
+            if (Array.isArray(material)) {
+                material.forEach((item) => item.dispose());
+            } else {
+                material.dispose();
             }
+        }
+    });
+}
 
-            const startZ = group.position.z;
-            const delta = targetZ - startZ;
-            if (Math.abs(delta) < 0.001) return;
+const projection = geoMercator()
+    .center([104.5, 35])
+    .scale(80)
+    .translate([0, 0]);
 
-            const startTime = performance.now();
+function mapPosition(coords: [number, number], lift = 1.8) {
+    const projected = projection(coords);
+    if (!projected) return null;
+    return new THREE.Vector3(-projected[0], lift, -projected[1]);
+}
 
-            const step = () => {
-                const now = performance.now();
-                const progress = Math.min((now - startTime) / duration, 1);
-                const eased = easeInOutCubic(progress);
-                group.position.z = startZ + delta * eased;
+const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const sceneRef = useRef<THREE.Scene | null>(null);
+    const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+    const mapGroupRef = useRef<THREE.Group | null>(null);
+    const meshMapRef = useRef<Record<string, THREE.Group>>({});
+    const cityStatusRef = useRef<Map<string, number>>(new Map());
+    const cityAnimFramesRef = useRef<Map<string, number>>(new Map());
+    const flyAnimFramesRef = useRef<Map<string, number>>(new Map());
+    const flyLinesRef = useRef<Map<string, THREE.Group>>(new Map());
+    const foShanNameRef = useRef<string>(FOSHAN);
+    const renderFrameRef = useRef<number>(0);
+    const pendingRaisedCitiesRef = useRef<Set<string>>(new Set([FOSHAN]));
 
-                if (progress < 1) {
-                    animFramesRef.current.set(cityName, requestAnimationFrame(step));
-                } else {
-                    group.position.z = targetZ;
-                    animFramesRef.current.delete(cityName);
-                }
-            };
+    const findCityKey = useCallback((cityName: string) => {
+        const normalized = normalizeCityName(cityName);
+        return Object.keys(meshMapRef.current).find((name) => normalizeCityName(name).includes(normalized));
+    }, []);
 
-            animFramesRef.current.set(cityName, requestAnimationFrame(step));
-        },
-        []
-    );
+    const animateCity = useCallback((cityName: string, targetZ: number, duration = 1200) => {
+        const group = meshMapRef.current[cityName];
+        if (!group) return;
 
-    // 上升方法
+        const oldFrame = cityAnimFramesRef.current.get(cityName);
+        if (oldFrame !== undefined) {
+            cancelAnimationFrame(oldFrame);
+            cityAnimFramesRef.current.delete(cityName);
+        }
+
+        const startZ = group.position.z;
+        const delta = targetZ - startZ;
+        if (Math.abs(delta) < 0.001) return;
+
+        const startTime = performance.now();
+        const step = () => {
+            const progress = Math.min((performance.now() - startTime) / duration, 1);
+            group.position.z = startZ + delta * easeInOutCubic(progress);
+
+            if (progress < 1) {
+                cityAnimFramesRef.current.set(cityName, requestAnimationFrame(step));
+            } else {
+                group.position.z = targetZ;
+                cityAnimFramesRef.current.delete(cityName);
+            }
+        };
+
+        cityAnimFramesRef.current.set(cityName, requestAnimationFrame(step));
+    }, []);
+
     const riseCity = useCallback(
         (cityName: string) => {
-            const matchedKey = Object.keys(meshMapRef.current).find((n) =>
-                n.includes(cityName)
-            );
-            if (!matchedKey) return;
+            const matchedKey = findCityKey(cityName);
+            if (!matchedKey) {
+                pendingRaisedCitiesRef.current.add(normalizeCityName(cityName));
+                return;
+            }
 
             const status = cityStatusRef.current.get(matchedKey) ?? 0;
-            if (status === 1) return; // 已经凸起，忽略
+            if (status === 1) return;
 
-            // 更新状态
             cityStatusRef.current.set(matchedKey, 1);
-
             const group = meshMapRef.current[matchedKey];
-            if (!group) return;
+            const isFoShan = normalizeCityName(matchedKey).includes(FOSHAN);
 
-            // 设置颜色（佛山保持金色，其他变为亮青色）
-            const isFoShan = matchedKey === foShanNameRef.current;
             group.children.forEach((child) => {
                 if (child instanceof THREE.Mesh) {
-                    (child.material as THREE.MeshStandardMaterial).color.set(
-                        isFoShan ? '#d97706' : '#06b6d4'
-                    );
+                    (child.material as THREE.MeshStandardMaterial).color.set(isFoShan ? '#f59e0b' : '#22d3ee');
+                    (child.material as THREE.MeshStandardMaterial).emissive.set(isFoShan ? '#7c2d12' : '#0e7490');
                 }
             });
 
-            // 执行上升动画
-            animateCity(matchedKey, RISE_HEIGHT, 1500);
+            animateCity(matchedKey, RISE_HEIGHT, 1200);
         },
-        [animateCity]
+        [animateCity, findCityKey]
     );
 
-    // 下降方法
     const fallCity = useCallback(
         (cityName: string) => {
-            const matchedKey = Object.keys(meshMapRef.current).find((n) =>
-                n.includes(cityName)
-            );
-            if (!matchedKey) return;
+            const matchedKey = findCityKey(cityName);
+            if (!matchedKey || normalizeCityName(matchedKey).includes(FOSHAN)) return;
 
             const status = cityStatusRef.current.get(matchedKey) ?? 0;
-            if (status === 0) return; // 已经在地面，忽略
+            if (status === 0) return;
 
-            // 更新状态
             cityStatusRef.current.set(matchedKey, 0);
-
             const group = meshMapRef.current[matchedKey];
-            if (!group) return;
-
-            // 恢复默认颜色
-            const isFoShan = matchedKey === foShanNameRef.current;
             group.children.forEach((child) => {
                 if (child instanceof THREE.Mesh) {
-                    (child.material as THREE.MeshStandardMaterial).color.set(
-                        isFoShan ? '#d97706' : '#334155'
-                    );
+                    (child.material as THREE.MeshStandardMaterial).color.set('#334155');
+                    (child.material as THREE.MeshStandardMaterial).emissive.set('#020617');
                 }
             });
 
-            // 执行下降动画
-            animateCity(matchedKey, 0, 800); // 下降可以稍快
+            animateCity(matchedKey, 0, 850);
         },
-        [animateCity]
+        [animateCity, findCityKey]
     );
 
-    // 暴露方法给父组件
-    useImperativeHandle(ref, () => ({ riseCity, fallCity, flyToCity: riseCity }), [riseCity, fallCity]);
+    const removeFlyLine = useCallback((lineId: string) => {
+        const group = flyLinesRef.current.get(lineId);
+        if (!group) return;
 
-    // 场景初始化（大部分不变，只调整初始高度和状态）
+        const frame = flyAnimFramesRef.current.get(lineId);
+        if (frame !== undefined) {
+            cancelAnimationFrame(frame);
+            flyAnimFramesRef.current.delete(lineId);
+        }
+
+        sceneRef.current?.remove(group);
+        flyLinesRef.current.delete(lineId);
+        disposeObject3D(group);
+    }, []);
+
+    const addFlyLine = useCallback(
+        (lineId: string, fromCoords: [number, number], toCoords: [number, number]) => {
+            const scene = sceneRef.current;
+            if (!scene) return;
+
+            removeFlyLine(lineId);
+
+            const from = mapPosition(fromCoords);
+            const to = mapPosition(toCoords);
+            if (!from || !to) return;
+
+            const mid = new THREE.Vector3().addVectors(from, to).multiplyScalar(0.5);
+            const distance = from.distanceTo(to);
+            mid.y += Math.max(3.2, distance * 0.42);
+
+            const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
+            const points = curve.getPoints(128);
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const glowGeometry = geometry.clone();
+            geometry.setDrawRange(0, 0);
+            glowGeometry.setDrawRange(0, 0);
+
+            const baseLine = new THREE.Line(
+                geometry,
+                new THREE.LineBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.88 })
+            );
+            const glowLine = new THREE.Line(
+                glowGeometry,
+                new THREE.LineBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: 0.28 })
+            );
+
+            const head = new THREE.Mesh(
+                new THREE.SphereGeometry(0.24, 16, 16),
+                new THREE.MeshBasicMaterial({ color: 0xbae6fd })
+            );
+            const halo = new THREE.Mesh(
+                new THREE.SphereGeometry(0.58, 16, 16),
+                new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.24, depthWrite: false })
+            );
+            const startPulse = new THREE.Mesh(
+                new THREE.SphereGeometry(0.3, 14, 14),
+                new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.8, depthWrite: false })
+            );
+            const endPulse = new THREE.Mesh(
+                new THREE.SphereGeometry(0.3, 14, 14),
+                new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.8, depthWrite: false })
+            );
+
+            head.position.copy(from);
+            halo.position.copy(from);
+            startPulse.position.copy(from);
+            endPulse.position.copy(to);
+
+            const group = new THREE.Group();
+            group.add(glowLine, baseLine, startPulse, endPulse, head, halo);
+            scene.add(group);
+            flyLinesRef.current.set(lineId, group);
+
+            const startTime = performance.now();
+            const growDuration = 1300;
+
+            const step = () => {
+                const elapsed = performance.now() - startTime;
+                const grow = Math.min(elapsed / growDuration, 1);
+                const drawCount = Math.max(2, Math.floor(easeInOutCubic(grow) * points.length));
+                geometry.setDrawRange(0, drawCount);
+                glowGeometry.setDrawRange(0, drawCount);
+
+                const travel = grow < 1 ? grow : (elapsed % 2200) / 2200;
+                const point = curve.getPoint(travel);
+                head.position.copy(point);
+                halo.position.copy(point);
+
+                halo.scale.setScalar(1 + Math.sin(elapsed / 180) * 0.22);
+                startPulse.scale.setScalar(1 + Math.sin(elapsed / 230) * 0.16);
+                endPulse.scale.setScalar(1 + Math.sin(elapsed / 250 + 1.2) * 0.16);
+
+                flyAnimFramesRef.current.set(lineId, requestAnimationFrame(step));
+            };
+
+            flyAnimFramesRef.current.set(lineId, requestAnimationFrame(step));
+        },
+        [removeFlyLine]
+    );
+
+    useImperativeHandle(
+        ref,
+        () => ({
+            riseCity,
+            fallCity,
+            flyToCity: riseCity,
+            addFlyLine,
+            removeFlyLine,
+        }),
+        [addFlyLine, fallCity, removeFlyLine, riseCity]
+    );
+
     useEffect(() => {
-        if (!containerRef.current) return;
         const container = containerRef.current;
-        const width = container.clientWidth;
-        const height = container.clientHeight;
+        if (!container) return;
 
+        let disposed = false;
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color('#0a0e17');
+        scene.background = new THREE.Color('#07111f');
+        sceneRef.current = scene;
 
-        const camera = new THREE.PerspectiveCamera(45, width / height, 1, 10000);
-        camera.position.set(0, 25, 0);
+        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 1, 10000);
+        camera.position.set(0, 26, 0);
         camera.lookAt(0, 0, 0);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        renderer.setSize(width, height);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        rendererRef.current = renderer;
         container.appendChild(renderer.domElement);
 
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.target.set(0, 0, 0);
         controls.minPolarAngle = 0;
-        controls.maxPolarAngle = Math.PI / 2.2;
-        controls.maxDistance = 300;
-        controls.minDistance = 2;
+        controls.maxPolarAngle = Math.PI / 2.15;
+        controls.minDistance = 8;
+        controls.maxDistance = 220;
         controls.update();
 
-        const ambient = new THREE.AmbientLight(0xffffff, 0.7);
-        scene.add(ambient);
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-        dirLight.position.set(0, 1, 0);
-        scene.add(dirLight);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+        const keyLight = new THREE.DirectionalLight(0xffffff, 1.35);
+        keyLight.position.set(0, 1, 0);
+        scene.add(keyLight);
+        const rimLight = new THREE.PointLight(0x22d3ee, 1.5, 90);
+        rimLight.position.set(0, 8, 0);
+        scene.add(rimLight);
 
         loadCityGeoJson().then((geoJson) => {
-            const group = new THREE.Group();
-            const allNames = geoJson.features.map((f: any) => f.properties.name);
-            const foShanName = allNames.find((n: string) => n.includes('佛山')) || '佛山市';
-            foShanNameRef.current = foShanName;
+            if (disposed) return;
 
-            const projection = geoMercator()
-                .center([104.5, 35])
-                .scale(80)
-                .translate([0, 0]);
+            const group = new THREE.Group();
+            const allNames = geoJson.features.map((feature: any) => feature.properties.name);
+            const foShanName = allNames.find((name: string) => normalizeCityName(name).includes(FOSHAN)) || FOSHAN;
+            foShanNameRef.current = foShanName;
 
             geoJson.features.forEach((feature: any) => {
                 const { geometry, properties } = feature;
                 const name = properties.name;
-                const isFoShan = name === foShanName;
-                const depth = isFoShan ? 2.0 : 1.0; // 佛山厚度 2，其他 1
-                const color = isFoShan ? '#d97706' : '#334155';
-                const initialStatus = isFoShan ? 1 : 0;   // 佛山初始凸起
+                const normalizedName = normalizeCityName(name);
+                const isFoShan = normalizedName.includes(FOSHAN);
+                const shouldRise = isFoShan || pendingRaisedCitiesRef.current.has(normalizedName);
+                const depth = isFoShan ? 2 : 1;
+                const color = isFoShan ? '#f59e0b' : shouldRise ? '#22d3ee' : '#334155';
+                const emissive = isFoShan ? '#7c2d12' : shouldRise ? '#0e7490' : '#020617';
 
                 let rings: number[][][] = [];
                 if (geometry.type === 'Polygon') {
@@ -210,28 +353,27 @@ const ChinaMap3D = forwardRef((_props: {}, ref: any) => {
 
                 const cityGroup = new THREE.Group();
                 cityGroup.name = name;
-                // 初始位置：佛山凸起，其他在地面
-                cityGroup.position.set(0, 0, initialStatus ? RISE_HEIGHT : 0);
-                cityGroup.userData = { baseDepth: depth, isFoShan };
+                cityGroup.position.set(0, 0, shouldRise ? RISE_HEIGHT : 0);
 
                 rings.forEach((ring) => {
                     const shape = new THREE.Shape();
-                    ring.forEach(([lng, lat], i) => {
-                        const [x, y] = projection([lng, lat])!;
-                        if (i === 0) shape.moveTo(-x, -y);
+                    ring.forEach(([lng, lat], index) => {
+                        const projected = projection([lng, lat]);
+                        if (!projected) return;
+                        const [x, y] = projected;
+                        if (index === 0) shape.moveTo(-x, -y);
                         else shape.lineTo(-x, -y);
                     });
 
-                    const geom = new THREE.ExtrudeGeometry(shape, {
-                        depth: depth,
-                        bevelEnabled: false,
-                    });
+                    const geom = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
                     const mesh = new THREE.Mesh(
                         geom,
                         new THREE.MeshStandardMaterial({
                             color,
-                            roughness: 0.6,
-                            metalness: 0.2,
+                            emissive,
+                            emissiveIntensity: shouldRise ? 0.26 : 0.1,
+                            roughness: 0.58,
+                            metalness: 0.22,
                             side: THREE.DoubleSide,
                         })
                     );
@@ -240,63 +382,52 @@ const ChinaMap3D = forwardRef((_props: {}, ref: any) => {
 
                 group.add(cityGroup);
                 meshMapRef.current[name] = cityGroup;
-                cityStatusRef.current.set(name, initialStatus);
+                cityStatusRef.current.set(name, shouldRise ? 1 : 0);
             });
 
             group.rotation.x = Math.PI / 2;
             scene.add(group);
+            mapGroupRef.current = group;
         });
 
-        const animate = () => {
-            requestAnimationFrame(animate);
+        const render = () => {
             controls.update();
-
-            if (coordDivRef.current) {
-                coordDivRef.current.textContent =
-                    `相机 (X:${camera.position.x.toFixed(2)} Y:${camera.position.y.toFixed(2)} Z:${camera.position.z.toFixed(2)})`;
-            }
-
             renderer.render(scene, camera);
+            renderFrameRef.current = requestAnimationFrame(render);
         };
-        animate();
+        render();
 
         const handleResize = () => {
-            camera.aspect = container.clientWidth / container.clientHeight;
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+            camera.aspect = width / height;
             camera.updateProjectionMatrix();
-            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setSize(width, height);
         };
         window.addEventListener('resize', handleResize);
 
         return () => {
-            // 清理所有动画帧
-            animFramesRef.current.forEach((frame) => cancelAnimationFrame(frame));
+            disposed = true;
+            cancelAnimationFrame(renderFrameRef.current);
+            cityAnimFramesRef.current.forEach((frame) => cancelAnimationFrame(frame));
+            flyAnimFramesRef.current.forEach((frame) => cancelAnimationFrame(frame));
+            flyLinesRef.current.forEach((line) => disposeObject3D(line));
+            if (mapGroupRef.current) disposeObject3D(mapGroupRef.current);
             window.removeEventListener('resize', handleResize);
+            controls.dispose();
             renderer.dispose();
-            if (container) container.removeChild(renderer.domElement);
+            renderer.domElement.remove();
+            sceneRef.current = null;
+            rendererRef.current = null;
+            meshMapRef.current = {};
+            cityStatusRef.current.clear();
+            cityAnimFramesRef.current.clear();
+            flyAnimFramesRef.current.clear();
+            flyLinesRef.current.clear();
         };
     }, []);
 
-    return (
-        <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
-            <div
-                ref={coordDivRef}
-                style={{
-                    position: 'absolute',
-                    top: '50%',
-                    left: '50%',
-                    transform: 'translate(-50%, -50%)',
-                    background: 'rgba(0,0,0,0.7)',
-                    color: '#0ff',
-                    padding: '5px 10px',
-                    borderRadius: 4,
-                    fontFamily: 'monospace',
-                    fontSize: 12,
-                    pointerEvents: 'none',
-                    zIndex: 100,
-                }}
-            />
-        </div>
-    );
+    return <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }} />;
 });
 
 export default ChinaMap3D;

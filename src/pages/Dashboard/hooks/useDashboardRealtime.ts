@@ -22,6 +22,8 @@ export type RouteOrder = {
     lineId: string;
     from: string;
     to: string;
+    fromCoords: [number, number];
+    toCoords: [number, number];
     plate: string;
     cargo: string;
     status: string;
@@ -31,6 +33,7 @@ type UseDashboardRealtimeOptions = {
     onCityRaise: (cityName: string) => void;
     onCityFall: (cityName: string) => void;
     onRouteRaise: (order: RouteOrder) => void;
+    onRouteFall?: (lineId: string) => void;
 };
 
 const WS_TOKEN = 'jushen-screen-token';
@@ -58,6 +61,8 @@ function createRouteOrder(line: CityRaiseMessage): RouteOrder {
         lineId: line.lineId,
         from: line.from,
         to: line.to,
+        fromCoords: line.fromCoords,
+        toCoords: line.toCoords,
         plate: `${PLATE_PREFIXES[hash % PLATE_PREFIXES.length]}\u00b7${line.lineId.slice(0, 6).toUpperCase()}`,
         cargo: CARGO_NAMES[hash % CARGO_NAMES.length],
         status: '\u8fd0\u8f93\u4e2d',
@@ -68,6 +73,7 @@ export function useDashboardRealtime({
     onCityRaise,
     onCityFall,
     onRouteRaise,
+    onRouteFall,
 }: UseDashboardRealtimeOptions) {
     const activeLinesRef = useRef<Map<string, { from: string; to: string }>>(new Map());
     const activeCityCountRef = useRef<Map<string, number>>(new Map());
@@ -113,6 +119,7 @@ export function useDashboardRealtime({
                 if (!activeLine) return;
 
                 activeLinesRef.current.delete(line.lineId);
+                onRouteFall?.(line.lineId);
                 fallTrackedCity(activeLine.from);
                 fallTrackedCity(activeLine.to);
             }
@@ -144,5 +151,5 @@ export function useDashboardRealtime({
             }
             socket?.close();
         };
-    }, [onCityFall, onCityRaise, onRouteRaise]);
+    }, [onCityFall, onCityRaise, onRouteFall, onRouteRaise]);
 }
