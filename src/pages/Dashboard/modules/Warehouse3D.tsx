@@ -49,7 +49,7 @@ function WarehouseScene() {
     const shelfElements = useMemo(
         () =>
             shelves.map((s) => (
-                <ShelfSlot key={s.id} position={s.position} status={s.status} />
+                <ShelfSlot key={s.id} position={[...s.position]} status={s.status} />
             )),
         []
     );

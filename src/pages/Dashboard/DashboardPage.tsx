@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import MainLayout from '@/components/Layout/MainLayout';
 import Header from '@/components/Layout/Header';
 import InventoryStats from './modules/InventoryStats';
@@ -6,10 +6,45 @@ import VehicleSchedule from './modules/VehicleSchedule';
 import TrafficMonitor from './modules/TrafficMonitor';
 import Warehouse3D from './modules/Warehouse3D';
 import ChinaMap3D from './modules/ChinaMap3D';
+import { type RouteOrder, useDashboardRealtime } from './hooks/useDashboardRealtime';
+
+type ChinaMap3DHandle = {
+    riseCity: (cityName: string) => void;
+    fallCity: (cityName: string) => void;
+    flyToCity: (cityName: string) => void;
+};
 
 function DashboardPage() {
     const [view, setView] = useState<'warehouse' | 'earth'>('warehouse');
-    const mapRef = useRef<any>(null);
+    const [routeOrders, setRouteOrders] = useState<RouteOrder[]>([]);
+    const mapRef = useRef<ChinaMap3DHandle | null>(null);
+
+    const riseCity = useCallback((cityName: string) => {
+        setView('earth');
+        window.setTimeout(() => {
+            mapRef.current?.riseCity(cityName);
+        }, 500);
+    }, []);
+
+    const fallCity = useCallback((cityName: string) => {
+        mapRef.current?.fallCity(cityName);
+    }, []);
+
+    const upsertRouteOrder = useCallback((order: RouteOrder) => {
+        setRouteOrders((orders) => {
+            const exists = orders.some((item) => item.lineId === order.lineId);
+            if (exists) {
+                return orders.map((item) => (item.lineId === order.lineId ? order : item));
+            }
+            return [...orders, order].slice(-8);
+        });
+    }, []);
+
+    useDashboardRealtime({
+        onCityRaise: riseCity,
+        onCityFall: fallCity,
+        onRouteRaise: upsertRouteOrder,
+    });
 
     return (
         <MainLayout
@@ -42,35 +77,11 @@ function DashboardPage() {
                     >
                         {view === 'warehouse' ? '切换地图视图' : '切换仓库视图'}
                     </button>
-
-                    {/* 测试连线按钮 */}
-                    <button
-                        onClick={() => {
-                            setView('earth');
-                            setTimeout(() => {
-                                mapRef.current?.flyToCity('上海');
-                            }, 500);
-                        }}
-                        className="absolute bottom-20 left-1/2 -translate-x-1/2 z-40 px-4 py-2 bg-white/10 backdrop-blur-md border border-cyan-400/30 rounded-full text-cyan-300 text-xs"
-                    >
-                        演示：佛山 → 上海
-                    </button>
-                    <button
-                        onClick={() => {
-                            setView('earth');
-                            setTimeout(() => {
-                                mapRef.current?.flyToCity('北京');
-                            }, 500);
-                        }}
-                        className="absolute bottom-40 left-1/2 -translate-x-1/2 z-40 px-4 py-2 bg-white/10 backdrop-blur-md border border-cyan-400/30 rounded-full text-cyan-300 text-xs"
-                    >
-                        演示：佛山 → 北京
-                    </button>
                 </div>
             }
             rightPanel={
                 <>
-                    <VehicleSchedule/>
+                    <VehicleSchedule routeOrders={routeOrders}/>
                     <TrafficMonitor/>
                 </>
             }
