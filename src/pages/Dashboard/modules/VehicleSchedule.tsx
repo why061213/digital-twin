@@ -1,5 +1,5 @@
 import Panel from '@/components/Layout/Panel';
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { RouteOrder } from '../hooks/useDashboardRealtime';
 
