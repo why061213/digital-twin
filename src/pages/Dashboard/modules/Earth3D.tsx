@@ -1,7 +1,7 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import * as echarts from 'echarts';
 import 'echarts-gl';
-import { cityCoords } from '@/data/cityCoords';
+import { CITY_COORDS as cityCoords } from '@/data/cityCoords';
 
 const BASE_URL = 'https://geo.datav.aliyun.com/areas_v3/bound/';
 
@@ -180,7 +180,7 @@ function ChinaMap3D({ onRef }: { onRef?: (ref: any) => void }) {
                 .find((n: string) => n.includes('佛山'));
             foShanNameRef.current = foShanName || '佛山市';
 
-            echarts.registerMap('china_cities', cityGeo);
+            echarts.registerMap('china_cities', cityGeo as any);
             const chart = echarts.init(containerRef.current!);
             chartRef.current = chart;
 

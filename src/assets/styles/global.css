@@ -63,3 +63,26 @@
 .alert-flash {
     animation: alertPulse 1.5s infinite;
 }
+
+.route-cell {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.route-cell-track {
+    display: inline-block;
+    min-width: max-content;
+    padding-right: 1.5rem;
+    animation: routeMarquee 7s linear infinite;
+}
+
+@keyframes routeMarquee {
+    0%, 18% {
+        transform: translateX(0);
+    }
+    82%, 100% {
+        transform: translateX(calc(-1 * var(--route-scroll-distance, 0px)));
+    }
+}

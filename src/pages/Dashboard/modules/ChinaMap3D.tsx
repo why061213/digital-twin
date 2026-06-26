@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { geoMercator } from 'd3-geo';
 
 const BASE_URL = 'https://geo.datav.aliyun.com/areas_v3/bound/';
@@ -29,7 +29,7 @@ async function loadCityGeoJson(): Promise<any> {
     return { type: 'FeatureCollection', features: [...municipalityFeatures, ...cityFeatures] };
 }
 
-const ChinaMap3D = forwardRef((props: {}, ref: any) => {
+const ChinaMap3D = forwardRef((_props: {}, ref: any) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const meshMapRef = useRef<Record<string, THREE.Group>>({});
     const cityStatusRef = useRef<Map<string, number>>(new Map());       // 0: 地面, 1: 凸起
@@ -147,7 +147,7 @@ const ChinaMap3D = forwardRef((props: {}, ref: any) => {
     );
 
     // 暴露方法给父组件
-    useImperativeHandle(ref, () => ({ riseCity, fallCity }), [riseCity, fallCity]);
+    useImperativeHandle(ref, () => ({ riseCity, fallCity, flyToCity: riseCity }), [riseCity, fallCity]);
 
     // 场景初始化（大部分不变，只调整初始高度和状态）
     useEffect(() => {
