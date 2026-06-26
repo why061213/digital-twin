@@ -40,6 +40,12 @@ const WS_TOKEN = 'jushen-screen-token';
 const HEADQUARTERS = '\u4f5b\u5c71';
 const CARGO_NAMES = ['\u94dd\u952d', '\u94dc\u6750', '\u94a2\u6750', '\u5316\u5de5\u539f\u6599', '\u5176\u4ed6'];
 const PLATE_PREFIXES = ['\u7ca4A', '\u7ca4B', '\u6e58E', '\u8d63C', '\u82cfE', '\u6d59A'];
+const CITY_RISE_DELAY = 500;
+const CITY_RISE_DURATION = 1200;
+const FLY_LINE_DELAY = CITY_RISE_DELAY + CITY_RISE_DURATION + 120;
+const FLY_GROW_DURATION = 1300;
+const FLY_TRAVEL_DURATION = 2400;
+const ROUTE_MIN_LIFETIME = FLY_LINE_DELAY + FLY_GROW_DURATION + FLY_TRAVEL_DURATION * 2;
 
 function buildRealtimeUrl() {
     const baseUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws';
@@ -75,8 +81,9 @@ export function useDashboardRealtime({
     onRouteRaise,
     onRouteFall,
 }: UseDashboardRealtimeOptions) {
-    const activeLinesRef = useRef<Map<string, { from: string; to: string }>>(new Map());
+    const activeLinesRef = useRef<Map<string, { from: string; to: string; startedAt: number }>>(new Map());
     const activeCityCountRef = useRef<Map<string, number>>(new Map());
+    const cityFallTimersRef = useRef<Map<string, number>>(new Map());
     const reconnectTimerRef = useRef<number | null>(null);
 
     useEffect(() => {
@@ -106,7 +113,12 @@ export function useDashboardRealtime({
         const handleMessage = (message: DashboardMessage) => {
             if (message.type === 'city_raise') {
                 const line = message as CityRaiseMessage;
-                activeLinesRef.current.set(line.lineId, { from: line.from, to: line.to });
+                const oldTimer = cityFallTimersRef.current.get(line.lineId);
+                if (oldTimer !== undefined) {
+                    window.clearTimeout(oldTimer);
+                    cityFallTimersRef.current.delete(line.lineId);
+                }
+                activeLinesRef.current.set(line.lineId, { from: line.from, to: line.to, startedAt: performance.now() });
                 onRouteRaise(createRouteOrder(line));
                 riseTrackedCity(line.from);
                 riseTrackedCity(line.to);
@@ -120,8 +132,21 @@ export function useDashboardRealtime({
 
                 activeLinesRef.current.delete(line.lineId);
                 onRouteFall?.(line.lineId);
-                fallTrackedCity(activeLine.from);
-                fallTrackedCity(activeLine.to);
+
+                const elapsed = performance.now() - activeLine.startedAt;
+                const remaining = Math.max(0, ROUTE_MIN_LIFETIME - elapsed);
+                const releaseCities = () => {
+                    cityFallTimersRef.current.delete(line.lineId);
+                    fallTrackedCity(activeLine.from);
+                    fallTrackedCity(activeLine.to);
+                };
+
+                if (remaining === 0) {
+                    releaseCities();
+                } else {
+                    const timer = window.setTimeout(releaseCities, remaining);
+                    cityFallTimersRef.current.set(line.lineId, timer);
+                }
             }
         };
 
@@ -149,6 +174,8 @@ export function useDashboardRealtime({
             if (reconnectTimerRef.current !== null) {
                 window.clearTimeout(reconnectTimerRef.current);
             }
+            cityFallTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+            cityFallTimersRef.current.clear();
             socket?.close();
         };
     }, [onCityFall, onCityRaise, onRouteFall, onRouteRaise]);
