@@ -75,7 +75,8 @@
     display: inline-block;
     min-width: max-content;
     padding-right: 1.5rem;
-    animation: routeMarquee 7s linear infinite;
+    animation: routeMarquee 7s ease-in-out infinite;
+    text-shadow: 0 0 8px rgba(34, 211, 238, 0.35);
 }
 
 @keyframes routeMarquee {
