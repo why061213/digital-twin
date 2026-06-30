@@ -16,7 +16,35 @@ type CityFallMessage = {
     lineId: string;
 };
 
-type DashboardMessage = CityRaiseMessage | CityFallMessage | { type?: string; [key: string]: unknown };
+export type RoadPathMessage = {
+    type: 'road_path';
+    lineId: string;
+    groupId?: string;
+    from?: string;
+    to?: string;
+    coordinates: [number, number][];
+    travelDurationMs?: number;
+    routeLengthKm?: number;
+    speedKmh?: number;
+};
+
+export type TruckPositionMessage = {
+    type: 'truck_position';
+    lineId: string;
+    position: [number, number];
+    speed?: [number, number];
+    velocity?: [number, number];
+    speedKmh?: number;
+    progress?: number;
+    status?: 'running' | 'finished' | string;
+};
+
+type DashboardMessage =
+    | CityRaiseMessage
+    | CityFallMessage
+    | RoadPathMessage
+    | TruckPositionMessage
+    | { type?: string; [key: string]: unknown };
 
 export type RouteOrder = {
     lineId: string;
@@ -24,6 +52,7 @@ export type RouteOrder = {
     to: string;
     fromCoords: [number, number];
     toCoords: [number, number];
+    routeLengthKm?: number;
     plate: string;
     cargo: string;
     status: string;
@@ -34,6 +63,8 @@ type UseDashboardRealtimeOptions = {
     onCityFall: (cityName: string) => void;
     onRouteRaise: (order: RouteOrder) => void;
     onRouteFall?: (lineId: string) => void;
+    onRoadPath?: (message: RoadPathMessage) => void;
+    onTruckPosition?: (message: TruckPositionMessage) => void;
 };
 
 const WS_TOKEN = 'jushen-screen-token';
@@ -80,6 +111,8 @@ export function useDashboardRealtime({
     onCityFall,
     onRouteRaise,
     onRouteFall,
+    onRoadPath,
+    onTruckPosition,
 }: UseDashboardRealtimeOptions) {
     const activeLinesRef = useRef<Map<string, { from: string; to: string; startedAt: number }>>(new Map());
     const activeCityCountRef = useRef<Map<string, number>>(new Map());
@@ -147,6 +180,16 @@ export function useDashboardRealtime({
                     const timer = window.setTimeout(releaseCities, remaining);
                     cityFallTimersRef.current.set(line.lineId, timer);
                 }
+                return;
+            }
+
+            if (message.type === 'road_path') {
+                onRoadPath?.(message as RoadPathMessage);
+                return;
+            }
+
+            if (message.type === 'truck_position') {
+                onTruckPosition?.(message as TruckPositionMessage);
             }
         };
 
@@ -178,5 +221,5 @@ export function useDashboardRealtime({
             cityFallTimersRef.current.clear();
             socket?.close();
         };
-    }, [onCityFall, onCityRaise, onRouteFall, onRouteRaise]);
+    }, [onCityFall, onCityRaise, onRoadPath, onRouteFall, onRouteRaise, onTruckPosition]);
 }
