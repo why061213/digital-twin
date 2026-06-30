@@ -481,6 +481,35 @@ function DashboardPage() {
         }
     }, [isDispatching, refreshRoadGroups]);
 
+
+    const handleWarehouseUpdate = useCallback((cityName: string, action: string, displayData: Record<string, any>) => {
+        console.log('🏗️ 处理仓库更新:', cityName, action, displayData);
+        if (action === 'rise') {
+            mapRef.current?.riseCity(cityName);
+            mapRef.current?.updateCityData(cityName, displayData);
+        } else if (action === 'fall') {
+            mapRef.current?.fallCity(cityName);
+            mapRef.current?.updateCityData(cityName, null);
+        }
+    }, []);
+
+    const requestWarehouseSnapshot = useCallback(async () => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/warehouse/snapshot/push`, { method: 'POST' });
+            if (!response.ok) throw new Error(`Warehouse snapshot request failed: ${response.status}`);
+            const messages = await response.json() as Array<{
+                cityName: string;
+                action: string;
+                displayData: Record<string, any>;
+            }>;
+            messages.forEach((message) => {
+                handleWarehouseUpdate(message.cityName, message.action, message.displayData);
+            });
+        } catch (error) {
+            console.warn('Warehouse snapshot request failed', error);
+        }
+    }, [handleWarehouseUpdate]);
+
     useDashboardRealtime({
         onCityRaise: handleCityRaise,
         onCityFall: handleCityFall,
@@ -488,12 +517,18 @@ function DashboardPage() {
         onRouteFall: finishRoute,
         onRoadPath: handleRoadPath,
         onTruckPosition: handleTruckPosition,
+        onWarehouseUpdate: handleWarehouseUpdate,
     });
 
     useEffect(() => {
         if (view !== 'roadMap') return;
         void refreshRoadGroups(activeRoadGroupId ?? undefined);
     }, [activeRoadGroupId, refreshRoadGroups, view]);
+
+    useEffect(() => {
+        if (view !== 'chinaMap') return;
+        void requestWarehouseSnapshot();
+    }, [requestWarehouseSnapshot, view]);
 
     useEffect(() => {
         if (view !== 'roadMap') return;

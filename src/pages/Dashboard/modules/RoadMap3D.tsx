@@ -27,6 +27,7 @@ const DIRECT_CITY_ADCODES = [110000, 120000, 310000, 500000, 710000, 810000, 820
 const ROAD_LIFT = 0.08;
 const TRUCK_LIFT = 0.36;
 const PATH_SAMPLE_COUNT = 160;
+const CAMERA_TILT_RATIO = 0.48;
 
 /* ---------- 工具函数 ---------- */
 async function loadCityGeoJson(): Promise<any> {
@@ -259,9 +260,20 @@ const RoadMap3D = forwardRef<RoadMap3DHandle>((_props, ref) => {
         const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
         const neededHeightByDepth = size.z / (2 * Math.tan(verticalFov / 2));
         const neededHeightByWidth = size.x / (2 * Math.tan(horizontalFov / 2));
-        const height = THREE.MathUtils.clamp(Math.max(neededHeightByDepth, neededHeightByWidth) * 1.6 + 8, 20, 130);
+        const span = Math.max(size.x, size.z, 1);
+        const height = THREE.MathUtils.clamp(Math.max(neededHeightByDepth, neededHeightByWidth) * 1.55 + 10, 24, 132);
+        const tilt = THREE.MathUtils.clamp(span * CAMERA_TILT_RATIO + 10, 16, 48);
+        const viewDirection = new THREE.Vector3(
+            camera.position.x - controls.target.x,
+            0,
+            camera.position.z - controls.target.z
+        );
+        if (viewDirection.lengthSq() < 0.001) {
+            viewDirection.set(-0.34, 0, 1);
+        }
+        viewDirection.normalize();
 
-        camera.position.set(center.x, height, center.z + 0.001);
+        camera.position.set(center.x + viewDirection.x * tilt, height, center.z + viewDirection.z * tilt);
         controls.target.set(center.x, 0, center.z);
         controls.update();
     }, []);
@@ -335,8 +347,10 @@ const RoadMap3D = forwardRef<RoadMap3DHandle>((_props, ref) => {
             // 货车与光晕
             const startPoint = samples[0].clone();
             startPoint.y = TRUCK_LIFT;
-            const labelAnchor = samples[Math.floor(samples.length / 2)]?.clone() ?? startPoint.clone();
-            labelAnchor.y = TRUCK_LIFT + 2.1;
+            const labelAnchor = samples[Math.floor(samples.length * 0.58)]?.clone() ?? startPoint.clone();
+            labelAnchor.x += 1.25;
+            labelAnchor.y = TRUCK_LIFT + 3.25;
+            labelAnchor.z += 0.95;
             const truck = new THREE.Mesh(new THREE.SphereGeometry(0.25, 16, 16), new THREE.MeshBasicMaterial({ color: 0xffb020 }));
             const truckGlow = new THREE.Mesh(new THREE.SphereGeometry(0.48, 16, 16), new THREE.MeshBasicMaterial({ color: 0xffb020, transparent: true, opacity: 0.24, depthWrite: false }));
             const selectionRing = new THREE.Mesh(
@@ -488,8 +502,8 @@ const RoadMap3D = forwardRef<RoadMap3DHandle>((_props, ref) => {
         sceneRef.current = scene;
 
         const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 1, 10000);
-        camera.up.set(0, 0, 1); // 保持与之前一致的 up 向量，以便视角正确
-        camera.position.set(0, 56, 0.001);
+        camera.up.set(0, 1, 0);
+        camera.position.set(14, 52, -24);
         camera.lookAt(0, 0, 0);
         cameraRef.current = camera;
 
@@ -501,10 +515,14 @@ const RoadMap3D = forwardRef<RoadMap3DHandle>((_props, ref) => {
 
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
+        controls.enableRotate = true;
         controls.target.set(0, 0, 0);
-        controls.minPolarAngle = 0;
-        controls.maxPolarAngle = Math.PI / 2.2;
+        controls.minAzimuthAngle = Number.NEGATIVE_INFINITY;
+        controls.maxAzimuthAngle = Number.POSITIVE_INFINITY;
+        controls.minPolarAngle = Math.PI / 10;
+        controls.maxPolarAngle = Math.PI / 2 - 0.035;
         controls.maxDistance = 220;
+        controls.minDistance = 10;
         controls.update();
         controlsRef.current = controls;
 
