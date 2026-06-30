@@ -493,6 +493,11 @@ function DashboardPage() {
         }
     }, []);
 
+    const handleCameraControl = useCallback((cityNames: string[], mode: string) => {
+        mapRef.current?.focusOnCities(cityNames, mode as any);
+    }, []);
+
+
     const requestWarehouseSnapshot = useCallback(async () => {
         try {
             const response = await fetch(`${API_BASE_URL}/warehouse/snapshot/push`, { method: 'POST' });
@@ -518,6 +523,7 @@ function DashboardPage() {
         onRoadPath: handleRoadPath,
         onTruckPosition: handleTruckPosition,
         onWarehouseUpdate: handleWarehouseUpdate,
+        onCameraControl: handleCameraControl,
     });
 
     useEffect(() => {

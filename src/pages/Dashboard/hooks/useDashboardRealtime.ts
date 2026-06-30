@@ -66,6 +66,7 @@ type UseDashboardRealtimeOptions = {
     onRoadPath?: (message: RoadPathMessage) => void;
     onTruckPosition?: (message: TruckPositionMessage) => void;
     onWarehouseUpdate?: (cityName: string, action: string, displayData: Record<string, any>) => void;
+    onCameraControl?: (cityNames: string[], mode: 'overview' | 'focus') => void;
 };
 
 const WS_TOKEN = String(import.meta.env.VITE_WS_TOKEN || 'jushen-screen-token');
@@ -118,6 +119,7 @@ export function useDashboardRealtime({
     onRoadPath,
     onTruckPosition,
     onWarehouseUpdate,
+    onCameraControl,
 }: UseDashboardRealtimeOptions) {
     const activeLinesRef = useRef<Map<string, { from: string; to: string; startedAt: number }>>(new Map());
     const activeCityCountRef = useRef<Map<string, number>>(new Map());
@@ -205,6 +207,11 @@ export function useDashboardRealtime({
                 onWarehouseUpdate(cityName, action, displayData);
                 return;
             }
+            if (message.type === 'camera_control' && onCameraControl) {
+                const { cityNames, mode } = message as any;
+                onCameraControl(cityNames, mode);
+                return;
+            }
         };
 
 
@@ -236,5 +243,5 @@ export function useDashboardRealtime({
             cityFallTimersRef.current.clear();
             socket?.close();
         };
-    }, [onCityFall, onCityRaise, onRoadPath, onRouteFall, onRouteRaise, onTruckPosition, onWarehouseUpdate]);
+    }, [onCityFall, onCityRaise, onRoadPath, onRouteFall, onRouteRaise, onTruckPosition, onWarehouseUpdate, onCameraControl]);
 }

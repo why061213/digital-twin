@@ -112,6 +112,19 @@ function indexCount(geometry: THREE.BufferGeometry) {
     return geometry.index?.count ?? geometry.attributes.position.count;
 }
 
+function ringAccentPoints(ring: number[][], count: number) {
+    if (ring.length < 3) return [];
+    const step = Math.max(8, Math.floor(ring.length / count));
+    const points: Array<[number, number]> = [];
+    for (let i = 0; i < ring.length; i += step) {
+        const coord = ring[i];
+        if (coord && typeof coord[0] === 'number' && typeof coord[1] === 'number') {
+            points.push([coord[0], coord[1]]);
+        }
+    }
+    return points.slice(0, count);
+}
+
 interface RoadState {
     group: THREE.Group;
     grayTube: THREE.Mesh;
@@ -498,7 +511,7 @@ const RoadMap3D = forwardRef<RoadMap3DHandle>((_props, ref) => {
         if (!container) return;
 
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color('#0a0e17');
+        scene.background = new THREE.Color('#081320');
         sceneRef.current = scene;
 
         const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 1, 10000);
@@ -526,9 +539,9 @@ const RoadMap3D = forwardRef<RoadMap3DHandle>((_props, ref) => {
         controls.update();
         controlsRef.current = controls;
 
-        scene.add(new THREE.AmbientLight(0xffffff, 0.75));
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
-        dirLight.position.set(0, 1, 0);
+        scene.add(new THREE.AmbientLight(0xdbeafe, 0.82));
+        const dirLight = new THREE.DirectionalLight(0xe0f2fe, 1.2);
+        dirLight.position.set(-12, 24, 18);
         scene.add(dirLight);
 
         loadCityGeoJson()
@@ -555,13 +568,43 @@ const RoadMap3D = forwardRef<RoadMap3DHandle>((_props, ref) => {
                         const mesh = new THREE.Mesh(
                             geom,
                             new THREE.MeshStandardMaterial({
-                                color: '#334155',
+                                color: '#2f465e',
+                                emissive: '#0b2234',
+                                emissiveIntensity: 0.12,
                                 roughness: 0.65,
                                 metalness: 0.18,
                                 side: THREE.DoubleSide,
                             })
                         );
                         cityGroup.add(mesh);
+                        const edgeLine = new THREE.LineSegments(
+                            new THREE.EdgesGeometry(geom, 32),
+                            new THREE.LineBasicMaterial({
+                                color: 0x7dd3fc,
+                                transparent: true,
+                                opacity: 0.14,
+                                depthWrite: false,
+                            })
+                        );
+                        edgeLine.position.z += 0.015;
+                        cityGroup.add(edgeLine);
+
+                        ringAccentPoints(ring, 2).forEach(([lng, lat], index) => {
+                            const projected = projection([lng, lat]);
+                            if (!projected) return;
+                            const [x, y] = projected;
+                            const accent = new THREE.Mesh(
+                                new THREE.SphereGeometry(0.035, 10, 10),
+                                new THREE.MeshBasicMaterial({
+                                    color: 0x93c5fd,
+                                    transparent: true,
+                                    opacity: 0.2,
+                                    depthWrite: false,
+                                })
+                            );
+                            accent.position.set(-x, -y, 0.58 + (index % 2) * 0.02);
+                            cityGroup.add(accent);
+                        });
                     });
                     group.add(cityGroup);
                 });
