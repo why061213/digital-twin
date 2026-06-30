@@ -65,9 +65,10 @@ type UseDashboardRealtimeOptions = {
     onRouteFall?: (lineId: string) => void;
     onRoadPath?: (message: RoadPathMessage) => void;
     onTruckPosition?: (message: TruckPositionMessage) => void;
+    onWarehouseUpdate?: (cityName: string, action: string, displayData: Record<string, any>) => void;
 };
 
-const WS_TOKEN = 'jushen-screen-token';
+const WS_TOKEN = String(import.meta.env.VITE_WS_TOKEN || 'jushen-screen-token');
 const HEADQUARTERS = '\u4f5b\u5c71';
 const CARGO_NAMES = ['\u94dd\u952d', '\u94dc\u6750', '\u94a2\u6750', '\u5316\u5de5\u539f\u6599', '\u5176\u4ed6'];
 const PLATE_PREFIXES = ['\u7ca4A', '\u7ca4B', '\u6e58E', '\u8d63C', '\u82cfE', '\u6d59A'];
@@ -81,7 +82,10 @@ const ROUTE_MIN_LIFETIME = FLY_LINE_DELAY + FLY_GROW_DURATION + FLY_TRAVEL_DURAT
 function buildRealtimeUrl() {
     const baseUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws';
     const normalizedBase = String(baseUrl).replace(/\/$/, '');
-    return `${normalizedBase}/realtime?token=${WS_TOKEN}`;
+    const endpoint = normalizedBase.endsWith('/realtime') ? normalizedBase : `${normalizedBase}/realtime`;
+    const url = new URL(endpoint);
+    url.searchParams.set('token', WS_TOKEN);
+    return url.toString();
 }
 
 function normalizeCityName(cityName: string) {
@@ -113,6 +117,7 @@ export function useDashboardRealtime({
     onRouteFall,
     onRoadPath,
     onTruckPosition,
+    onWarehouseUpdate,
 }: UseDashboardRealtimeOptions) {
     const activeLinesRef = useRef<Map<string, { from: string; to: string; startedAt: number }>>(new Map());
     const activeCityCountRef = useRef<Map<string, number>>(new Map());
@@ -122,6 +127,7 @@ export function useDashboardRealtime({
     useEffect(() => {
         let socket: WebSocket | null = null;
         let disposed = false;
+
 
         const riseTrackedCity = (cityName: string) => {
             const normalized = normalizeCityName(cityName);
@@ -144,6 +150,7 @@ export function useDashboardRealtime({
         };
 
         const handleMessage = (message: DashboardMessage) => {
+            console.log('📩 收到 WebSocket 消息:', message);
             if (message.type === 'city_raise') {
                 const line = message as CityRaiseMessage;
                 const oldTimer = cityFallTimersRef.current.get(line.lineId);
@@ -191,7 +198,15 @@ export function useDashboardRealtime({
             if (message.type === 'truck_position') {
                 onTruckPosition?.(message as TruckPositionMessage);
             }
+
+            if (message.type === 'warehouse_update' && onWarehouseUpdate) {
+                const { cityName, action, displayData } = message as any;
+                console.log('🏭 仓库更新:', cityName, action, displayData);
+                onWarehouseUpdate(cityName, action, displayData);
+                return;
+            }
         };
+
 
         const connect = () => {
             socket = new WebSocket(buildRealtimeUrl());
@@ -221,5 +236,5 @@ export function useDashboardRealtime({
             cityFallTimersRef.current.clear();
             socket?.close();
         };
-    }, [onCityFall, onCityRaise, onRoadPath, onRouteFall, onRouteRaise, onTruckPosition]);
+    }, [onCityFall, onCityRaise, onRoadPath, onRouteFall, onRouteRaise, onTruckPosition, onWarehouseUpdate]);
 }

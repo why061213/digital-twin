@@ -1,36 +1,35 @@
-import type { ReactNode } from 'react'
+import type { ReactNode } from 'react';
 
 interface MainLayoutProps {
-    header: ReactNode
-    leftPanel: ReactNode
-    centerPanel: ReactNode
-    rightPanel: ReactNode
+    header: ReactNode;
+    leftPanel: ReactNode;
+    centerPanel: ReactNode;
+    rightPanel: ReactNode;
 }
 
 function MainLayout({ header, leftPanel, centerPanel, rightPanel }: MainLayoutProps) {
     return (
-        <div className="relative w-screen h-screen bg-[#0a0e17] overflow-hidden">
-            {/* 全屏 3D 场景容器（铺满整个屏幕） */}
+        <div className="relative h-screen w-screen overflow-hidden bg-[#050914] text-slate-100">
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_38%,rgba(14,165,233,0.16),transparent_34%),linear-gradient(180deg,#06111f_0%,#050914_58%,#030712_100%)]" />
+            <div className="pointer-events-none absolute inset-0 opacity-[0.08] [background-image:linear-gradient(rgba(148,163,184,0.5)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.5)_1px,transparent_1px)] [background-size:56px_56px]" />
+
             <div className="absolute inset-0 z-0">
                 {centerPanel}
             </div>
 
-            {/* 顶部标题与 KPI - 悬浮在上方 */}
-            <div className="absolute top-0 left-0 right-0 z-20 h-20 px-6 flex items-center pointer-events-none">
-                <div className="pointer-events-auto w-full">{header}</div>
+            <div className="pointer-events-none absolute left-0 right-0 top-0 z-20 h-20 px-6">
+                <div className="pointer-events-auto h-full">{header}</div>
             </div>
 
-            {/* 左侧面板 - 悬浮在左侧 */}
-            <div className="absolute left-0 top-20 bottom-0 z-20 w-[22%] p-4 pointer-events-none">
+            <aside className="pointer-events-none absolute bottom-4 left-4 top-20 z-20 w-[22%] min-w-[260px]">
                 <div className="pointer-events-auto h-full">{leftPanel}</div>
-            </div>
+            </aside>
 
-            {/* 右侧面板 - 悬浮在右侧 */}
-            <div className="absolute right-0 top-20 bottom-0 z-20 w-[25%] p-4 flex flex-col gap-3 pointer-events-none">
-                <div className="pointer-events-auto flex-1 flex flex-col gap-3 h-full">{rightPanel}</div>
-            </div>
+            <aside className="pointer-events-none absolute bottom-4 right-4 top-20 z-20 w-[25%] min-w-[300px]">
+                <div className="pointer-events-auto flex h-full flex-col gap-3">{rightPanel}</div>
+            </aside>
         </div>
-    )
+    );
 }
 
-export default MainLayout
+export default MainLayout;

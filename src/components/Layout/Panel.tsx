@@ -1,37 +1,35 @@
-import type { ReactNode } from 'react'
+import type { ReactNode } from 'react';
 
 interface PanelProps {
-    title: string
-    children: ReactNode
-    className?: string
+    title: string;
+    children: ReactNode;
+    className?: string;
 }
 
 function Panel({ title, children, className = '' }: PanelProps) {
     return (
-        <div
+        <section
             className={`
-        relative h-full
-        bg-gradient-to-b from-[rgba(13,19,33,0.6)] to-[rgba(10,14,23,0.8)]
-        backdrop-blur-sm
-        rounded-sm
-        border border-white/5
-        shadow-[inset_0_0_30px_rgba(34,211,238,0.03)]
-        before:absolute before:inset-0 before:rounded-sm before:border before:border-cyan-400/10 before:pointer-events-none
-        ${className}
-      `}
+                relative h-full overflow-hidden rounded-md border border-cyan-200/10
+                bg-slate-950/58 shadow-[0_18px_48px_rgba(2,8,23,0.42)]
+                backdrop-blur-md
+                before:pointer-events-none before:absolute before:inset-0 before:rounded-md
+                before:bg-[linear-gradient(135deg,rgba(34,211,238,0.12),transparent_32%,rgba(16,185,129,0.06))]
+                after:pointer-events-none after:absolute after:inset-x-4 after:top-0 after:h-px
+                after:bg-gradient-to-r after:from-transparent after:via-cyan-200/45 after:to-transparent
+                ${className}
+            `}
         >
-            {/* 标题栏 */}
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5">
-                <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full shadow-[0_0_8px_#22d3ee]" />
-                <span className="text-cyan-300/80 text-sm font-medium tracking-wider">{title}</span>
+            <div className="relative flex h-11 items-center gap-2 border-b border-white/8 px-4">
+                <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_16px_rgba(103,232,249,0.9)]" />
+                <span className="text-sm font-medium text-cyan-100">{title}</span>
             </div>
 
-            {/* 内容区 */}
-            <div className="p-3 h-[calc(100%-3rem)]">
+            <div className="relative h-[calc(100%-2.75rem)] p-3">
                 {children}
             </div>
-        </div>
-    )
+        </section>
+    );
 }
 
-export default Panel
+export default Panel;
