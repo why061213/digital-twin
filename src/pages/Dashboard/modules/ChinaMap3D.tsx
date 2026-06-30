@@ -11,7 +11,9 @@ export type ChinaMap3DHandle = {
     addFlyLine: (lineId: string, fromCoords: [number, number], toCoords: [number, number]) => void;
     removeFlyLine: (lineId: string) => void;
     updateCityData: (cityName: string, data: Record<string, any> | null) => void;
+    focusOnCities: (cityNames: string[], mode: CameraFocusMode) => void;
 };
+type CameraFocusMode = 'overview' | 'focus';
 
 const BASE_URL = 'https://geo.datav.aliyun.com/areas_v3/bound/';
 const DIRECT_CITY_ADCODES = [
@@ -27,8 +29,8 @@ const MAP_ROTATION_Z = 0;
 const FLY_GROW_DURATION = 1300;
 const FLY_TRAVEL_DURATION = 2400;
 const FLY_MIN_LIFETIME = FLY_GROW_DURATION + FLY_TRAVEL_DURATION * 2;
-const CITY_BASE_COLOR = '#1f3a52';
-const CITY_BASE_EMISSIVE = '#071827';
+const CITY_BASE_COLOR = '#2f465e';
+const CITY_BASE_EMISSIVE = '#0b2234';
 const CITY_ACTIVE_COLOR = '#22d3ee';
 const CITY_ACTIVE_EMISSIVE = '#0e7490';
 const FOSHAN_COLOR = '#f59e0b';
@@ -105,6 +107,19 @@ function mapPosition(coords: [number, number], lift = 1.8) {
 
 function indexCount(geometry: THREE.BufferGeometry) {
     return geometry.index?.count ?? geometry.attributes.position.count;
+}
+
+function ringAccentPoints(ring: number[][], count: number) {
+    if (ring.length < 3) return [];
+    const step = Math.max(8, Math.floor(ring.length / count));
+    const points: Array<[number, number]> = [];
+    for (let i = 0; i < ring.length; i += step) {
+        const coord = ring[i];
+        if (coord && typeof coord[0] === 'number' && typeof coord[1] === 'number') {
+            points.push([coord[0], coord[1]]);
+        }
+    }
+    return points.slice(0, count);
 }
 
 type LabelLayout = {
@@ -224,6 +239,7 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
     const cameraFocusTimeoutRef = useRef<number | null>(null);
     const pendingRaisedCitiesRef = useRef<Set<string>>(new Set([FOSHAN]));
 
+
     // 标签相关
     const labelRendererRef = useRef<CSS2DRenderer | null>(null);
     const cityLabelMapRef = useRef<Map<string, CSS2DObject>>(new Map());
@@ -313,10 +329,10 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                 const localWeight = cluster.has(other.name)
                     ? Math.pow(Math.max(0, LABEL_NEIGHBOR_RADIUS - distance) / LABEL_NEIGHBOR_RADIUS, 2)
                     : 0;
-                const overlapWeight = equalCircleOverlapRatio(distance, LABEL_NEIGHBOR_RADIUS) * 0.82;
+                const overlapWeight = equalCircleOverlapRatio(distance, LABEL_NEIGHBOR_RADIUS) * 1.5;
                 const globalWeight = Math.exp(-distance / 260) * 0.08;
                 density += Math.exp(-distance / LABEL_NEIGHBOR_RADIUS) + overlapWeight * 0.55;
-                localRepulsion.add(direction.clone().multiplyScalar(localWeight * 2.4));
+                localRepulsion.add(direction.clone().multiplyScalar(localWeight * 4));
                 overlapRepulsion.add(direction.clone().multiplyScalar(overlapWeight));
                 globalRepulsion.add(direction.multiplyScalar(globalWeight));
                 if (distance < nearestDistance) {
@@ -343,7 +359,7 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                 .add(localRepulsion)
                 .add(overlapRepulsion.multiplyScalar(1.15))
                 .add(globalRepulsion)
-                .add(outward.multiplyScalar(0.55));
+                .add(outward.multiplyScalar(-1.5));
             if (direction.lengthSq() < 0.001) {
                 direction.copy(outward);
             }
@@ -878,18 +894,94 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         }
     }, []);
 
-    useImperativeHandle(
-        ref,
-        () => ({
-            riseCity,
-            fallCity,
-            flyToCity: riseCity,
-            addFlyLine,
-            removeFlyLine,
-            updateCityData,
-        }),
-        [riseCity, fallCity, addFlyLine, removeFlyLine, updateCityData]
-    );
+// 通用聚焦函数（复用之前的逻辑）
+    const focusPoints = useCallback((points: THREE.Vector3[]) => {
+        const camera = cameraRef.current;
+        const controls = controlsRef.current;
+        const container = containerRef.current;
+        if (!camera || !controls || !container || points.length === 0) return;
+
+        const box = new THREE.Box3().setFromPoints(points);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+
+        const verticalFov = THREE.MathUtils.degToRad(camera.fov);
+        const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
+        const neededHeightByDepth = size.z / (2 * Math.tan(verticalFov / 2));
+        const neededHeightByWidth = size.x / (2 * Math.tan(horizontalFov / 2));
+        const targetHeight = THREE.MathUtils.clamp(
+            Math.max(neededHeightByDepth, neededHeightByWidth) * 1.6 + 10,
+            22,
+            98
+        );
+
+        // 目标点（地面）
+        const targetLookAt = new THREE.Vector3(center.x, 0, center.z);
+
+        // 相机放在目标点南方（Z 轴负方向），高度为 targetHeight
+        const southOffset = targetHeight * 0.8;  // 可调节视角倾斜度，0.8 约为 38° 俯角
+        const targetPosition = new THREE.Vector3(
+            center.x,
+            targetHeight,
+            center.z - southOffset
+        );
+
+        const startPosition = camera.position.clone();
+        const startTarget = controls.target.clone();
+        const duration = 1100;
+        const startTime = performance.now();
+
+        cancelAnimationFrame(cameraMoveFrameRef.current);
+        const step = () => {
+            const progress = Math.min((performance.now() - startTime) / duration, 1);
+            const eased = easeInOutCubic(progress);
+            camera.position.lerpVectors(startPosition, targetPosition, eased);
+            controls.target.lerpVectors(startTarget, targetLookAt, eased);
+            camera.lookAt(controls.target);
+            controls.update();
+            if (progress < 1) {
+                cameraMoveFrameRef.current = requestAnimationFrame(step);
+            }
+        };
+        cameraMoveFrameRef.current = requestAnimationFrame(step);
+    }, []);
+
+    const focusOnCities = useCallback((cityNames: string[], mode: CameraFocusMode) => {
+        const points: THREE.Vector3[] = [];
+
+        const collectCityCenter = (cityName: string) => {
+            const key = findCityKey(cityName);
+            const group = key ? meshMapRef.current[key] : undefined;
+            if (group) {
+                const box = new THREE.Box3().setFromObject(group);
+                if (!box.isEmpty()) {
+                    points.push(box.getCenter(new THREE.Vector3()));
+                }
+            }
+        };
+
+        if (mode === 'overview') {
+            // 收集所有指定城市 + 佛山
+            for (const name of cityNames) collectCityCenter(name);
+            collectCityCenter(FOSHAN);
+        } else if (mode === 'focus' && cityNames.length === 1) {
+            collectCityCenter(cityNames[0]);
+        }
+
+        if (points.length > 0) {
+            focusPoints(points);
+        }
+    }, [findCityKey, focusPoints]);
+
+    useImperativeHandle(ref, () => ({
+        riseCity,
+        fallCity,
+        flyToCity: riseCity,
+        addFlyLine,
+        removeFlyLine,
+        updateCityData,
+        focusOnCities,
+    }), [riseCity, fallCity, addFlyLine, removeFlyLine, updateCityData, focusOnCities]);
 
     useEffect(() => {
         const container = containerRef.current;
@@ -897,8 +989,8 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
 
         let disposed = false;
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color('#06101d');
-        scene.fog = new THREE.Fog('#06101d', 45, 150);
+        scene.background = new THREE.Color('#081320');
+        scene.fog = new THREE.Fog('#081320', 58, 170);
         sceneRef.current = scene;
 
         const initialFocus = mapPosition(FOSHAN_COORDS, 0) ?? new THREE.Vector3(0, 0, 0);
@@ -927,11 +1019,11 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         controls.update();
         controlsRef.current = controls;
 
-        scene.add(new THREE.AmbientLight(0xc7d2fe, 0.62));
+        scene.add(new THREE.AmbientLight(0xdbeafe, 0.78));
         const keyLight = new THREE.DirectionalLight(0xe0f2fe, 1.45);
         keyLight.position.set(-12, 28, 18);
         scene.add(keyLight);
-        const rimLight = new THREE.PointLight(0x22d3ee, 1.8, 120);
+        const rimLight = new THREE.PointLight(0x22d3ee, 2.15, 145);
         rimLight.position.set(6, 12, -8);
         scene.add(rimLight);
         const warmLight = new THREE.PointLight(0xf59e0b, 0.75, 85);
@@ -1012,13 +1104,43 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                         new THREE.MeshStandardMaterial({
                             color,
                             emissive,
-                            emissiveIntensity: isFoShan ? 0.42 : shouldRise ? 0.3 : 0.08,
+                            emissiveIntensity: isFoShan ? 0.44 : shouldRise ? 0.34 : 0.13,
                             roughness: 0.52,
                             metalness: shouldRise ? 0.34 : 0.24,
                             side: THREE.DoubleSide,
                         })
                     );
                     cityGroup.add(mesh);
+
+                    const edgeLine = new THREE.LineSegments(
+                        new THREE.EdgesGeometry(geom, 32),
+                        new THREE.LineBasicMaterial({
+                            color: shouldRise ? 0x8beafe : 0x7dd3fc,
+                            transparent: true,
+                            opacity: shouldRise ? 0.38 : 0.16,
+                            depthWrite: false,
+                        })
+                    );
+                    edgeLine.position.z += 0.015;
+                    cityGroup.add(edgeLine);
+
+                    const accentPoints = ringAccentPoints(ring, shouldRise ? 5 : 2);
+                    accentPoints.forEach(([lng, lat], index) => {
+                        const projected = projection([lng, lat]);
+                        if (!projected) return;
+                        const [x, y] = projected;
+                        const accent = new THREE.Mesh(
+                            new THREE.SphereGeometry(shouldRise ? 0.065 : 0.038, 10, 10),
+                            new THREE.MeshBasicMaterial({
+                                color: shouldRise ? 0xcffafe : 0x93c5fd,
+                                transparent: true,
+                                opacity: shouldRise ? 0.62 : 0.22,
+                                depthWrite: false,
+                            })
+                        );
+                        accent.position.set(-x, -y, depth + 0.08 + (index % 2) * 0.025);
+                        cityGroup.add(accent);
+                    });
                 });
 
                 const cityBox = new THREE.Box3().setFromObject(cityGroup);
