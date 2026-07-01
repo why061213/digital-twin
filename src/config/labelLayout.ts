@@ -71,4 +71,10 @@ export const LABEL_CONFIG = {
         /** 面板正文字体大小 */
         bodyFontSize: 11,
     },
+    warehouseTour: {
+        focusHold: 8000,     // 聚焦单个仓库的停留时间
+        overviewHold: 900,   // 俯瞰所有仓库的停留时间
+        loopHold: 900,       // 每轮巡游结束后的等待时间
+        startDelay: 500,     // 开始到镜头爬升的等待时间
+    },
 };
