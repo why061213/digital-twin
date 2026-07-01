@@ -112,19 +112,6 @@ function indexCount(geometry: THREE.BufferGeometry) {
     return geometry.index?.count ?? geometry.attributes.position.count;
 }
 
-function ringAccentPoints(ring: number[][], count: number) {
-    if (ring.length < 3) return [];
-    const step = Math.max(8, Math.floor(ring.length / count));
-    const points: Array<[number, number]> = [];
-    for (let i = 0; i < ring.length; i += step) {
-        const coord = ring[i];
-        if (coord && typeof coord[0] === 'number' && typeof coord[1] === 'number') {
-            points.push([coord[0], coord[1]]);
-        }
-    }
-    return points.slice(0, count);
-}
-
 interface RoadState {
     group: THREE.Group;
     grayTube: THREE.Mesh;
@@ -586,25 +573,10 @@ const RoadMap3D = forwardRef<RoadMap3DHandle>((_props, ref) => {
                                 depthWrite: false,
                             })
                         );
-                        edgeLine.position.z += 0.015;
+                        // 地图整体绕 X 轴旋转后，局部 z 负方向才是镜头可见的上表面外侧。
+                        edgeLine.position.z -= 0.018;
                         cityGroup.add(edgeLine);
 
-                        ringAccentPoints(ring, 2).forEach(([lng, lat], index) => {
-                            const projected = projection([lng, lat]);
-                            if (!projected) return;
-                            const [x, y] = projected;
-                            const accent = new THREE.Mesh(
-                                new THREE.SphereGeometry(0.035, 10, 10),
-                                new THREE.MeshBasicMaterial({
-                                    color: 0x93c5fd,
-                                    transparent: true,
-                                    opacity: 0.2,
-                                    depthWrite: false,
-                                })
-                            );
-                            accent.position.set(-x, -y, 0.58 + (index % 2) * 0.02);
-                            cityGroup.add(accent);
-                        });
                     });
                     group.add(cityGroup);
                 });

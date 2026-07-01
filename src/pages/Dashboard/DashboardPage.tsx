@@ -203,6 +203,8 @@ function DashboardPage() {
     const [activeRoadGroupId, setActiveRoadGroupId] = useState<string | null>(null);
     const [isDispatching, setIsDispatching] = useState(false);
     const [isLoadingRoadGroup, setIsLoadingRoadGroup] = useState(false);
+    const [chinaMapSession, setChinaMapSession] = useState(0);
+    const previousViewRef = useRef<ViewMode>('warehouse');
     const mapRef = useRef<ChinaMap3DHandle>(null);
     const roadMapRef = useRef<RoadMap3DHandle>(null);
     const activeRoutesRef = useRef<Map<string, ActiveRoute>>(new Map());
@@ -484,7 +486,8 @@ function DashboardPage() {
 
     const handleWarehouseUpdate = useCallback((cityName: string, action: string, displayData: Record<string, any>) => {
         console.log('🏗️ 处理仓库更新:', cityName, action, displayData);
-        if (action === 'rise') {
+        const hasDisplayData = Boolean(displayData && Object.keys(displayData).length > 0);
+        if (action !== 'fall' || hasDisplayData) {
             mapRef.current?.riseCity(cityName);
             mapRef.current?.updateCityData(cityName, displayData);
         } else if (action === 'fall') {
@@ -494,7 +497,9 @@ function DashboardPage() {
     }, []);
 
     const handleCameraControl = useCallback((cityNames: string[], mode: string) => {
-        mapRef.current?.focusOnCities(cityNames, mode as any);
+        // 仓库地图进入时使用前端本地巡航流程；后端 camera_control 先保留接入点，避免打断巡航。
+        void cityNames;
+        void mode;
     }, []);
 
 
@@ -510,6 +515,9 @@ function DashboardPage() {
             messages.forEach((message) => {
                 handleWarehouseUpdate(message.cityName, message.action, message.displayData);
             });
+            window.setTimeout(() => {
+                mapRef.current?.startWarehouseTour();
+            }, 180);
         } catch (error) {
             console.warn('Warehouse snapshot request failed', error);
         }
@@ -527,14 +535,22 @@ function DashboardPage() {
     });
 
     useEffect(() => {
+        if (previousViewRef.current !== 'chinaMap' && view === 'chinaMap') {
+            setChinaMapSession((session) => session + 1);
+        }
+        previousViewRef.current = view;
+    }, [view]);
+
+    useEffect(() => {
         if (view !== 'roadMap') return;
         void refreshRoadGroups(activeRoadGroupId ?? undefined);
     }, [activeRoadGroupId, refreshRoadGroups, view]);
 
     useEffect(() => {
         if (view !== 'chinaMap') return;
+        if (chinaMapSession <= 0) return;
         void requestWarehouseSnapshot();
-    }, [requestWarehouseSnapshot, view]);
+    }, [chinaMapSession, requestWarehouseSnapshot, view]);
 
     useEffect(() => {
         if (view !== 'roadMap') return;
@@ -569,7 +585,7 @@ function DashboardPage() {
             case 'warehouse':
                 return <Warehouse3D key="warehouse" />;
             case 'chinaMap':
-                return <ChinaMap3D key="chinaMap" ref={mapRef} />;
+                return <ChinaMap3D key={`chinaMap-${chinaMapSession}`} ref={mapRef} />;
             case 'roadMap':
                 return <RoadMap3D key="roadMap" ref={roadMapRef} />;
             default:

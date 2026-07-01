@@ -1,8 +1,9 @@
-﻿import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
+﻿    import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { geoMercator } from 'd3-geo';
+import {LABEL_CONFIG} from '@/config/labelLayout'
 
 export type ChinaMap3DHandle = {
     riseCity: (cityName: string) => void;
@@ -12,14 +13,27 @@ export type ChinaMap3DHandle = {
     removeFlyLine: (lineId: string) => void;
     updateCityData: (cityName: string, data: Record<string, any> | null) => void;
     focusOnCities: (cityNames: string[], mode: CameraFocusMode) => void;
+    startWarehouseTour: () => void;
 };
 type CameraFocusMode = 'overview' | 'focus';
+type CameraPose = {
+    position: THREE.Vector3;
+    target: THREE.Vector3;
+};
+type PendingCameraControl = {
+    cityNames: string[];
+    mode: CameraFocusMode;
+};
+type LabelVisibilityMode = {
+    mode: 'all' | 'focus';
+    focusedKey?: string;
+};
 
 const BASE_URL = 'https://geo.datav.aliyun.com/areas_v3/bound/';
 const DIRECT_CITY_ADCODES = [
     110000, 120000, 310000, 500000, 710000, 810000, 820000
 ];
-const RISE_HEIGHT = -1;
+const RISE_HEIGHT = -0.55;
 const FOSHAN = '佛山';
 const FOSHAN_COORDS: [number, number] = [113.121416, 23.021548];
 const CITY_RISE_DELAY = 500;
@@ -29,6 +43,7 @@ const MAP_ROTATION_Z = 0;
 const FLY_GROW_DURATION = 1300;
 const FLY_TRAVEL_DURATION = 2400;
 const FLY_MIN_LIFETIME = FLY_GROW_DURATION + FLY_TRAVEL_DURATION * 2;
+const CAMERA_CONTROL_DEDUPE_MS = 2400;
 const CITY_BASE_COLOR = '#2f465e';
 const CITY_BASE_EMISSIVE = '#0b2234';
 const CITY_ACTIVE_COLOR = '#22d3ee';
@@ -36,6 +51,11 @@ const CITY_ACTIVE_EMISSIVE = '#0e7490';
 const FOSHAN_COLOR = '#f59e0b';
 const FOSHAN_EMISSIVE = '#7c2d12';
 const CAMERA_TILT_RATIO = 0.5;
+const CITY_EDGE_LINE_FLAG = 'cityEdgeLine';
+const WAREHOUSE_TOUR_START_DELAY = 520;
+const WAREHOUSE_TOUR_FOCUS_HOLD = 1250;
+const WAREHOUSE_TOUR_OVERVIEW_HOLD = 900;
+const WAREHOUSE_TOUR_LOOP_HOLD = 900;
 
 const projection = geoMercator()
     .center([104.5, 35])
@@ -109,19 +129,6 @@ function indexCount(geometry: THREE.BufferGeometry) {
     return geometry.index?.count ?? geometry.attributes.position.count;
 }
 
-function ringAccentPoints(ring: number[][], count: number) {
-    if (ring.length < 3) return [];
-    const step = Math.max(8, Math.floor(ring.length / count));
-    const points: Array<[number, number]> = [];
-    for (let i = 0; i < ring.length; i += step) {
-        const coord = ring[i];
-        if (coord && typeof coord[0] === 'number' && typeof coord[1] === 'number') {
-            points.push([coord[0], coord[1]]);
-        }
-    }
-    return points.slice(0, count);
-}
-
 type LabelLayout = {
     x: number;
     y: number;
@@ -136,12 +143,12 @@ type MarkedWarehouse = {
     data: Record<string, any>;
 };
 
-const LABEL_NEIGHBOR_RADIUS = 128;
-const LABEL_MIN_DISTANCE = 78;
-const LABEL_MAX_DISTANCE = 140;
-const LABEL_CARD_WIDTH = 132;
-const LABEL_CARD_HEIGHT = 56;
-const LABEL_CITY_SAFE_MARGIN = 22;
+// const LABEL_NEIGHBOR_RADIUS = 128;
+// const LABEL_MIN_DISTANCE = 78;
+// const LABEL_MAX_DISTANCE = 140;
+// const LABEL_CARD_WIDTH = 132;
+// const LABEL_CARD_HEIGHT = 56;
+// const LABEL_CITY_SAFE_MARGIN = 22;
 
 function equalCircleOverlapRatio(distance: number, radius: number) {
     if (distance >= radius * 2) return 0;
@@ -238,6 +245,14 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
     const cameraMoveFrameRef = useRef<number>(0);
     const cameraFocusTimeoutRef = useRef<number | null>(null);
     const pendingRaisedCitiesRef = useRef<Set<string>>(new Set([FOSHAN]));
+    const initialCameraPoseRef = useRef<CameraPose | null>(null);
+    const firstCameraControlRef = useRef(true);
+    const pendingCameraControlRef = useRef<PendingCameraControl | null>(null);
+    const lastCameraControlRef = useRef<{ key: string; time: number }>({ key: '', time: 0 });
+    const labelVisibilityRef = useRef<LabelVisibilityMode>({ mode: 'all' });
+    const warehouseTourTimeoutRef = useRef<number | null>(null);
+    const warehouseTourRunRef = useRef(0);
+    const cityPanelMapRef = useRef<Map<string, HTMLDivElement>>(new Map());
 
 
     // 标签相关
@@ -254,13 +269,32 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         return Object.keys(meshMapRef.current).find((name) => normalizeCityName(name).includes(normalized));
     }, []);
 
+    const applyLabelVisibility = useCallback(() => {
+        const visibility = labelVisibilityRef.current;
+        cityLabelMapRef.current.forEach((labelObj, key) => {
+            const element = labelObj.element as HTMLDivElement;
+            const shouldShow = visibility.mode !== 'focus' || key === visibility.focusedKey;
+            element.style.display = shouldShow ? 'block' : 'none';
+            element.style.visibility = shouldShow ? 'visible' : 'hidden';
+            element.style.opacity = shouldShow ? '1' : '0';
+        });
+        if (labelRendererRef.current) {
+            labelRendererRef.current.domElement.style.opacity = '1';
+        }
+    }, []);
+
+    const setLabelVisibility = useCallback((visibility: LabelVisibilityMode) => {
+        labelVisibilityRef.current = visibility;
+        applyLabelVisibility();
+    }, [applyLabelVisibility]);
+
     const refreshWarehouseLabels = useCallback(() => {
         const camera = cameraRef.current;
         const controls = controlsRef.current;
         const container = containerRef.current;
         if (!camera || !controls || !container) return;
         const cameraDistance = camera.position.distanceTo(controls.target);
-        const zoomScale = THREE.MathUtils.clamp(36 / Math.max(cameraDistance, 1), 0.5, 1.08);
+        const zoomScale = THREE.MathUtils.clamp(LABEL_CONFIG.zoomScaleFactor / Math.max(cameraDistance, 1), 0.5, 1.08);
 
         const entries = Object.entries(meshMapRef.current)
             .map(([name, group]) => {
@@ -274,9 +308,17 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                     data,
                 };
             })
-            .filter((item): item is MarkedWarehouse => Boolean(item.anchor && item.screen && item.data));
+            .filter((item): item is MarkedWarehouse => {
+                const isMarked = Boolean(item.anchor && item.screen && item.data);
+                const visibility = labelVisibilityRef.current;
+                if (!isMarked) return false;
+                return visibility.mode !== 'focus' || item.name === visibility.focusedKey;
+            });
 
-        if (entries.length === 0) return;
+        if (entries.length === 0) {
+            applyLabelVisibility();
+            return;
+        }
 
         const screenCenter = new THREE.Vector2(container.clientWidth / 2, container.clientHeight / 2);
         const clusters = new Map<string, Set<string>>();
@@ -293,7 +335,7 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                 const a = entries[i];
                 const b = entries[j];
                 const distance = a.screen.distanceTo(b.screen);
-                if (distance > LABEL_NEIGHBOR_RADIUS) continue;
+                if (distance > LABEL_CONFIG.neighborRadius) continue;
 
                 const clusterA = findCluster(a.name);
                 const clusterB = findCluster(b.name);
@@ -327,12 +369,12 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                 const distance = Math.max(delta.length(), 0.001);
                 const direction = delta.clone().normalize();
                 const localWeight = cluster.has(other.name)
-                    ? Math.pow(Math.max(0, LABEL_NEIGHBOR_RADIUS - distance) / LABEL_NEIGHBOR_RADIUS, 2)
+                    ? Math.pow(Math.max(0, LABEL_CONFIG.neighborRadius - distance) / LABEL_CONFIG.neighborRadius, 2)
                     : 0;
-                const overlapWeight = equalCircleOverlapRatio(distance, LABEL_NEIGHBOR_RADIUS) * 1.5;
-                const globalWeight = Math.exp(-distance / 260) * 0.08;
-                density += Math.exp(-distance / LABEL_NEIGHBOR_RADIUS) + overlapWeight * 0.55;
-                localRepulsion.add(direction.clone().multiplyScalar(localWeight * 4));
+                const overlapWeight = equalCircleOverlapRatio(distance, LABEL_CONFIG.neighborRadius) * LABEL_CONFIG.overlapWeightMultiplier;
+                const globalWeight = Math.exp(-distance / 260) * LABEL_CONFIG.globalWeightMultiplier;
+                density += Math.exp(-distance / LABEL_CONFIG.neighborRadius) + overlapWeight * 0.55;
+                localRepulsion.add(direction.clone().multiplyScalar(localWeight * LABEL_CONFIG.localWeightMultiplier));
                 overlapRepulsion.add(direction.clone().multiplyScalar(overlapWeight));
                 globalRepulsion.add(direction.multiplyScalar(globalWeight));
                 if (distance < nearestDistance) {
@@ -355,11 +397,11 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
             }
             outward.normalize();
             const direction = clusterOutward
-                .multiplyScalar(clusterItems.length > 1 ? 1.6 : 0.45)
+                .multiplyScalar(clusterItems.length > 1 ? LABEL_CONFIG.clusterOutwardStrong : LABEL_CONFIG.clusterOutwardWeak)
                 .add(localRepulsion)
-                .add(overlapRepulsion.multiplyScalar(1.15))
+                .add(overlapRepulsion.multiplyScalar(LABEL_CONFIG.overlapDirectionScale))
                 .add(globalRepulsion)
-                .add(outward.multiplyScalar(-1.5));
+                .add(outward.multiplyScalar(LABEL_CONFIG.outwardWeight));
             if (direction.lengthSq() < 0.001) {
                 direction.copy(outward);
             }
@@ -367,27 +409,27 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
 
             const hash = Array.from(item.name).reduce((sum, char) => sum + char.charCodeAt(0), 0);
             const rawLabelDistance = THREE.MathUtils.clamp(
-                LABEL_MIN_DISTANCE + density * 18 + Math.max(0, LABEL_NEIGHBOR_RADIUS - nearestDistance) * 0.22,
-                LABEL_MIN_DISTANCE,
-                LABEL_MAX_DISTANCE
+                LABEL_CONFIG.minDistance + density * LABEL_CONFIG.densityFactor + Math.max(0, LABEL_CONFIG.neighborRadius - nearestDistance) * LABEL_CONFIG.nearestDistanceFactor,
+                LABEL_CONFIG.minDistance,
+                LABEL_CONFIG.maxDistance
             );
-            const labelDistance = THREE.MathUtils.clamp(rawLabelDistance * zoomScale, 46, LABEL_MAX_DISTANCE);
+            const labelDistance = THREE.MathUtils.clamp(rawLabelDistance * zoomScale, LABEL_CONFIG.zoomClampMin, LABEL_CONFIG.maxDistance);
             let x = direction.x * labelDistance;
-            const verticalBias = Math.abs(direction.y) < 0.22 ? ((hash % 3) - 1) * 14 : 0;
-            let y = direction.y * labelDistance * 0.78 + verticalBias;
+            const verticalBias = Math.abs(direction.y) < 0.22 ? ((hash % 3) - 1) * LABEL_CONFIG.verticalBiasRange : 0;
+            let y = direction.y * labelDistance * LABEL_CONFIG.verticalCompression + verticalBias;
             let align: 'left' | 'right' = x < 0 ? 'right' : 'left';
 
-            for (let pass = 0; pass < 3; pass++) {
-                const cardLeft = current.x + x + (align === 'right' ? -LABEL_CARD_WIDTH : 0);
-                const cardRight = cardLeft + LABEL_CARD_WIDTH;
+            for (let pass = 0; pass < LABEL_CONFIG.safeMarginPasses; pass++) {
+                const cardLeft = current.x + x + (align === 'right' ? -LABEL_CONFIG.cardWidth : 0);
+                const cardRight = cardLeft + LABEL_CONFIG.cardWidth;
                 const cardTop = current.y + y;
-                const cardBottom = cardTop + LABEL_CARD_HEIGHT;
+                const cardBottom = cardTop + LABEL_CONFIG.cardHeight;
                 const cardCenter = new THREE.Vector2((cardLeft + cardRight) / 2, (cardTop + cardBottom) / 2);
 
                 entries.forEach((other) => {
                     if (other.name === item.name) return;
-                    const insideX = other.screen.x > cardLeft - LABEL_CITY_SAFE_MARGIN && other.screen.x < cardRight + LABEL_CITY_SAFE_MARGIN;
-                    const insideY = other.screen.y > cardTop - LABEL_CITY_SAFE_MARGIN && other.screen.y < cardBottom + LABEL_CITY_SAFE_MARGIN;
+                    const insideX = other.screen.x > cardLeft - LABEL_CONFIG.citySafeMargin && other.screen.x < cardRight + LABEL_CONFIG.citySafeMargin;
+                    const insideY = other.screen.y > cardTop - LABEL_CONFIG.citySafeMargin && other.screen.y < cardBottom + LABEL_CONFIG.citySafeMargin;
                     if (!insideX || !insideY) return;
 
                     const away = cardCenter.clone().sub(other.screen);
@@ -395,13 +437,13 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                         away.set(x || 1, y || -1);
                     }
                     away.normalize();
-                    const horizontalPush = (LABEL_CARD_WIDTH / 2 + LABEL_CITY_SAFE_MARGIN) - Math.abs(other.screen.x - cardCenter.x);
-                    const verticalPush = (LABEL_CARD_HEIGHT / 2 + LABEL_CITY_SAFE_MARGIN) - Math.abs(other.screen.y - cardCenter.y);
+                    const horizontalPush = (LABEL_CONFIG.cardWidth / 2 + LABEL_CONFIG.citySafeMargin) - Math.abs(other.screen.x - cardCenter.x);
+                    const verticalPush = (LABEL_CONFIG.cardHeight / 2 + LABEL_CONFIG.citySafeMargin) - Math.abs(other.screen.y - cardCenter.y);
                     if (verticalPush > 0) {
-                        y += Math.sign(away.y || -1) * Math.min(34, verticalPush * 0.8);
+                        y += Math.sign(away.y || -1) * Math.min(LABEL_CONFIG.maxVerticalPush, verticalPush * LABEL_CONFIG.verticalPushFactor);
                     }
                     if (horizontalPush > 0) {
-                        x += Math.sign(away.x || (x >= 0 ? 1 : -1)) * Math.min(30, horizontalPush * 0.45);
+                        x += Math.sign(away.x || (x >= 0 ? 1 : -1)) * Math.min(LABEL_CONFIG.maxHorizontalPush, horizontalPush * LABEL_CONFIG.horizontalPushFactor);
                     }
                     align = x < 0 ? 'right' : 'left';
                 });
@@ -410,11 +452,17 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
             item.group.userData.labelLayout = { x, y, align } satisfies LabelLayout;
             const labelObj = cityLabelMapRef.current.get(item.name);
             if (labelObj) {
-                (labelObj.element as HTMLDivElement).innerHTML = warehouseLabelHtml(item.name, item.data, item.group.userData.labelLayout);
+                const element = labelObj.element as HTMLDivElement;
+                const nextHtml = warehouseLabelHtml(item.name, item.data, item.group.userData.labelLayout);
+                if (element.dataset.labelHtml !== nextHtml) {
+                    element.innerHTML = nextHtml;
+                    element.dataset.labelHtml = nextHtml;
+                }
                 labelObj.position.copy(item.anchor);
             }
         });
-    }, []);
+        applyLabelVisibility();
+    }, [applyLabelVisibility]);
 
     const focusFreightNodes = useCallback((delay = 0) => {
         const scheduleFocus = () => {
@@ -537,10 +585,13 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
 
             group.children.forEach((child) => {
                 if (child instanceof THREE.Mesh) {
-                    const material = child.material as THREE.MeshStandardMaterial;
+                    const material = child.material;
+                    if (!(material instanceof THREE.MeshStandardMaterial)) return;
                     material.color.set(isFoShan ? FOSHAN_COLOR : CITY_ACTIVE_COLOR);
                     material.emissive.set(isFoShan ? FOSHAN_EMISSIVE : CITY_ACTIVE_EMISSIVE);
                     material.emissiveIntensity = isFoShan ? 0.42 : 0.34;
+                } else if (child instanceof THREE.LineSegments && child.userData.kind === CITY_EDGE_LINE_FLAG) {
+                    child.visible = false;
                 }
             });
 
@@ -561,10 +612,13 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
             const group = meshMapRef.current[matchedKey];
             group.children.forEach((child) => {
                 if (child instanceof THREE.Mesh) {
-                    const material = child.material as THREE.MeshStandardMaterial;
+                    const material = child.material;
+                    if (!(material instanceof THREE.MeshStandardMaterial)) return;
                     material.color.set(CITY_BASE_COLOR);
                     material.emissive.set(CITY_BASE_EMISSIVE);
                     material.emissiveIntensity = 0.08;
+                } else if (child instanceof THREE.LineSegments && child.userData.kind === CITY_EDGE_LINE_FLAG) {
+                    child.visible = true;
                 }
             });
 
@@ -789,15 +843,18 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         if (!group) return;
 
         if (data) {
+            riseCity(cityName);
             group.userData.displayData = data;
             if (!cityLabelMapRef.current.has(matchedKey)) {
                 const div = document.createElement('div');
                 const layout = group.userData.labelLayout as LabelLayout | undefined;
-                div.innerHTML = warehouseLabelHtml(cityName, data, layout ?? {
+                const initialHtml = warehouseLabelHtml(cityName, data, layout ?? {
                     x: 96,
                     y: -58,
                     align: 'left',
                 });
+                div.innerHTML = initialHtml;
+                div.dataset.labelHtml = initialHtml;
                 div.style.color = '#dffafe';
                 div.style.letterSpacing = '0';
                 div.style.whiteSpace = 'nowrap';
@@ -809,15 +866,21 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                 labelObj.position.copy(group.userData.labelAnchor ?? new THREE.Vector3(0, 1.2, 0));
                 group.add(labelObj);
                 cityLabelMapRef.current.set(matchedKey, labelObj);
+                applyLabelVisibility();
             } else {
                 const existingLabel = cityLabelMapRef.current.get(matchedKey);
                 if (existingLabel) {
                     const layout = group.userData.labelLayout as LabelLayout | undefined;
-                    (existingLabel.element as HTMLDivElement).innerHTML = warehouseLabelHtml(cityName, data, layout ?? {
+                    const element = existingLabel.element as HTMLDivElement;
+                    const nextHtml = warehouseLabelHtml(cityName, data, layout ?? {
                         x: 96,
                         y: -58,
                         align: 'left',
                     });
+                    if (element.dataset.labelHtml !== nextHtml) {
+                        element.innerHTML = nextHtml;
+                        element.dataset.labelHtml = nextHtml;
+                    }
                     existingLabel.position.copy(group.userData.labelAnchor ?? new THREE.Vector3(0, 1.2, 0));
                 }
             }
@@ -834,7 +897,7 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
             delete group.userData.displayData;
             refreshWarehouseLabels();
         }
-    }, [findCityKey, refreshWarehouseLabels]);
+    }, [applyLabelVisibility, findCityKey, refreshWarehouseLabels, riseCity]);
 
     const checkHover = useCallback(() => {
         const camera = cameraRef.current;
@@ -894,12 +957,12 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         }
     }, []);
 
-// 通用聚焦函数（复用之前的逻辑）
-    const focusPoints = useCallback((points: THREE.Vector3[]) => {
+    // 通用聚焦函数：返回 Promise，方便仓库巡航按顺序执行镜头动画。
+    const focusPoints = useCallback((points: THREE.Vector3[], startPose?: CameraPose, mode: CameraFocusMode = 'overview') => {
         const camera = cameraRef.current;
         const controls = controlsRef.current;
         const container = containerRef.current;
-        if (!camera || !controls || !container || points.length === 0) return;
+        if (!camera || !controls || !container || points.length === 0) return Promise.resolve();
 
         const box = new THREE.Box3().setFromPoints(points);
         const center = box.getCenter(new THREE.Vector3());
@@ -909,44 +972,70 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
         const neededHeightByDepth = size.z / (2 * Math.tan(verticalFov / 2));
         const neededHeightByWidth = size.x / (2 * Math.tan(horizontalFov / 2));
+        const baseDistance = Math.max(neededHeightByDepth, neededHeightByWidth);
         const targetHeight = THREE.MathUtils.clamp(
-            Math.max(neededHeightByDepth, neededHeightByWidth) * 1.6 + 10,
-            22,
-            98
+            mode === 'focus' ? baseDistance * 1.1 + 13 : baseDistance * 1.6 + 10,
+            mode === 'focus' ? 16 : 22,
+            mode === 'focus' ? 34 : 98
         );
 
         // 目标点（地面）
         const targetLookAt = new THREE.Vector3(center.x, 0, center.z);
 
         // 相机放在目标点南方（Z 轴负方向），高度为 targetHeight
-        const southOffset = targetHeight * 0.8;  // 可调节视角倾斜度，0.8 约为 38° 俯角
+        const southOffset = targetHeight * (mode === 'focus' ? 0.58 : 0.8);
         const targetPosition = new THREE.Vector3(
             center.x,
             targetHeight,
             center.z - southOffset
         );
 
-        const startPosition = camera.position.clone();
-        const startTarget = controls.target.clone();
-        const duration = 1100;
+        const startPosition = startPose?.position.clone() ?? camera.position.clone();
+        const startTarget = startPose?.target.clone() ?? controls.target.clone();
+        const duration = mode === 'focus' ? 950 : 1150;
         const startTime = performance.now();
 
         cancelAnimationFrame(cameraMoveFrameRef.current);
-        const step = () => {
-            const progress = Math.min((performance.now() - startTime) / duration, 1);
-            const eased = easeInOutCubic(progress);
-            camera.position.lerpVectors(startPosition, targetPosition, eased);
-            controls.target.lerpVectors(startTarget, targetLookAt, eased);
-            camera.lookAt(controls.target);
-            controls.update();
-            if (progress < 1) {
-                cameraMoveFrameRef.current = requestAnimationFrame(step);
-            }
-        };
-        cameraMoveFrameRef.current = requestAnimationFrame(step);
+        return new Promise<void>((resolve) => {
+            const step = () => {
+                const progress = Math.min((performance.now() - startTime) / duration, 1);
+                const eased = easeInOutCubic(progress);
+                camera.position.lerpVectors(startPosition, targetPosition, eased);
+                controls.target.lerpVectors(startTarget, targetLookAt, eased);
+                camera.lookAt(controls.target);
+                controls.update();
+                if (progress < 1) {
+                    cameraMoveFrameRef.current = requestAnimationFrame(step);
+                } else {
+                    cameraMoveFrameRef.current = 0;
+                    resolve();
+                }
+            };
+            cameraMoveFrameRef.current = requestAnimationFrame(step);
+        });
     }, []);
 
     const focusOnCities = useCallback((cityNames: string[], mode: CameraFocusMode) => {
+        const safeMode: CameraFocusMode = mode === 'focus' ? 'focus' : 'overview';
+        const safeCityNames = Array.from(new Set(cityNames.filter(Boolean)));
+        const requestKey = `${safeMode}:${safeCityNames.slice().sort().join('|')}`;
+        const now = performance.now();
+
+        // 地图 GeoJSON 还没装载完时，先记住最后一次控制；装载完成后再从初始镜头执行。
+        if (!mapGroupRef.current || Object.keys(meshMapRef.current).length === 0) {
+            pendingCameraControlRef.current = { cityNames: safeCityNames, mode: safeMode };
+            return;
+        }
+
+        if (
+            !firstCameraControlRef.current &&
+            requestKey === lastCameraControlRef.current.key &&
+            now - lastCameraControlRef.current.time < CAMERA_CONTROL_DEDUPE_MS
+        ) {
+            return;
+        }
+        lastCameraControlRef.current = { key: requestKey, time: now };
+
         const points: THREE.Vector3[] = [];
 
         const collectCityCenter = (cityName: string) => {
@@ -960,18 +1049,206 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
             }
         };
 
-        if (mode === 'overview') {
+        if (safeMode === 'overview') {
             // 收集所有指定城市 + 佛山
-            for (const name of cityNames) collectCityCenter(name);
+            for (const name of safeCityNames) collectCityCenter(name);
             collectCityCenter(FOSHAN);
-        } else if (mode === 'focus' && cityNames.length === 1) {
-            collectCityCenter(cityNames[0]);
+            setLabelVisibility({ mode: 'all' });
+        } else if (safeMode === 'focus' && safeCityNames.length === 1) {
+            collectCityCenter(safeCityNames[0]);
+            const focusedKey = findCityKey(safeCityNames[0]);
+            if (focusedKey) {
+                setLabelVisibility({ mode: 'focus', focusedKey });
+            }
         }
 
         if (points.length > 0) {
-            focusPoints(points);
+            const startPose = firstCameraControlRef.current ? initialCameraPoseRef.current ?? undefined : undefined;
+            firstCameraControlRef.current = false;
+            void focusPoints(points, startPose, safeMode);
+        } else {
+            pendingCameraControlRef.current = { cityNames: safeCityNames, mode: safeMode };
         }
-    }, [findCityKey, focusPoints]);
+    }, [findCityKey, focusPoints, setLabelVisibility]);
+
+    const startWarehouseTour = useCallback(() => {
+        const runId = warehouseTourRunRef.current + 1;
+        warehouseTourRunRef.current = runId;
+        firstCameraControlRef.current = false;
+
+        if (warehouseTourTimeoutRef.current !== null) {
+            window.clearTimeout(warehouseTourTimeoutRef.current);
+            warehouseTourTimeoutRef.current = null;
+        }
+
+        const wait = (delay: number) => new Promise<void>((resolve) => {
+            warehouseTourTimeoutRef.current = window.setTimeout(() => {
+                warehouseTourTimeoutRef.current = null;
+                resolve();
+            }, delay);
+        });
+
+        const cityCenterByKey = (key: string) => {
+            const group = meshMapRef.current[key];
+            if (!group) return null;
+            const box = new THREE.Box3().setFromObject(group);
+            return box.isEmpty() ? null : box.getCenter(new THREE.Vector3());
+        };
+
+        const runTour = async () => {
+            await wait(WAREHOUSE_TOUR_START_DELAY);
+            if (warehouseTourRunRef.current !== runId) return;
+
+            let isFirstLoop = true;
+            while (warehouseTourRunRef.current === runId) {
+                const warehouseKeys = Object.entries(meshMapRef.current)
+                    .filter(([, group]) => Boolean(group.userData.displayData))
+                    .map(([key]) => key)
+                    .sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+                if (warehouseKeys.length === 0) {
+                    await wait(WAREHOUSE_TOUR_LOOP_HOLD);
+                    continue;
+                }
+
+                const overviewPoints: THREE.Vector3[] = [];
+                const foShanKey = findCityKey(FOSHAN);
+                if (foShanKey) {
+                    const foShanCenter = cityCenterByKey(foShanKey);
+                    if (foShanCenter) overviewPoints.push(foShanCenter);
+                }
+                warehouseKeys.forEach((key) => {
+                    if (key === foShanKey) return;
+                    const center = cityCenterByKey(key);
+                    if (center) overviewPoints.push(center);
+                });
+
+                if (overviewPoints.length === 0) {
+                    await wait(WAREHOUSE_TOUR_LOOP_HOLD);
+                    continue;
+                }
+
+                // 1. 初始镜头已经落在佛山；2. 拉升到覆盖所有仓库城市的俯瞰镜头。
+                setLabelVisibility({ mode: 'all' });
+                await focusPoints(overviewPoints, isFirstLoop ? initialCameraPoseRef.current ?? undefined : undefined, 'overview');
+                isFirstLoop = false;
+                if (warehouseTourRunRef.current !== runId) return;
+                await wait(WAREHOUSE_TOUR_OVERVIEW_HOLD);
+
+                // 3. 依次聚焦每个仓储城市，聚焦时只显示当前目标标签。
+                for (const key of warehouseKeys) {
+                    if (warehouseTourRunRef.current !== runId) return;
+                    const center = cityCenterByKey(key);
+                    if (!center) continue;
+                    setLabelVisibility({ mode: 'focus', focusedKey: key });
+                    await focusPoints([center], undefined, 'focus');
+                    if (warehouseTourRunRef.current !== runId) return;
+                    refreshWarehouseLabels();
+                    await wait(WAREHOUSE_TOUR_FOCUS_HOLD);
+                }
+
+                // 4. 巡航结束后回到俯瞰镜头，然后进入下一轮。
+                if (warehouseTourRunRef.current !== runId) return;
+                setLabelVisibility({ mode: 'all' });
+                await focusPoints(overviewPoints, undefined, 'overview');
+                if (warehouseTourRunRef.current !== runId) return;
+                refreshWarehouseLabels();
+                await wait(WAREHOUSE_TOUR_LOOP_HOLD);
+            }
+        };
+
+
+
+        void runTour();
+    }, [findCityKey, focusPoints, refreshWarehouseLabels, setLabelVisibility]);
+
+    const showCityPanels = useCallback((cityName: string, panels: PanelData[]) => {
+        const matchedKey = findCityKey(cityName);
+        if (!matchedKey) return;
+        const group = meshMapRef.current[matchedKey];
+        if (!group) return;
+
+        // 移除旧面板
+        const oldPanel = cityPanelMapRef.current.get(matchedKey);
+        if (oldPanel) {
+            oldPanel.remove();
+            cityPanelMapRef.current.delete(matchedKey);
+        }
+
+        // 创建面板容器
+        const panelDiv = document.createElement('div');
+        panelDiv.style.position = 'absolute';
+        panelDiv.style.width = `${LABEL_CONFIG.panels.width}px`;
+        panelDiv.style.maxHeight = `${LABEL_CONFIG.panels.maxHeight}px`;
+        panelDiv.style.background = LABEL_CONFIG.panels.backgroundColor;
+        panelDiv.style.border = LABEL_CONFIG.panels.border;
+        panelDiv.style.borderRadius = `${LABEL_CONFIG.panels.borderRadius}px`;
+        panelDiv.style.padding = `${LABEL_CONFIG.panels.padding}px`;
+        panelDiv.style.overflowY = 'auto';
+        panelDiv.style.zIndex = '100';
+        panelDiv.style.backdropFilter = 'blur(10px)';
+        panelDiv.style.boxShadow = '0 18px 42px rgba(2,8,23,0.5)';
+
+        // 构建面板内容
+        panels.forEach(panel => {
+            const section = document.createElement('div');
+            section.style.marginBottom = '12px';
+
+            const title = document.createElement('div');
+            title.textContent = panel.title;
+            title.style.color = '#cffafe';
+            title.style.fontSize = `${LABEL_CONFIG.panels.titleFontSize}px`;
+            title.style.fontWeight = 'bold';
+            title.style.marginBottom = '6px';
+            title.style.borderBottom = '1px solid rgba(103,232,249,0.2)';
+            title.style.paddingBottom = '4px';
+            section.appendChild(title);
+
+            const table = document.createElement('table');
+            table.style.width = '100%';
+            table.style.color = '#e2e8f0';
+            table.style.fontSize = `${LABEL_CONFIG.panels.bodyFontSize}px`;
+            table.style.borderCollapse = 'collapse';
+
+            panel.rows.forEach(row => {
+                const tr = document.createElement('tr');
+                const labelCell = document.createElement('td');
+                labelCell.textContent = row.label;
+                labelCell.style.color = '#94a3b8';
+                labelCell.style.padding = '2px 0';
+                labelCell.style.width = '60%';
+                const valueCell = document.createElement('td');
+                valueCell.textContent = String(row.value);
+                valueCell.style.padding = '2px 0';
+                valueCell.style.textAlign = 'right';
+                valueCell.style.fontWeight = '500';
+                tr.appendChild(labelCell);
+                tr.appendChild(valueCell);
+                table.appendChild(tr);
+            });
+
+            section.appendChild(table);
+            panelDiv.appendChild(section);
+        });
+
+        // 将面板添加到场景中的 CSS2DObject 容器
+        const labelObj = cityLabelMapRef.current.get(matchedKey);
+        const container = labelObj?.element as HTMLDivElement;
+        if (container) {
+            container.appendChild(panelDiv);
+            cityPanelMapRef.current.set(matchedKey, panelDiv);
+        }
+    }, [findCityKey]);
+
+// 清除指定城市的面板
+    const clearCityPanels = useCallback((cityName: string) => {
+        const matchedKey = findCityKey(cityName);
+        if (!matchedKey) return;
+        const panel = cityPanelMapRef.current.get(matchedKey);
+        if (panel) {
+            panel.remove();
+            cityPanelMapRef.current.delete(matchedKey);
+        }
+    }, [findCityKey]);
 
     useImperativeHandle(ref, () => ({
         riseCity,
@@ -981,7 +1258,12 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         removeFlyLine,
         updateCityData,
         focusOnCities,
-    }), [riseCity, fallCity, addFlyLine, removeFlyLine, updateCityData, focusOnCities]);
+        startWarehouseTour,
+        showCityPanels,
+        clearCityPanels,
+    }), [riseCity, fallCity, addFlyLine, removeFlyLine, updateCityData,
+        focusOnCities, startWarehouseTour, showCityPanels,
+        clearCityPanels,]);
 
     useEffect(() => {
         const container = containerRef.current;
@@ -1018,6 +1300,10 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         controls.maxDistance = 220;
         controls.update();
         controlsRef.current = controls;
+        initialCameraPoseRef.current = {
+            position: camera.position.clone(),
+            target: controls.target.clone(),
+        };
 
         scene.add(new THREE.AmbientLight(0xdbeafe, 0.78));
         const keyLight = new THREE.DirectionalLight(0xe0f2fe, 1.45);
@@ -1072,7 +1358,7 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                 const name = properties.name;
                 const normalizedName = normalizeCityName(name);
                 const isFoShan = normalizedName.includes(FOSHAN);
-                const shouldRise = isFoShan || pendingRaisedCitiesRef.current.has(normalizedName);
+                const shouldRise = isFoShan;
                 const depth = isFoShan ? 1.5 : 1;
                 const color = isFoShan ? FOSHAN_COLOR : shouldRise ? CITY_ACTIVE_COLOR : CITY_BASE_COLOR;
                 const emissive = isFoShan ? FOSHAN_EMISSIVE : shouldRise ? CITY_ACTIVE_EMISSIVE : CITY_BASE_EMISSIVE;
@@ -1121,26 +1407,12 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                             depthWrite: false,
                         })
                     );
-                    edgeLine.position.z += 0.015;
+                    // 地图整体绕 X 轴旋转后，局部 z 负方向才是镜头可见的上表面外侧。
+                    edgeLine.position.z -= 0.018;
+                    edgeLine.visible = !shouldRise;
+                    edgeLine.userData.kind = CITY_EDGE_LINE_FLAG;
                     cityGroup.add(edgeLine);
 
-                    const accentPoints = ringAccentPoints(ring, shouldRise ? 5 : 2);
-                    accentPoints.forEach(([lng, lat], index) => {
-                        const projected = projection([lng, lat]);
-                        if (!projected) return;
-                        const [x, y] = projected;
-                        const accent = new THREE.Mesh(
-                            new THREE.SphereGeometry(shouldRise ? 0.065 : 0.038, 10, 10),
-                            new THREE.MeshBasicMaterial({
-                                color: shouldRise ? 0xcffafe : 0x93c5fd,
-                                transparent: true,
-                                opacity: shouldRise ? 0.62 : 0.22,
-                                depthWrite: false,
-                            })
-                        );
-                        accent.position.set(-x, -y, depth + 0.08 + (index % 2) * 0.025);
-                        cityGroup.add(accent);
-                    });
                 });
 
                 const cityBox = new THREE.Box3().setFromObject(cityGroup);
@@ -1197,10 +1469,23 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
             scene.add(group);
             mapGroupRef.current = group;
 
+            pendingRaisedCitiesRef.current.forEach((cityName) => {
+                if (normalizeCityName(cityName).includes(FOSHAN)) return;
+                window.setTimeout(() => riseCity(cityName), 120);
+            });
+
             pendingCityDataRef.current.forEach((data, cityName) => {
                 updateCityData(cityName, data);
             });
             pendingCityDataRef.current.clear();
+
+            const pendingCameraControl = pendingCameraControlRef.current;
+            if (pendingCameraControl) {
+                pendingCameraControlRef.current = null;
+                window.setTimeout(() => {
+                    focusOnCities(pendingCameraControl.cityNames, pendingCameraControl.mode);
+                }, 160);
+            }
         });
 
         const render = () => {
@@ -1217,24 +1502,18 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                 controls.target.y.toFixed(2),
                 controls.target.z.toFixed(2),
             ].join(',');
-            if (cameraState !== lastCameraStateRef.current) {
+            if (cameraState !== lastCameraStateRef.current && labelVisibilityRef.current.mode !== 'focus') {
                 lastCameraStateRef.current = cameraState;
-                if (labelRendererRef.current) {
-                    labelRendererRef.current.domElement.style.opacity = '0';
-                }
                 if (labelRevealTimeoutRef.current !== null) {
                     window.clearTimeout(labelRevealTimeoutRef.current);
                 }
                 labelRevealTimeoutRef.current = window.setTimeout(() => {
                     refreshWarehouseLabels();
-                    if (labelRendererRef.current) {
-                        labelRendererRef.current.domElement.style.opacity = '1';
-                    }
                     labelRevealTimeoutRef.current = null;
-                }, 500);
+                }, 220);
             }
             const now = performance.now();
-            if (now - lastLabelRefreshRef.current > 160) {
+            if (labelVisibilityRef.current.mode !== 'focus' && now - lastLabelRefreshRef.current > 360) {
                 lastLabelRefreshRef.current = now;
                 refreshWarehouseLabels();
             }
@@ -1265,6 +1544,11 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                 window.clearTimeout(labelRevealTimeoutRef.current);
                 labelRevealTimeoutRef.current = null;
             }
+            if (warehouseTourTimeoutRef.current !== null) {
+                window.clearTimeout(warehouseTourTimeoutRef.current);
+                warehouseTourTimeoutRef.current = null;
+            }
+            warehouseTourRunRef.current += 1;
             cityAnimFramesRef.current.forEach((frame) => cancelAnimationFrame(frame));
             flyAnimFramesRef.current.forEach((frame) => cancelAnimationFrame(frame));
             flyTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
@@ -1282,6 +1566,8 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
             rendererRef.current = null;
             cameraRef.current = null;
             controlsRef.current = null;
+            initialCameraPoseRef.current = null;
+            pendingCameraControlRef.current = null;
             meshMapRef.current = {};
             cityStatusRef.current.clear();
             cityAnimFramesRef.current.clear();
