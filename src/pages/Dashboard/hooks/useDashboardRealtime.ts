@@ -39,6 +39,16 @@ export type TruckPositionMessage = {
     status?: 'running' | 'finished' | string;
 };
 
+export type WarehouseFocusPanel = {
+    id: string;
+    title: string;
+    chartType: 'table' | 'bar' | 'line' | 'pie' | 'ring';
+    height?: number;
+    columns?: Array<{ key: string; label: string }>;
+    rows?: Array<Record<string, any>>;
+    option?: any;
+};
+
 type DashboardMessage =
     | CityRaiseMessage
     | CityFallMessage
@@ -66,6 +76,7 @@ type UseDashboardRealtimeOptions = {
     onRoadPath?: (message: RoadPathMessage) => void;
     onTruckPosition?: (message: TruckPositionMessage) => void;
     onWarehouseUpdate?: (cityName: string, action: string, displayData: Record<string, any>) => void;
+    onWarehouseFocus?: (cityName: string, panels: WarehouseFocusPanel[]) => void;
     onCameraControl?: (cityNames: string[], mode: 'overview' | 'focus') => void;
 };
 
@@ -119,6 +130,7 @@ export function useDashboardRealtime({
     onRoadPath,
     onTruckPosition,
     onWarehouseUpdate,
+    onWarehouseFocus,
     onCameraControl,
 }: UseDashboardRealtimeOptions) {
     const activeLinesRef = useRef<Map<string, { from: string; to: string; startedAt: number }>>(new Map());
@@ -207,6 +219,11 @@ export function useDashboardRealtime({
                 onWarehouseUpdate(cityName, action, displayData);
                 return;
             }
+            if (message.type === 'warehouse_focus' && onWarehouseFocus) {
+                const { cityName, panels } = message as any;
+                onWarehouseFocus(cityName, panels ?? []);
+                return;
+            }
             if (message.type === 'camera_control' && onCameraControl) {
                 const { cityNames, mode } = message as any;
                 onCameraControl(cityNames, mode);
@@ -243,5 +260,5 @@ export function useDashboardRealtime({
             cityFallTimersRef.current.clear();
             socket?.close();
         };
-    }, [onCityFall, onCityRaise, onRoadPath, onRouteFall, onRouteRaise, onTruckPosition, onWarehouseUpdate, onCameraControl]);
+    }, [onCityFall, onCityRaise, onRoadPath, onRouteFall, onRouteRaise, onTruckPosition, onWarehouseUpdate, onWarehouseFocus, onCameraControl]);
 }

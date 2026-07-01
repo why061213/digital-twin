@@ -10,7 +10,7 @@ import type { ChinaMap3DHandle } from './modules/ChinaMap3D';
 import RoadMap3D from './modules/RoadMap3D';
 import type { RoadMap3DHandle } from './modules/RoadMap3D';
 import { useDashboardRealtime } from './hooks/useDashboardRealtime';
-import type { RoadPathMessage, RouteOrder, TruckPositionMessage } from './hooks/useDashboardRealtime';
+import type { RoadPathMessage, RouteOrder, TruckPositionMessage, WarehouseFocusPanel } from './hooks/useDashboardRealtime';
 
 type ViewMode = 'warehouse' | 'chinaMap' | 'roadMap';
 type LonLat = [number, number];
@@ -501,7 +501,9 @@ function DashboardPage() {
         void cityNames;
         void mode;
     }, []);
-
+    const handleWarehouseFocus = useCallback((cityName: string, panels: WarehouseFocusPanel[]) => {
+        mapRef.current?.showCityPanels(cityName, panels);
+    }, []);
 
     const requestWarehouseSnapshot = useCallback(async () => {
         try {
@@ -515,13 +517,23 @@ function DashboardPage() {
             messages.forEach((message) => {
                 handleWarehouseUpdate(message.cityName, message.action, message.displayData);
             });
+            await Promise.all(messages.map(async (message) => {
+                try {
+                    const focusResponse = await fetch(`${API_BASE_URL}/warehouse/focus/${encodeURIComponent(message.cityName)}`);
+                    if (!focusResponse.ok) return;
+                    const focusMessage = await focusResponse.json() as { cityName: string; panels: WarehouseFocusPanel[] };
+                    handleWarehouseFocus(focusMessage.cityName, focusMessage.panels ?? []);
+                } catch (error) {
+                    console.warn('Warehouse focus request failed', error);
+                }
+            }));
             window.setTimeout(() => {
                 mapRef.current?.startWarehouseTour();
             }, 180);
         } catch (error) {
             console.warn('Warehouse snapshot request failed', error);
         }
-    }, [handleWarehouseUpdate]);
+    }, [handleWarehouseFocus, handleWarehouseUpdate]);
 
     useDashboardRealtime({
         onCityRaise: handleCityRaise,
@@ -531,6 +543,7 @@ function DashboardPage() {
         onRoadPath: handleRoadPath,
         onTruckPosition: handleTruckPosition,
         onWarehouseUpdate: handleWarehouseUpdate,
+        onWarehouseFocus: handleWarehouseFocus,
         onCameraControl: handleCameraControl,
     });
 

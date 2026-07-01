@@ -1,9 +1,10 @@
-﻿    import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
+﻿import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { geoMercator } from 'd3-geo';
 import {LABEL_CONFIG} from '@/config/labelLayout'
+import * as echarts from 'echarts';
 
 export type ChinaMap3DHandle = {
     riseCity: (cityName: string) => void;
@@ -14,6 +15,8 @@ export type ChinaMap3DHandle = {
     updateCityData: (cityName: string, data: Record<string, any> | null) => void;
     focusOnCities: (cityNames: string[], mode: CameraFocusMode) => void;
     startWarehouseTour: () => void;
+    showCityPanels: (cityName: string, panels: PanelData[]) => void;
+    clearCityPanels: (cityName: string) => void;
 };
 type CameraFocusMode = 'overview' | 'focus';
 type CameraPose = {
@@ -27,6 +30,15 @@ type PendingCameraControl = {
 type LabelVisibilityMode = {
     mode: 'all' | 'focus';
     focusedKey?: string;
+};
+export type PanelData = {
+    id: string;
+    title: string;
+    chartType: 'table' | 'bar' | 'line' | 'pie' | 'ring';
+    height?: number;
+    columns?: Array<{ key: string; label: string }>;
+    rows?: Array<Record<string, any>>;
+    option?: any;
 };
 
 const BASE_URL = 'https://geo.datav.aliyun.com/areas_v3/bound/';
@@ -52,10 +64,10 @@ const FOSHAN_COLOR = '#f59e0b';
 const FOSHAN_EMISSIVE = '#7c2d12';
 const CAMERA_TILT_RATIO = 0.5;
 const CITY_EDGE_LINE_FLAG = 'cityEdgeLine';
-const WAREHOUSE_TOUR_START_DELAY = 520;
-const WAREHOUSE_TOUR_FOCUS_HOLD = 1250;
-const WAREHOUSE_TOUR_OVERVIEW_HOLD = 900;
-const WAREHOUSE_TOUR_LOOP_HOLD = 900;
+const WAREHOUSE_TOUR_START_DELAY = LABEL_CONFIG.warehouseTour.startDelay;
+const WAREHOUSE_TOUR_FOCUS_HOLD = LABEL_CONFIG.warehouseTour.focusHold;
+const WAREHOUSE_TOUR_OVERVIEW_HOLD = LABEL_CONFIG.warehouseTour.overviewHold;
+const WAREHOUSE_TOUR_LOOP_HOLD = LABEL_CONFIG.warehouseTour.loopHold;
 
 const projection = geoMercator()
     .center([104.5, 35])
@@ -253,7 +265,7 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
     const warehouseTourTimeoutRef = useRef<number | null>(null);
     const warehouseTourRunRef = useRef(0);
     const cityPanelMapRef = useRef<Map<string, HTMLDivElement>>(new Map());
-
+    const cityPanelChartsRef = useRef<Map<string, echarts.ECharts[]>>(new Map());
 
     // 标签相关
     const labelRendererRef = useRef<CSS2DRenderer | null>(null);
@@ -277,6 +289,10 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
             element.style.display = shouldShow ? 'block' : 'none';
             element.style.visibility = shouldShow ? 'visible' : 'hidden';
             element.style.opacity = shouldShow ? '1' : '0';
+        });
+        cityPanelMapRef.current.forEach((panel, key) => {
+            const shouldShow = visibility.mode === 'focus' && key === visibility.focusedKey;
+            panel.style.display = shouldShow ? 'block' : 'none';
         });
         if (labelRendererRef.current) {
             labelRendererRef.current.domElement.style.opacity = '1';
@@ -1170,6 +1186,8 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         // 移除旧面板
         const oldPanel = cityPanelMapRef.current.get(matchedKey);
         if (oldPanel) {
+            cityPanelChartsRef.current.get(matchedKey)?.forEach((chart) => chart.dispose());
+            cityPanelChartsRef.current.delete(matchedKey);
             oldPanel.remove();
             cityPanelMapRef.current.delete(matchedKey);
         }
@@ -1187,6 +1205,61 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         panelDiv.style.zIndex = '100';
         panelDiv.style.backdropFilter = 'blur(10px)';
         panelDiv.style.boxShadow = '0 18px 42px rgba(2,8,23,0.5)';
+        panelDiv.style.left = `${LABEL_CONFIG.panels.width + LABEL_CONFIG.panels.gapFromLabel}px`;
+        panelDiv.style.top = '0';
+        panelDiv.style.pointerEvents = 'auto';
+        panelDiv.style.display = 'none';
+        panelDiv.dataset.cityPanel = matchedKey;
+
+        const charts: echarts.ECharts[] = [];
+
+        const renderTable = (section: HTMLDivElement, panel: PanelData) => {
+            const table = document.createElement('table');
+            table.style.width = '100%';
+            table.style.color = '#e2e8f0';
+            table.style.fontSize = `${LABEL_CONFIG.panels.bodyFontSize}px`;
+            table.style.borderCollapse = 'collapse';
+
+            const rows = panel.rows ?? [];
+            const columns = panel.columns?.length
+                ? panel.columns
+                : Object.keys(rows[0] ?? {}).map((key) => ({ key, label: key }));
+
+            rows.forEach((row) => {
+                const tr = document.createElement('tr');
+                columns.forEach((column, index) => {
+                    const cell = document.createElement('td');
+                    cell.textContent = String(row[column.key] ?? '--');
+                    cell.style.color = index === 0 ? '#94a3b8' : '#e2e8f0';
+                    cell.style.padding = '3px 0';
+                    cell.style.textAlign = index === 0 ? 'left' : 'right';
+                    cell.style.fontWeight = index === 0 ? '400' : '600';
+                    tr.appendChild(cell);
+                });
+                table.appendChild(tr);
+            });
+            section.appendChild(table);
+        };
+
+        const renderChart = (section: HTMLDivElement, panel: PanelData) => {
+            const chartDiv = document.createElement('div');
+            chartDiv.style.width = '100%';
+            chartDiv.style.height = `${panel.height ?? 120}px`;
+            section.appendChild(chartDiv);
+
+            window.setTimeout(() => {
+                if (!chartDiv.isConnected) return;
+                const chart = echarts.init(chartDiv, undefined, { renderer: 'canvas' });
+                chart.setOption({
+                    textStyle: { color: '#cbd5e1', fontSize: 10 },
+                    color: ['#22d3ee', '#fbbf24', '#38bdf8', '#34d399', '#a78bfa'],
+                    tooltip: { trigger: 'item', backgroundColor: 'rgba(2,6,23,0.92)', borderColor: 'rgba(103,232,249,0.28)', textStyle: { color: '#e2e8f0' } },
+                    ...panel.option,
+                });
+                charts.push(chart);
+                cityPanelChartsRef.current.set(matchedKey, charts);
+            }, 0);
+        };
 
         // 构建面板内容
         panels.forEach(panel => {
@@ -1203,30 +1276,11 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
             title.style.paddingBottom = '4px';
             section.appendChild(title);
 
-            const table = document.createElement('table');
-            table.style.width = '100%';
-            table.style.color = '#e2e8f0';
-            table.style.fontSize = `${LABEL_CONFIG.panels.bodyFontSize}px`;
-            table.style.borderCollapse = 'collapse';
-
-            panel.rows.forEach(row => {
-                const tr = document.createElement('tr');
-                const labelCell = document.createElement('td');
-                labelCell.textContent = row.label;
-                labelCell.style.color = '#94a3b8';
-                labelCell.style.padding = '2px 0';
-                labelCell.style.width = '60%';
-                const valueCell = document.createElement('td');
-                valueCell.textContent = String(row.value);
-                valueCell.style.padding = '2px 0';
-                valueCell.style.textAlign = 'right';
-                valueCell.style.fontWeight = '500';
-                tr.appendChild(labelCell);
-                tr.appendChild(valueCell);
-                table.appendChild(tr);
-            });
-
-            section.appendChild(table);
+            if (panel.chartType === 'table') {
+                renderTable(section, panel);
+            } else {
+                renderChart(section, panel);
+            }
             panelDiv.appendChild(section);
         });
 
@@ -1236,8 +1290,9 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         if (container) {
             container.appendChild(panelDiv);
             cityPanelMapRef.current.set(matchedKey, panelDiv);
+            applyLabelVisibility();
         }
-    }, [findCityKey]);
+    }, [applyLabelVisibility, findCityKey]);
 
 // 清除指定城市的面板
     const clearCityPanels = useCallback((cityName: string) => {
@@ -1245,6 +1300,8 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         if (!matchedKey) return;
         const panel = cityPanelMapRef.current.get(matchedKey);
         if (panel) {
+            cityPanelChartsRef.current.get(matchedKey)?.forEach((chart) => chart.dispose());
+            cityPanelChartsRef.current.delete(matchedKey);
             panel.remove();
             cityPanelMapRef.current.delete(matchedKey);
         }
@@ -1553,6 +1610,10 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
             flyAnimFramesRef.current.forEach((frame) => cancelAnimationFrame(frame));
             flyTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
             flyRemovalTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
+            cityPanelChartsRef.current.forEach((charts) => charts.forEach((chart) => chart.dispose()));
+            cityPanelChartsRef.current.clear();
+            cityPanelMapRef.current.forEach((panel) => panel.remove());
+            cityPanelMapRef.current.clear();
             flyLinesRef.current.forEach((line) => disposeObject3D(line));
             if (mapGroupRef.current) disposeObject3D(mapGroupRef.current);
             window.removeEventListener('resize', handleResize);
