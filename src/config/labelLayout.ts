@@ -1,0 +1,74 @@
+export const LABEL_CONFIG = {
+    /** 标签排斥影响半径（像素） */
+    neighborRadius: 128,
+    /** 标签距锚点的最小距离（像素） */
+    minDistance: 50,
+    /** 标签距锚点的最大距离（像素） */
+    maxDistance: 140,
+    /** 卡片宽度（像素） */
+    cardWidth: 132,
+    /** 卡片高度（像素） */
+    cardHeight: 56,
+    /** 城市锚点安全边距（像素） */
+    citySafeMargin: 22,
+    /** 局部排斥权重（同簇内） */
+    localWeightMultiplier: 4.0,
+    /** 重叠排斥权重 */
+    overlapWeightMultiplier: 1.5,
+    /** 全局排斥权重 */
+    globalWeightMultiplier: 0.2,
+    /** 屏幕中心向外推力权重 */
+    outwardWeight: -1.5,
+    /** 簇外向推力权重（多城市时） */
+    clusterOutwardStrong: 1.6,
+    /** 簇外向推力权重（单城市时） */
+    clusterOutwardWeak: 0.45,
+    /** 垂直方向压缩系数 */
+    verticalCompression: 0.78,
+    /** 垂直偏差范围（像素） */
+    verticalBiasRange: 14,
+    /** 安全边距迭代次数 */
+    safeMarginPasses: 3,
+    /** 水平推移最大值 */
+    maxHorizontalPush: 30,
+    /** 垂直推移最大值 */
+    maxVerticalPush: 34,
+    /** 相机距离缩放系数 */
+    zoomScaleFactor: 0.5,
+    overlapDirectionScale: 1.15,
+    /** 密度系数 (原 18) */
+    densityFactor: 18,
+    /** 最近距离惩罚系数 (原 0.22) */
+    nearestDistanceFactor: 0.22,
+    /** 缩放后的标签距离下限 (原 46) */
+    zoomClampMin: 46,
+    /** 垂直推移系数 (原 0.8) */
+    verticalPushFactor: 0.8,
+    /** 水平推移系数 (原 0.45) */
+    horizontalPushFactor: 0.45,
+
+    panels: {
+        /** 面板宽度（像素） */
+        width: 200,
+        /** 面板最大高度（像素） */
+        maxHeight: 300,
+        /** 面板背景色 */
+        backgroundColor: 'rgba(2,6,23,0.92)',
+        /** 面板边框 */
+        border: '1px solid rgba(103,232,249,0.32)',
+        /** 面板圆角 */
+        borderRadius: 8,
+        /** 面板内边距 */
+        padding: 12,
+        /** 面板与标签之间的间距（像素） */
+        gapFromLabel: 16,
+        /** 面板布局方向：'right' | 'bottom' */
+        direction: 'right' as 'right' | 'bottom',
+        /** 面板内部的表格行高（像素） */
+        rowHeight: 28,
+        /** 面板标题字体大小 */
+        titleFontSize: 13,
+        /** 面板正文字体大小 */
+        bodyFontSize: 11,
+    },
+};
