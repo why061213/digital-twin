@@ -1,16 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import MainLayout from '@/components/Layout/MainLayout';
 import Header from '@/components/Layout/Header';
-import InventoryStats from './modules/InventoryStats';
-import VehicleSchedule from './modules/VehicleSchedule';
-import TrafficMonitor from './modules/TrafficMonitor';
 import Warehouse3D from './modules/Warehouse3D';
-import ChinaMap3D from './modules/ChinaMap3D';
+import ChinaMap3D from './modules/ChinaMap3D/index';
 import type { ChinaMap3DHandle } from './modules/ChinaMap3D';
 import RoadMap3D from './modules/RoadMap3D';
 import type { RoadMap3DHandle } from './modules/RoadMap3D';
 import { useDashboardRealtime } from './hooks/useDashboardRealtime';
-import type { RoadPathMessage, RouteOrder, TruckPositionMessage, WarehouseFocusPanel } from './hooks/useDashboardRealtime';
+import type { RoadPathMessage, RouteOrder, TruckPositionMessage, WarehouseFocusPanel, WarehouseFocusStyle } from './hooks/useDashboardRealtime';
 
 type ViewMode = 'warehouse' | 'chinaMap' | 'roadMap';
 type LonLat = [number, number];
@@ -198,7 +195,7 @@ function nextQueryInterval(speedKmh: number | null) {
 
 function DashboardPage() {
     const [view, setView] = useState<ViewMode>('warehouse');
-    const [routeOrders, setRouteOrders] = useState<RouteOrder[]>([]);
+    const [, setRouteOrders] = useState<RouteOrder[]>([]);
     const [roadGroups, setRoadGroups] = useState<RoadGroupSummary[]>([]);
     const [activeRoadGroupId, setActiveRoadGroupId] = useState<string | null>(null);
     const [isDispatching, setIsDispatching] = useState(false);
@@ -501,8 +498,8 @@ function DashboardPage() {
         void cityNames;
         void mode;
     }, []);
-    const handleWarehouseFocus = useCallback((cityName: string, panels: WarehouseFocusPanel[]) => {
-        mapRef.current?.showCityPanels(cityName, panels);
+    const handleWarehouseFocus = useCallback((cityName: string, panels: WarehouseFocusPanel[], style?: WarehouseFocusStyle) => {
+        mapRef.current?.showCityPanels(cityName, panels, style);
     }, []);
 
     const requestWarehouseSnapshot = useCallback(async () => {
@@ -521,8 +518,8 @@ function DashboardPage() {
                 try {
                     const focusResponse = await fetch(`${API_BASE_URL}/warehouse/focus/${encodeURIComponent(message.cityName)}`);
                     if (!focusResponse.ok) return;
-                    const focusMessage = await focusResponse.json() as { cityName: string; panels: WarehouseFocusPanel[] };
-                    handleWarehouseFocus(focusMessage.cityName, focusMessage.panels ?? []);
+                    const focusMessage = await focusResponse.json() as { cityName: string; panels: WarehouseFocusPanel[]; style?: WarehouseFocusStyle };
+                    handleWarehouseFocus(focusMessage.cityName, focusMessage.panels ?? [], focusMessage.style);
                 } catch (error) {
                     console.warn('Warehouse focus request failed', error);
                 }
@@ -660,7 +657,8 @@ function DashboardPage() {
     return (
         <MainLayout
             header={<Header />}
-            leftPanel={<InventoryStats />}
+            // leftPanel={<InventoryStats />}
+            leftPanel={null}
             centerPanel={
                 <div className="relative h-full w-full">
                     {renderCenterPanel()}
@@ -669,12 +667,13 @@ function DashboardPage() {
                     {dispatchButton}
                 </div>
             }
-            rightPanel={
-                <>
-                    <VehicleSchedule routeOrders={routeOrders} />
-                    <TrafficMonitor />
-                </>
-            }
+            rightPanel={null}
+            // rightPanel={
+            //     <>
+            //         <VehicleSchedule routeOrders={routeOrders} />
+            //         <TrafficMonitor />
+            //     </>
+            // }
         />
     );
 }

@@ -49,9 +49,15 @@ export const LABEL_CONFIG = {
 
     panels: {
         /** 面板宽度（像素） */
-        width: 200,
+        width: 180,
+        /** 面板最小宽度（像素） */
+        minWidth: 180,
+        /** 面板最小高度（像素） */
+        minHeight: 118,
         /** 面板最大高度（像素） */
-        maxHeight: 300,
+        maxHeight: 240,
+        /** 是否显示面板引导线和端点 */
+        showLeaderLines: false,
         /** 面板背景色 */
         backgroundColor: 'rgba(2,6,23,0.92)',
         /** 面板边框 */
@@ -59,7 +65,7 @@ export const LABEL_CONFIG = {
         /** 面板圆角 */
         borderRadius: 8,
         /** 面板内边距 */
-        padding: 12,
+        padding: 10,
         /** 面板与标签之间的间距（像素） */
         gapFromLabel: 16,
         /** 面板布局方向：'right' | 'bottom' */
@@ -67,12 +73,12 @@ export const LABEL_CONFIG = {
         /** 面板内部的表格行高（像素） */
         rowHeight: 28,
         /** 面板标题字体大小 */
-        titleFontSize: 13,
+        titleFontSize: 12,
         /** 面板正文字体大小 */
-        bodyFontSize: 11,
+        bodyFontSize: 10,
     },
     warehouseTour: {
-        focusHold: 8000,     // 聚焦单个仓库的停留时间
+        focusHold: 4000,     // 聚焦单个仓库的停留时间
         overviewHold: 900,   // 俯瞰所有仓库的停留时间
         loopHold: 900,       // 每轮巡游结束后的等待时间
         startDelay: 500,     // 开始到镜头爬升的等待时间
