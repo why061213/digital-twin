@@ -1,24 +1,49 @@
-import { forwardRef, useImperativeHandle } from 'react';
+import {forwardRef, useCallback, useEffect, useImperativeHandle} from 'react';
 import type { RoadMap3DHandle } from './types';
 import { useRoadMapRefs } from './hooks/useRoadMapRefs';
 import { useRoadControls } from './hooks/useRoadControls';
 import { useRoadSelection } from './hooks/useRoadSelection';
 import { useRoadMapScene } from './hooks/useRoadMapScene';
 
-const RoadMap3D = forwardRef<RoadMap3DHandle>((_props, ref) => {
+type RoadMap3DProps = {
+    onVisualReady?: () => void;
+};
+
+const RoadMap3D = forwardRef<RoadMap3DHandle, RoadMap3DProps>(({ onVisualReady }, ref) => {
     const refs = useRoadMapRefs();
     const controls = useRoadControls(refs);
     const selection = useRoadSelection(refs);
 
-    useRoadMapScene(refs, controls, selection);
+    useRoadMapScene(refs, controls, selection, onVisualReady);
+
+    const clearRoads = useCallback(() => {
+        controls.clearRoads();
+        selection.clearSelection();
+    }, [controls.clearRoads, selection.clearSelection]);
 
     useImperativeHandle(ref, () => ({
         setRoadPath: controls.setRoadPath,
         addRoadPath: controls.addRoadPath,
         removeRoadPath: controls.removeRoadPath,
-        clearRoads: controls.clearRoads,
+        clearRoads,
         updateTruckPosition: controls.updateTruckPosition,
-    }), [controls]);
+        refreshAllPositions: controls.refreshAllPositions,
+    }), [
+        controls.setRoadPath,
+        controls.addRoadPath,
+        controls.removeRoadPath,
+        clearRoads,
+        controls.updateTruckPosition,
+        controls.refreshAllPositions,
+    ]);
+
+    useEffect(() => {
+        console.log('RoadMap3D mounted');
+
+        return () => {
+            console.log('RoadMap3D unmounted');
+        };
+    }, []);
 
     return (
         <div ref={refs.containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>

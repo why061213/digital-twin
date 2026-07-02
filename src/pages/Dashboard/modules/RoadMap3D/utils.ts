@@ -1,5 +1,78 @@
 import * as THREE from 'three';
 
+export type CachedTruckPosition = {
+    lineId: string;
+    position: [number, number];
+    status?: string;
+    speedKmh?: number | null;
+    updatedAt?: string;
+};
+
+const TRUCK_POSITION_CACHE_KEY = 'dashboard.truck.positions.v1';
+
+type TruckPositionCachePayload = {
+    savedAt: number;
+    positions: CachedTruckPosition[];
+};
+
+export function loadTruckPositionsFromCache(maxAgeMs = 5 * 60_000): CachedTruckPosition[] {
+    try {
+        const raw = localStorage.getItem(TRUCK_POSITION_CACHE_KEY);
+        if (!raw) return [];
+
+        const payload = JSON.parse(raw) as TruckPositionCachePayload;
+
+        if (!payload || !Array.isArray(payload.positions)) {
+            return [];
+        }
+
+        if (Date.now() - payload.savedAt > maxAgeMs) {
+            return [];
+        }
+
+        return payload.positions;
+    } catch {
+        return [];
+    }
+}
+
+export function saveTruckPositionsToCache(positions: CachedTruckPosition[]) {
+    try {
+        const payload: TruckPositionCachePayload = {
+            savedAt: Date.now(),
+            positions,
+        };
+
+        localStorage.setItem(TRUCK_POSITION_CACHE_KEY, JSON.stringify(payload));
+    } catch {
+        // ignore
+    }
+}
+
+export function saveTruckPositionToCache(position: CachedTruckPosition) {
+    try {
+        const current = loadTruckPositionsFromCache(Number.POSITIVE_INFINITY);
+        const nextMap = new Map<string, CachedTruckPosition>();
+
+        current.forEach((item) => {
+            nextMap.set(item.lineId, item);
+        });
+
+        nextMap.set(position.lineId, position);
+
+        saveTruckPositionsToCache(Array.from(nextMap.values()));
+    } catch {
+        // ignore
+    }
+}
+
+export function clearTruckPositionsCache() {
+    try {
+        localStorage.removeItem(TRUCK_POSITION_CACHE_KEY);
+    } catch {
+        // ignore
+    }
+}
 export function disposeObject3D(object: THREE.Object3D) {
     object.traverse((child) => {
         if (child instanceof THREE.Mesh || child instanceof THREE.Line) {

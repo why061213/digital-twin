@@ -10,7 +10,12 @@ import type { useRoadMapRefs } from './useRoadMapRefs';
 export function useRoadControls(
     refs: ReturnType<typeof useRoadMapRefs>,
 ) {
-    // 通用绿色进度绘制
+    const easeInOutCubic = useCallback((value: number) => (
+        value < 0.5
+            ? 4 * value * value * value
+            : 1 - Math.pow(-2 * value + 2, 3) / 2
+    ), []);
+
     const paintGreenRoad = useCallback((tube: THREE.Mesh, progress: number, tubularSegments: number, radialSegments: number) => {
         if (!tube) return;
         const p = clamp01(progress);
@@ -24,7 +29,6 @@ export function useRoadControls(
         tube.geometry.setDrawRange(0, drawCount);
     }, []);
 
-    // 根据货车位置更新指定道路的进度
     const updateProgressFromTruck = useCallback((roadId: string) => {
         const road = refs.roadsMapRef.current.get(roadId);
         if (!road) return;
@@ -63,7 +67,6 @@ export function useRoadControls(
         paintGreenRoad(greenTube, nextProgress, tubularSegments, radialSegments);
     }, [refs.roadsMapRef, paintGreenRoad]);
 
-    // 镜头聚焦到一组点
     const focusPath = useCallback((points: THREE.Vector3[]) => {
         const camera = refs.cameraRef.current;
         const controls = refs.controlsRef.current;
@@ -88,16 +91,53 @@ export function useRoadControls(
         if (viewDirection.lengthSq() < 0.001) viewDirection.set(-0.34, 0, 1);
         viewDirection.normalize();
 
-        camera.position.set(center.x + viewDirection.x * tilt, height, center.z + viewDirection.z * tilt);
-        controls.target.set(center.x, 0, center.z);
-        controls.update();
-    }, [refs]);
+        const targetPosition = new THREE.Vector3(center.x + viewDirection.x * tilt, height, center.z + viewDirection.z * tilt);
+        const targetLookAt = new THREE.Vector3(center.x, 0, center.z);
+        const startPosition = camera.position.clone();
+        const startTarget = controls.target.clone();
+        const duration = 980;
+        const startTime = performance.now();
 
-    // 移除单条道路
+        cancelAnimationFrame(refs.cameraMoveFrameRef.current);
+        const step = () => {
+            const progress = Math.min((performance.now() - startTime) / duration, 1);
+            const eased = easeInOutCubic(progress);
+            camera.position.lerpVectors(startPosition, targetPosition, eased);
+            controls.target.lerpVectors(startTarget, targetLookAt, eased);
+            camera.lookAt(controls.target);
+            controls.update();
+            if (progress < 1) {
+                refs.cameraMoveFrameRef.current = requestAnimationFrame(step);
+            } else {
+                refs.cameraMoveFrameRef.current = 0;
+            }
+        };
+        refs.cameraMoveFrameRef.current = requestAnimationFrame(step);
+    }, [easeInOutCubic, refs]);
+
+    const focusAllRoads = useCallback((delay = 80) => {
+        if (refs.cameraFocusTimeoutRef.current !== null) {
+            window.clearTimeout(refs.cameraFocusTimeoutRef.current);
+        }
+
+        refs.cameraFocusTimeoutRef.current = window.setTimeout(() => {
+            refs.cameraFocusTimeoutRef.current = null;
+            const points: THREE.Vector3[] = [];
+            refs.roadsMapRef.current.forEach((road) => {
+                if (road.samples.length === 0) return;
+                points.push(road.samples[0]);
+                points.push(road.samples[road.samples.length - 1]);
+                points.push(road.samples[Math.floor(road.samples.length * 0.5)]);
+                points.push(road.truck.position);
+            });
+            focusPath(points);
+        }, Math.max(0, delay));
+    }, [focusPath, refs]);
+
     const clearRoad = useCallback((id: string) => {
         const road = refs.roadsMapRef.current.get(id);
         if (!road) return;
-        road.dragControls.dispose();
+        road.dragControls?.dispose();
         refs.sceneRef.current?.remove(road.group);
         disposeObject3D(road.group);
         refs.roadsMapRef.current.delete(id);
@@ -106,15 +146,15 @@ export function useRoadControls(
     const clearRoads = useCallback(() => {
         Array.from(refs.roadsMapRef.current.keys()).forEach((id) => clearRoad(id));
         refs.roadsMapRef.current.clear();
-    }, [clearRoad, refs.roadsMapRef]);
+        refs.selectedRoadIdRef.current = null;
+    }, [clearRoad, refs.roadsMapRef, refs.selectedRoadIdRef]);
 
-    // 添加一条道路
     const addRoadPath = useCallback(
         (id: string, coords: [number, number][], info: RoadObjectInfo = {}) => {
             const scene = refs.sceneRef.current;
             if (!scene || coords.length < 2) return;
 
-            clearRoad(id); // 如果已存在同 ID 则先移除
+            clearRoad(id);
 
             const points = coords
                 .map((coord) => mapPosition(coord, ROAD_LIFT))
@@ -130,7 +170,6 @@ export function useRoadControls(
                 cumulativeLengths[i] = cumulativeLengths[i - 1] + samples[i - 1].distanceTo(samples[i]);
             }
 
-            // 灰色底路
             const grayTubeGeo = new THREE.TubeGeometry(pathCurve, tubularSegments, 0.08, radialSegments, false);
             const grayTube = new THREE.Mesh(grayTubeGeo, new THREE.MeshBasicMaterial({ color: 0x475569, transparent: true, opacity: 0.76 }));
             grayTube.userData = { roadId: id, objectType: '路线' };
@@ -141,13 +180,11 @@ export function useRoadControls(
             }));
             selectionTube.userData = { roadId: id, objectType: '路线' };
 
-            // 绿色覆盖路
             const greenTubeGeo = new THREE.TubeGeometry(pathCurve, tubularSegments, 0.105, radialSegments, false);
             greenTubeGeo.setDrawRange(0, 0);
             const greenTube = new THREE.Mesh(greenTubeGeo, new THREE.MeshBasicMaterial({ color: 0x22c55e, transparent: true, opacity: 0.92 }));
             greenTube.userData = { roadId: id, objectType: '已行驶路线' };
 
-            // 货车与光晕
             const startPoint = samples[0].clone();
             startPoint.y = TRUCK_LIFT;
             const labelAnchor = samples[Math.floor(samples.length * 0.58)]?.clone() ?? startPoint.clone();
@@ -176,7 +213,7 @@ export function useRoadControls(
             const progressRef = { current: 0 };
             const road: RoadState = {
                 group, grayTube, selectionTube, greenTube, truck, truckGlow, selectionRing,
-                dragControls: null as any,
+                dragControls: null,
                 samples, cumulativeLengths,
                 totalLength: cumulativeLengths[cumulativeLengths.length - 1] ?? 0,
                 tubularSegments, radialSegments, progressRef,
@@ -186,7 +223,6 @@ export function useRoadControls(
                 isSelected: false,
             };
 
-            // 拖拽
             if (refs.rendererRef.current && refs.cameraRef.current) {
                 const dragControls = new DragControls([truck], refs.cameraRef.current, refs.rendererRef.current.domElement);
                 dragControls.addEventListener('dragstart', () => {
@@ -213,9 +249,10 @@ export function useRoadControls(
             }
 
             refs.roadsMapRef.current.set(id, road);
-            focusPath(points);
+            road.group.visible = true;
+            focusAllRoads();
         },
-        [refs, clearRoad, updateProgressFromTruck, focusPath, paintGreenRoad],
+        [refs, clearRoad, updateProgressFromTruck, focusAllRoads],
     );
 
     const removeRoadPath = useCallback((id: string) => clearRoad(id), [clearRoad]);
@@ -241,13 +278,23 @@ export function useRoadControls(
         updateProgressFromTruck(lineId);
     }, [refs.roadsMapRef, updateProgressFromTruck]);
 
+    const refreshAllPositions = useCallback(() => {
+        // 由父组件实现位置刷新逻辑，这里仅暴露接口
+        const ids = Array.from(refs.roadsMapRef.current.keys());
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('roadmap:refresh-positions', { detail: ids }));
+        }
+    }, [refs.roadsMapRef]);
+
     return {
         addRoadPath,
         removeRoadPath,
         clearRoads,
         setRoadPath,
         updateTruckPosition,
+        refreshAllPositions,
         paintGreenRoad,
         updateProgressFromTruck,
+        focusAllRoads,
     };
 }

@@ -10,7 +10,11 @@ import { useWarehouseTour } from './hooks/useWarehouseTour';
 import { useMapHover } from './hooks/useMapHover';
 import { useMapScene } from './hooks/useMapScene';
 
-const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
+type ChinaMap3DProps = {
+    onVisualReady?: () => void;
+};
+
+const ChinaMap3D = forwardRef<ChinaMap3DHandle, ChinaMap3DProps>(({ onVisualReady }, ref) => {
     const refs = useChinaMapRefs();
 
     const labels = useWarehouseLabels(refs);
@@ -35,6 +39,7 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         flyLines,
         panels,
         hover,
+        onVisualReady,
     });
 
     useImperativeHandle(ref, () => ({

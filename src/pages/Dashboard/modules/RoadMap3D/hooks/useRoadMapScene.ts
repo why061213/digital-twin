@@ -1,8 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { loadCityGeoJson, projection } from '../geo';
-import { disposeObject3D } from '../utils';
 import { useRoadMapRefs } from './useRoadMapRefs';
 import { useRoadControls } from './useRoadControls';
 import { useRoadSelection } from './useRoadSelection';
@@ -11,14 +10,22 @@ export function useRoadMapScene(
     refs: ReturnType<typeof useRoadMapRefs>,
     controls: ReturnType<typeof useRoadControls>,
     selection: ReturnType<typeof useRoadSelection>,
+    onVisualReady?: () => void,
 ) {
+    const controlsRef = useRef(controls);
+    const selectionRef = useRef(selection);
+    const onVisualReadyRef = useRef(onVisualReady);
+    controlsRef.current = controls;
+    selectionRef.current = selection;
+    onVisualReadyRef.current = onVisualReady;
+
     useEffect(() => {
         const container = refs.containerRef.current;
         if (!container) return;
 
         let disposed = false;
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color('#081320');
+        scene.background = null;
         refs.sceneRef.current = scene;
 
         const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 1, 10000);
@@ -28,8 +35,10 @@ export function useRoadMapScene(
         refs.cameraRef.current = camera;
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+        renderer.setClearColor(0x000000, 0);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.domElement.style.background = 'transparent';
         container.appendChild(renderer.domElement);
         refs.rendererRef.current = renderer;
 
@@ -98,6 +107,13 @@ export function useRoadMapScene(
                 });
                 group.rotation.x = Math.PI / 2;
                 scene.add(group);
+                window.requestAnimationFrame(() => {
+                    if (disposed) return;
+                    renderer.render(scene, camera);
+                    window.requestAnimationFrame(() => {
+                        if (!disposed) onVisualReadyRef.current?.();
+                    });
+                });
             })
             .catch((err) => console.error('Map data failed to load', err));
 
@@ -109,7 +125,9 @@ export function useRoadMapScene(
                 const pulse = 1 + Math.sin(now / 260) * 0.08;
                 road.selectionRing.scale.setScalar(pulse);
                 road.selectionRing.rotation.z += 0.018;
+
             });
+            selectionRef.current.updateHoverPosition();
             orbitControls.update();
             renderer.render(scene, camera);
         };
@@ -122,26 +140,62 @@ export function useRoadMapScene(
         };
         window.addEventListener('resize', onResize);
 
-        const pointerMove = selection.handlePointerMove;
-        const pointerLeave = selection.handlePointerLeave;
+        const pointerMove = (event: PointerEvent) => selectionRef.current.handlePointerMove(event);
+        const pointerLeave = () => selectionRef.current.handlePointerLeave();
         renderer.domElement.addEventListener('pointermove', pointerMove);
         renderer.domElement.addEventListener('pointerleave', pointerLeave);
 
+        console.log('✅ RoadMap3D scene initialized');
+
         return () => {
+            console.log('🧹 RoadMap3D scene cleanup');
+
             disposed = true;
+
             window.removeEventListener('resize', onResize);
             renderer.domElement.removeEventListener('pointermove', pointerMove);
             renderer.domElement.removeEventListener('pointerleave', pointerLeave);
+
             cancelAnimationFrame(refs.renderFrameRef.current);
-            controls.clearRoads();
+            cancelAnimationFrame(refs.cameraMoveFrameRef.current);
+            if (refs.cameraFocusTimeoutRef.current !== null) {
+                window.clearTimeout(refs.cameraFocusTimeoutRef.current);
+                refs.cameraFocusTimeoutRef.current = null;
+            }
+
+            controlsRef.current.clearRoads();
+
+            orbitControls.dispose();
+
+            scene.traverse((child) => {
+                if (child instanceof THREE.Mesh || child instanceof THREE.LineSegments || child instanceof THREE.Line) {
+                    child.geometry?.dispose();
+
+                    const material = child.material;
+                    if (Array.isArray(material)) {
+                        material.forEach((m) => m.dispose());
+                    } else {
+                        material?.dispose();
+                    }
+                }
+            });
+
             renderer.dispose();
+
+            // 可选：如果你频繁进入/退出这个 3D 页面，可以释放 WebGL context
+            renderer.forceContextLoss();
+
             if (renderer.domElement.parentElement === container) {
                 container.removeChild(renderer.domElement);
             }
+
             refs.sceneRef.current = null;
             refs.cameraRef.current = null;
             refs.rendererRef.current = null;
             refs.controlsRef.current = null;
+            refs.cameraMoveFrameRef.current = 0;
+            refs.roadsMapRef.current.clear();
+            refs.selectedRoadIdRef.current = null;
         };
-    }, [refs, controls, selection]);
+    }, [refs]);
 }

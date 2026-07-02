@@ -1536,8 +1536,6 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         );
 
         panels.forEach((panel, index) => {
-            const cardX = anchorScreen.x + placement.x;
-            const cardY = anchorScreen.y + placement.y;
             const cardHeight = panelSizes[index].height;
             const placement = panelPlacements[index] ?? {
                 x: layout.x,
@@ -1547,6 +1545,8 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                 attachSide: attachSideFromCard(layout.x, layout.y, panelWidth, cardHeight, layout.align, [0, 0]),
                 direction: new THREE.Vector2(layout.x || 1, layout.y || 0).normalize(),
             };
+            const cardX = anchorScreen.x + placement.x;
+            const cardY = anchorScreen.y + placement.y;
             panelDiv.insertAdjacentHTML(
                 'beforeend',
                 leaderLineHtml(

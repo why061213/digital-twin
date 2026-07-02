@@ -120,7 +120,7 @@ interface RoadState {
     truck: THREE.Mesh;
     truckGlow: THREE.Mesh;
     selectionRing: THREE.Mesh;
-    dragControls: DragControls;
+    dragControls: DragControls | null;
     samples: THREE.Vector3[];
     cumulativeLengths: number[];
     totalLength: number;
@@ -282,7 +282,7 @@ const RoadMap3D = forwardRef<RoadMap3DHandle>((_props, ref) => {
     const clearRoad = useCallback((id: string) => {
         const road = roadsMapRef.current.get(id);
         if (!road) return;
-        road.dragControls.dispose();
+        road.dragControls?.dispose();
         sceneRef.current?.remove(road.group);
         disposeObject3D(road.group);
         roadsMapRef.current.delete(id);

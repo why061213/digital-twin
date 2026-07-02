@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useMemo } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { RoadState } from '../types';
@@ -14,8 +14,10 @@ export function useRoadMapRefs() {
     const raycasterRef = useRef(new THREE.Raycaster());
     const pointerRef = useRef(new THREE.Vector2());
     const selectedRoadIdRef = useRef<string | null>(null);
+    const cameraMoveFrameRef = useRef<number>(0);
+    const cameraFocusTimeoutRef = useRef<number | null>(null);
 
-    return {
+    return useMemo(() => ({
         containerRef,
         sceneRef,
         cameraRef,
@@ -26,5 +28,7 @@ export function useRoadMapRefs() {
         raycasterRef,
         pointerRef,
         selectedRoadIdRef,
-    };
+        cameraMoveFrameRef,
+        cameraFocusTimeoutRef,
+    }), []);
 }
