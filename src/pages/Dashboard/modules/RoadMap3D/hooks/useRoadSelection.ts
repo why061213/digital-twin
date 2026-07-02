@@ -52,12 +52,37 @@ export function useRoadSelection(refs: ReturnType<typeof useRoadMapRefs>) {
         };
     }, [refs.roadsMapRef]);
 
+    const updateHoverPosition = useCallback(() => {
+        const camera = refs.cameraRef.current;
+        const container = refs.containerRef.current;
+        const selectedRoadId = refs.selectedRoadIdRef.current;
+        if (!camera || !container || !selectedRoadId) return;
+
+        const road = refs.roadsMapRef.current.get(selectedRoadId);
+        if (!road) return;
+
+        const label = screenPosition(road.labelAnchor, camera, container);
+        setHoverInfo((current) => {
+            if (!current) return current;
+            if (Math.abs(current.x - label.x) < 0.5 && Math.abs(current.y - label.y) < 0.5) {
+                return current;
+            }
+            return { ...current, x: label.x, y: label.y };
+        });
+    }, [refs]);
+
+    const clearSelection = useCallback(() => {
+        setSelectedRoad(null);
+        setHoverInfo(null);
+    }, [setSelectedRoad]);
+
     const handlePointerMove = useCallback((event: PointerEvent) => {
         const camera = refs.cameraRef.current;
         const container = refs.containerRef.current;
         if (!camera || !container) return;
 
-        const rect = container.getBoundingClientRect();
+        const canvas = refs.rendererRef.current?.domElement;
+        const rect = (canvas ?? container).getBoundingClientRect();
         refs.pointerRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
         refs.pointerRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
         refs.raycasterRef.current.setFromCamera(refs.pointerRef.current, camera);
@@ -87,14 +112,15 @@ export function useRoadSelection(refs: ReturnType<typeof useRoadMapRefs>) {
     }, [refs, buildHoverInfo, setSelectedRoad]);
 
     const handlePointerLeave = useCallback(() => {
-        setSelectedRoad(null);
-        setHoverInfo(null);
-    }, [setSelectedRoad]);
+        clearSelection();
+    }, [clearSelection]);
 
     return {
         hoverInfo,
         setSelectedRoad,
         buildHoverInfo,
+        updateHoverPosition,
+        clearSelection,
         handlePointerMove,
         handlePointerLeave,
     };

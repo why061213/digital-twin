@@ -1,9 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { loadCityGeoJson, projection, mapPosition } from '../geo';
-import { normalizeCityName, disposeObject3D, easeInOutCubic } from '../utils';
+import { normalizeCityName, disposeObject3D } from '../utils';
 import {
     FOSHAN, FOSHAN_COORDS, MAP_ROTATION_Z,
     CITY_BASE_COLOR, CITY_BASE_EMISSIVE, CITY_ACTIVE_COLOR, CITY_ACTIVE_EMISSIVE,
@@ -25,15 +25,19 @@ export function useMapScene(
         flyLines: { addFlyLine: (lineId: string, fromCoords: [number, number], toCoords: [number, number]) => void; removeFlyLine: (lineId: string) => void };
         panels: { showCityPanels: (cityName: string, panels: any[]) => void };
         hover: { onMouseMove: (event: MouseEvent) => void; checkHover: () => void };
+        onVisualReady?: () => void;
     }
 ) {
+    const servicesRef = useRef(services);
+    servicesRef.current = services;
+
     useEffect(() => {
         const container = refs.containerRef.current;
         if (!container) return;
 
         let disposed = false;
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color('#081320');
+        scene.background = null;
         scene.fog = new THREE.Fog('#081320', 58, 170);
         refs.sceneRef.current = scene;
 
@@ -45,8 +49,10 @@ export function useMapScene(
         refs.cameraRef.current = camera;
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setClearColor(0x000000, 0);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.domElement.style.background = 'transparent';
         refs.rendererRef.current = renderer;
         container.appendChild(renderer.domElement);
 
@@ -104,7 +110,10 @@ export function useMapScene(
         container.appendChild(tooltipDiv);
         refs.tooltipRef.current = tooltipDiv;
 
-        container.addEventListener('mousemove', services.hover.onMouseMove);
+        const handleMouseMove = (event: MouseEvent) => {
+            servicesRef.current.hover.onMouseMove(event);
+        };
+        container.addEventListener('mousemove', handleMouseMove);
 
         loadCityGeoJson().then((geoJson) => {
             if (disposed) return;
@@ -219,16 +228,16 @@ export function useMapScene(
 
             refs.pendingRaisedCitiesRef.current.forEach((cityName) => {
                 if (normalizeCityName(cityName).includes(FOSHAN)) return;
-                window.setTimeout(() => services.cities.riseCity(cityName), 120);
+                window.setTimeout(() => servicesRef.current.cities.riseCity(cityName), 120);
             });
 
             refs.pendingCityDataRef.current.forEach((data, cityName) => {
-                services.cities.updateCityData(cityName, data);
+                servicesRef.current.cities.updateCityData(cityName, data);
             });
             refs.pendingCityDataRef.current.clear();
 
             refs.pendingCityPanelsRef.current.forEach((panels, cityName) => {
-                const matchedKey = services.cities.findCityKey(cityName);
+                const matchedKey = servicesRef.current.cities.findCityKey(cityName);
                 if (!matchedKey) return;
                 const pendingStyle =
                     refs.pendingCityPanelStylesRef.current.get(cityName) ??
@@ -253,9 +262,18 @@ export function useMapScene(
             if (pendingCameraControl) {
                 refs.pendingCameraControlRef.current = null;
                 window.setTimeout(() => {
-                    services.camera.focusOnCities(pendingCameraControl.cityNames, pendingCameraControl.mode);
+                    servicesRef.current.camera.focusOnCities(pendingCameraControl.cityNames, pendingCameraControl.mode);
                 }, 160);
             }
+
+            window.requestAnimationFrame(() => {
+                if (disposed) return;
+                renderer.render(scene, camera);
+                refs.labelRendererRef.current?.render(scene, camera);
+                window.requestAnimationFrame(() => {
+                    if (!disposed) servicesRef.current.onVisualReady?.();
+                });
+            });
         });
 
         const render = () => {
@@ -272,15 +290,15 @@ export function useMapScene(
                 refs.lastCameraStateRef.current = cameraState;
                 if (!refs.isCameraMovingRef.current) {
                     refs.isCameraMovingRef.current = true;
-                    services.labels.applyLabelVisibility();
+            servicesRef.current.labels.applyLabelVisibility();
                 }
                 if (refs.labelRevealTimeoutRef.current !== null) window.clearTimeout(refs.labelRevealTimeoutRef.current);
                 refs.labelRevealTimeoutRef.current = window.setTimeout(() => {
                     refs.isCameraMovingRef.current = false;
                     if (refs.labelVisibilityRef.current.mode !== 'focus') {
-                        services.labels.refreshWarehouseLabels();
+                        servicesRef.current.labels.refreshWarehouseLabels();
                     } else {
-                        services.labels.applyLabelVisibility();
+                        servicesRef.current.labels.applyLabelVisibility();
                     }
                     refs.labelRevealTimeoutRef.current = null;
                 }, 260);
@@ -288,9 +306,9 @@ export function useMapScene(
             const now = performance.now();
             if (refs.labelVisibilityRef.current.mode !== 'focus' && now - refs.lastLabelRefreshRef.current > 360) {
                 refs.lastLabelRefreshRef.current = now;
-                services.labels.refreshWarehouseLabels();
+                servicesRef.current.labels.refreshWarehouseLabels();
             }
-            services.hover.checkHover();
+            servicesRef.current.hover.checkHover();
             refs.renderFrameRef.current = requestAnimationFrame(render);
         };
         render();
@@ -325,7 +343,7 @@ export function useMapScene(
             refs.flyLinesRef.current.forEach((line) => disposeObject3D(line));
             if (refs.mapGroupRef.current) disposeObject3D(refs.mapGroupRef.current);
             window.removeEventListener('resize', handleResize);
-            container.removeEventListener('mousemove', services.hover.onMouseMove);
+            container.removeEventListener('mousemove', handleMouseMove);
             controls.dispose();
             renderer.dispose();
             refs.labelRendererRef.current?.domElement.remove();
@@ -348,5 +366,5 @@ export function useMapScene(
             refs.pendingFlyRemovalRef.current.clear();
             refs.activeRouteCoordsRef.current.clear();
         };
-    }, [refs, services]);
+    }, [refs]);
 }

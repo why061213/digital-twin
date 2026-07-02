@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
@@ -53,7 +53,7 @@ export function useChinaMapRefs() {
     const raycasterRef = useRef(new THREE.Raycaster());
     const hoveredCityRef = useRef<THREE.Group | null>(null);
 
-    return {
+    return useMemo(() => ({
         containerRef, sceneRef, rendererRef, cameraRef, controlsRef, mapGroupRef,
         meshMapRef, cityStatusRef, cityAnimFramesRef, flyAnimFramesRef, flyTimeoutsRef,
         flyRemovalTimeoutsRef, flyLinesRef, flyStartTimesRef, pendingFlyRemovalRef,
@@ -66,5 +66,5 @@ export function useChinaMapRefs() {
         pendingCityPanelStylesRef, showCityPanelsRef,
         labelRendererRef, cityLabelMapRef, pendingCityDataRef,
         tooltipRef, mouseRef, raycasterRef, hoveredCityRef,
-    };
+    }), []);
 }

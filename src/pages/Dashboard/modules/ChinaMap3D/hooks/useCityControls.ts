@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import * as THREE from 'three';
-import { normalizeCityName, easeInOutCubic, disposeObject3D } from '../utils';
+import { normalizeCityName, easeInOutCubic } from '../utils';
 import { CITY_RISE_DURATION, RISE_HEIGHT, FOSHAN, CITY_BASE_COLOR, CITY_BASE_EMISSIVE, CITY_ACTIVE_COLOR, CITY_ACTIVE_EMISSIVE, FOSHAN_COLOR, FOSHAN_EMISSIVE, CITY_EDGE_LINE_FLAG } from '../constants';
 import { useChinaMapRefs } from './useChinaMapRefs';
 import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
@@ -8,7 +8,7 @@ import { CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 export function useCityControls(
     refs: ReturnType<typeof useChinaMapRefs>,
     labels: { applyLabelVisibility: () => void; refreshWarehouseLabels: () => void },
-    focusFreightNodes: (delay?: number) => void,
+    _focusFreightNodes: (delay?: number) => void,
 ) {
     const findCityKey = useCallback((cityName: string) => {
         const normalized = normalizeCityName(cityName);

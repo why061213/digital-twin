@@ -7,6 +7,7 @@ export type RoadMap3DHandle = {
     removeRoadPath: (id: string) => void;
     clearRoads: () => void;
     updateTruckPosition: (lineId: string, position: [number, number], info?: RoadObjectInfo) => void;
+    refreshAllPositions: () => void;
 };
 
 export type RoadObjectInfo = {
@@ -27,7 +28,7 @@ export interface RoadState {
     truck: THREE.Mesh;
     truckGlow: THREE.Mesh;
     selectionRing: THREE.Mesh;
-    dragControls: DragControls;
+    dragControls: DragControls | null;
     samples: THREE.Vector3[];
     cumulativeLengths: number[];
     totalLength: number;
