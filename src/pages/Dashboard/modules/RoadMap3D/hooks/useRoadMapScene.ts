@@ -1,0 +1,147 @@
+import { useEffect } from 'react';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { loadCityGeoJson, projection } from '../geo';
+import { disposeObject3D } from '../utils';
+import { useRoadMapRefs } from './useRoadMapRefs';
+import { useRoadControls } from './useRoadControls';
+import { useRoadSelection } from './useRoadSelection';
+
+export function useRoadMapScene(
+    refs: ReturnType<typeof useRoadMapRefs>,
+    controls: ReturnType<typeof useRoadControls>,
+    selection: ReturnType<typeof useRoadSelection>,
+) {
+    useEffect(() => {
+        const container = refs.containerRef.current;
+        if (!container) return;
+
+        let disposed = false;
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color('#081320');
+        refs.sceneRef.current = scene;
+
+        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 1, 10000);
+        camera.up.set(0, 1, 0);
+        camera.position.set(14, 52, -24);
+        camera.lookAt(0, 0, 0);
+        refs.cameraRef.current = camera;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        container.appendChild(renderer.domElement);
+        refs.rendererRef.current = renderer;
+
+        const orbitControls = new OrbitControls(camera, renderer.domElement);
+        orbitControls.enableDamping = true;
+        orbitControls.enableRotate = true;
+        orbitControls.target.set(0, 0, 0);
+        orbitControls.minAzimuthAngle = Number.NEGATIVE_INFINITY;
+        orbitControls.maxAzimuthAngle = Number.POSITIVE_INFINITY;
+        orbitControls.minPolarAngle = Math.PI / 10;
+        orbitControls.maxPolarAngle = Math.PI / 2 - 0.035;
+        orbitControls.maxDistance = 220;
+        orbitControls.minDistance = 10;
+        orbitControls.update();
+        refs.controlsRef.current = orbitControls;
+
+        scene.add(new THREE.AmbientLight(0xdbeafe, 0.82));
+        const dirLight = new THREE.DirectionalLight(0xe0f2fe, 1.2);
+        dirLight.position.set(-12, 24, 18);
+        scene.add(dirLight);
+
+        loadCityGeoJson()
+            .then((geoJson) => {
+                if (disposed) return;
+                const group = new THREE.Group();
+                geoJson.features.forEach((feature: any) => {
+                    const { geometry } = feature;
+                    let rings: number[][][] = [];
+                    if (geometry.type === 'Polygon') rings = [geometry.coordinates[0]];
+                    else if (geometry.type === 'MultiPolygon') rings = geometry.coordinates.map((p: any) => p[0]);
+
+                    const cityGroup = new THREE.Group();
+                    rings.forEach((ring) => {
+                        const shape = new THREE.Shape();
+                        ring.forEach(([lng, lat], index) => {
+                            const projected = projection([lng, lat]);
+                            if (!projected) return;
+                            const [x, y] = projected;
+                            if (index === 0) shape.moveTo(-x, -y);
+                            else shape.lineTo(-x, -y);
+                        });
+
+                        const geom = new THREE.ExtrudeGeometry(shape, { depth: 0.5, bevelEnabled: false });
+                        const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
+                            color: '#2f465e',
+                            emissive: '#0b2234',
+                            emissiveIntensity: 0.12,
+                            roughness: 0.65,
+                            metalness: 0.18,
+                            side: THREE.DoubleSide,
+                        }));
+                        cityGroup.add(mesh);
+                        const edgeLine = new THREE.LineSegments(
+                            new THREE.EdgesGeometry(geom, 32),
+                            new THREE.LineBasicMaterial({
+                                color: 0x7dd3fc,
+                                transparent: true,
+                                opacity: 0.14,
+                                depthWrite: false,
+                            })
+                        );
+                        edgeLine.position.z -= 0.018;
+                        cityGroup.add(edgeLine);
+                    });
+                    group.add(cityGroup);
+                });
+                group.rotation.x = Math.PI / 2;
+                scene.add(group);
+            })
+            .catch((err) => console.error('Map data failed to load', err));
+
+        const animate = () => {
+            refs.renderFrameRef.current = requestAnimationFrame(animate);
+            const now = performance.now();
+            refs.roadsMapRef.current.forEach((road) => {
+                if (!road.isSelected) return;
+                const pulse = 1 + Math.sin(now / 260) * 0.08;
+                road.selectionRing.scale.setScalar(pulse);
+                road.selectionRing.rotation.z += 0.018;
+            });
+            orbitControls.update();
+            renderer.render(scene, camera);
+        };
+        animate();
+
+        const onResize = () => {
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        };
+        window.addEventListener('resize', onResize);
+
+        const pointerMove = selection.handlePointerMove;
+        const pointerLeave = selection.handlePointerLeave;
+        renderer.domElement.addEventListener('pointermove', pointerMove);
+        renderer.domElement.addEventListener('pointerleave', pointerLeave);
+
+        return () => {
+            disposed = true;
+            window.removeEventListener('resize', onResize);
+            renderer.domElement.removeEventListener('pointermove', pointerMove);
+            renderer.domElement.removeEventListener('pointerleave', pointerLeave);
+            cancelAnimationFrame(refs.renderFrameRef.current);
+            controls.clearRoads();
+            renderer.dispose();
+            if (renderer.domElement.parentElement === container) {
+                container.removeChild(renderer.domElement);
+            }
+            refs.sceneRef.current = null;
+            refs.cameraRef.current = null;
+            refs.rendererRef.current = null;
+            refs.controlsRef.current = null;
+        };
+    }, [refs, controls, selection]);
+}

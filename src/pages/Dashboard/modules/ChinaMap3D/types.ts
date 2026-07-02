@@ -26,8 +26,11 @@ export type ChinaMap3DHandle = {
     removeFlyLine: (lineId: string) => void;
     updateCityData: (cityName: string, data: Record<string, any> | null) => void;
     focusOnCities: (cityNames: string[], mode: CameraFocusMode) => void;
+    isReady: () => boolean;
     startWarehouseTour: () => void;
     showCityPanels: (cityName: string, panels: PanelData[], style?: PanelStyle) => void;
+    cacheCityPanels: (cityName: string, panels: PanelData[], style?: PanelStyle) => void;
+    showCachedCityPanels: (cityName: string) => boolean;
     clearCityPanels: (cityName: string) => void;
 };
 export type CameraFocusMode = 'overview' | 'focus';

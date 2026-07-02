@@ -8,6 +8,7 @@ import RoadMap3D from './modules/RoadMap3D';
 import type { RoadMap3DHandle } from './modules/RoadMap3D';
 import { useDashboardRealtime } from './hooks/useDashboardRealtime';
 import type { RoadPathMessage, RouteOrder, TruckPositionMessage, WarehouseFocusPanel, WarehouseFocusStyle } from './hooks/useDashboardRealtime';
+import type { PanelData } from './modules/ChinaMap3D/types';
 
 type ViewMode = 'warehouse' | 'chinaMap' | 'roadMap';
 type LonLat = [number, number];
@@ -76,6 +77,10 @@ function lerp(start: number, end: number, progress: number) {
 
 function clamp01(value: number) {
     return Math.min(Math.max(value, 0), 1);
+}
+
+function waitFrame() {
+    return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
 function distance(a: LonLat, b: LonLat) {
@@ -201,9 +206,10 @@ function DashboardPage() {
     const [isDispatching, setIsDispatching] = useState(false);
     const [isLoadingRoadGroup, setIsLoadingRoadGroup] = useState(false);
     const [chinaMapSession, setChinaMapSession] = useState(0);
-    const previousViewRef = useRef<ViewMode>('warehouse');
+    const [isPreparingChinaMap, setIsPreparingChinaMap] = useState(false);
     const mapRef = useRef<ChinaMap3DHandle>(null);
     const roadMapRef = useRef<RoadMap3DHandle>(null);
+    const chinaMapPrepareRunRef = useRef(0);
     const activeRoutesRef = useRef<Map<string, ActiveRoute>>(new Map());
     const positionRequestsRef = useRef<Set<string>>(new Set());
 
@@ -480,6 +486,20 @@ function DashboardPage() {
         }
     }, [isDispatching, refreshRoadGroups]);
 
+    const requestViewChange = useCallback((nextView: ViewMode) => {
+        if (nextView === 'chinaMap') {
+            if (view === 'chinaMap' || isPreparingChinaMap) return;
+            chinaMapPrepareRunRef.current += 1;
+            setIsPreparingChinaMap(true);
+            setChinaMapSession((session) => session + 1);
+            return;
+        }
+
+        chinaMapPrepareRunRef.current += 1;
+        setIsPreparingChinaMap(false);
+        setView(nextView);
+    }, [isPreparingChinaMap, view]);
+
 
     const handleWarehouseUpdate = useCallback((cityName: string, action: string, displayData: Record<string, any>) => {
         console.log('🏗️ 处理仓库更新:', cityName, action, displayData);
@@ -502,8 +522,19 @@ function DashboardPage() {
         mapRef.current?.showCityPanels(cityName, panels, style);
     }, []);
 
-    const requestWarehouseSnapshot = useCallback(async () => {
+    const waitForChinaMapReady = useCallback(async () => {
+        const startedAt = performance.now();
+        while (!mapRef.current?.isReady()) {
+            if (performance.now() - startedAt > 2500) return false;
+            await waitFrame();
+        }
+        await waitFrame();
+        return true;
+    }, []);
+
+    const requestWarehouseSnapshot = useCallback(async (prepareRunId: number) => {
         try {
+            // 1. 推送仓库快照，让所有城市升起
             const response = await fetch(`${API_BASE_URL}/warehouse/snapshot/push`, { method: 'POST' });
             if (!response.ok) throw new Error(`Warehouse snapshot request failed: ${response.status}`);
             const messages = await response.json() as Array<{
@@ -514,23 +545,42 @@ function DashboardPage() {
             messages.forEach((message) => {
                 handleWarehouseUpdate(message.cityName, message.action, message.displayData);
             });
-            await Promise.all(messages.map(async (message) => {
-                try {
-                    const focusResponse = await fetch(`${API_BASE_URL}/warehouse/focus/${encodeURIComponent(message.cityName)}`);
-                    if (!focusResponse.ok) return;
-                    const focusMessage = await focusResponse.json() as { cityName: string; panels: WarehouseFocusPanel[]; style?: WarehouseFocusStyle };
-                    handleWarehouseFocus(focusMessage.cityName, focusMessage.panels ?? [], focusMessage.style);
-                } catch (error) {
-                    console.warn('Warehouse focus request failed', error);
-                }
-            }));
-            window.setTimeout(() => {
+
+            const foshanName = '佛山市';
+            const uniqueCities = Array.from(new Set([
+                foshanName,
+                ...messages.map((message) => message.cityName),
+            ]));
+
+            uniqueCities.forEach((city) => {
+                fetch(`${API_BASE_URL}/warehouse/focus/${encodeURIComponent(city)}`)
+                    .then((res) => {
+                        if (!res.ok) throw new Error(`Warehouse focus request failed: ${res.status}`);
+                        return res.json();
+                    })
+                    .then((focusMessage: { cityName: string; panels: PanelData[]; style?: WarehouseFocusStyle }) => {
+                        const targetCity = focusMessage.cityName || city;
+                        const panels = focusMessage.panels ?? [];
+                        mapRef.current?.cacheCityPanels(targetCity, panels, focusMessage.style);
+                    })
+                    .catch(err => console.warn(`${city} 面板预加载失败`, err));
+            });
+
+            // 到这里说明 ChinaMap3D 已经挂载、仓库快照已经进入地图；再等 Three mesh 就绪后释放旧视图。
+            await waitForChinaMapReady();
+            if (chinaMapPrepareRunRef.current !== prepareRunId) return;
+            setView('chinaMap');
+            setIsPreparingChinaMap(false);
+            window.requestAnimationFrame(() => {
                 mapRef.current?.startWarehouseTour();
-            }, 180);
+            });
         } catch (error) {
             console.warn('Warehouse snapshot request failed', error);
+            if (chinaMapPrepareRunRef.current === prepareRunId) {
+                setIsPreparingChinaMap(false);
+            }
         }
-    }, [handleWarehouseFocus, handleWarehouseUpdate]);
+    }, [handleWarehouseUpdate, waitForChinaMapReady]);
 
     useDashboardRealtime({
         onCityRaise: handleCityRaise,
@@ -545,22 +595,15 @@ function DashboardPage() {
     });
 
     useEffect(() => {
-        if (previousViewRef.current !== 'chinaMap' && view === 'chinaMap') {
-            setChinaMapSession((session) => session + 1);
-        }
-        previousViewRef.current = view;
-    }, [view]);
-
-    useEffect(() => {
         if (view !== 'roadMap') return;
         void refreshRoadGroups(activeRoadGroupId ?? undefined);
     }, [activeRoadGroupId, refreshRoadGroups, view]);
 
     useEffect(() => {
-        if (view !== 'chinaMap') return;
+        if (!isPreparingChinaMap) return;
         if (chinaMapSession <= 0) return;
-        void requestWarehouseSnapshot();
-    }, [chinaMapSession, requestWarehouseSnapshot, view]);
+        void requestWarehouseSnapshot(chinaMapPrepareRunRef.current);
+    }, [chinaMapSession, isPreparingChinaMap, requestWarehouseSnapshot]);
 
     useEffect(() => {
         if (view !== 'roadMap') return;
@@ -591,16 +634,31 @@ function DashboardPage() {
     }, [renderTruckPosition, requestTruckPosition]);
 
     const renderCenterPanel = () => {
-        switch (view) {
-            case 'warehouse':
-                return <Warehouse3D key="warehouse" />;
-            case 'chinaMap':
-                return <ChinaMap3D key={`chinaMap-${chinaMapSession}`} ref={mapRef} />;
-            case 'roadMap':
-                return <RoadMap3D key="roadMap" ref={roadMapRef} />;
-            default:
-                return null;
-        }
+        const showChinaMapLayer = view === 'chinaMap' || isPreparingChinaMap;
+
+        return (
+            <>
+                {view === 'warehouse' && (
+                    <div className="absolute inset-0">
+                        <Warehouse3D key="warehouse" />
+                    </div>
+                )}
+                {view === 'roadMap' && (
+                    <div className="absolute inset-0">
+                        <RoadMap3D key="roadMap" ref={roadMapRef} />
+                    </div>
+                )}
+                {showChinaMapLayer && (
+                    <div
+                        className={`absolute inset-0 transition-opacity duration-300 ${
+                            view === 'chinaMap' ? 'opacity-100' : 'pointer-events-none opacity-0'
+                        }`}
+                    >
+                        <ChinaMap3D key={`chinaMap-${chinaMapSession}`} ref={mapRef} />
+                    </div>
+                )}
+            </>
+        );
     };
 
     const viewButtons = (
@@ -612,14 +670,14 @@ function DashboardPage() {
             ].map(([mode, label]) => (
                 <button
                     key={mode}
-                    onClick={() => setView(mode as ViewMode)}
+                    onClick={() => requestViewChange(mode as ViewMode)}
                     className={`rounded-full border px-4 py-2 text-xs shadow-lg backdrop-blur-md transition-all pointer-events-auto ${
-                        view === mode
+                        view === mode || (mode === 'chinaMap' && isPreparingChinaMap)
                             ? 'border-cyan-400/50 bg-cyan-500/20 text-cyan-300'
                             : 'border-white/10 bg-white/10 text-gray-400 hover:bg-white/20'
                     }`}
                 >
-                    {label}
+                    {mode === 'chinaMap' && isPreparingChinaMap ? '数字孪生准备中...' : label}
                 </button>
             ))}
         </div>

@@ -279,6 +279,51 @@ export function useCityPanels(
         [refs, findCityKey, applyLabelVisibility],
     );
 
+    const cacheCityPanels = useCallback((cityName: string, panels: PanelData[], style?: PanelStyle) => {
+        const matchedKey = findCityKey(cityName);
+        if (matchedKey) {
+            refs.cityPanelDataRef.current.set(matchedKey, panels);
+            if (style) refs.cityPanelStyleRef.current.set(matchedKey, style);
+            refs.pendingCityPanelsRef.current.delete(matchedKey);
+            refs.pendingCityPanelsRef.current.delete(normalizeCityName(matchedKey));
+            refs.pendingCityPanelStylesRef.current.delete(matchedKey);
+            refs.pendingCityPanelStylesRef.current.delete(normalizeCityName(matchedKey));
+            const visibility = refs.labelVisibilityRef.current;
+            if (visibility.mode === 'focus' && visibility.focusedKey === matchedKey) {
+                window.setTimeout(() => showCityPanels(matchedKey, panels, style), 0);
+            }
+        } else {
+            refs.pendingCityPanelsRef.current.set(cityName, panels);
+            refs.pendingCityPanelsRef.current.set(normalizeCityName(cityName), panels);
+            if (style) {
+                refs.pendingCityPanelStylesRef.current.set(cityName, style);
+                refs.pendingCityPanelStylesRef.current.set(normalizeCityName(cityName), style);
+            }
+        }
+    }, [refs, findCityKey, showCityPanels]);
+
+    const showCachedCityPanels = useCallback((cityName: string) => {
+        const matchedKey = findCityKey(cityName);
+        if (!matchedKey) return false;
+
+        const panels =
+            refs.cityPanelDataRef.current.get(matchedKey) ??
+            refs.pendingCityPanelsRef.current.get(matchedKey) ??
+            refs.pendingCityPanelsRef.current.get(normalizeCityName(matchedKey)) ??
+            refs.pendingCityPanelsRef.current.get(cityName) ??
+            refs.pendingCityPanelsRef.current.get(normalizeCityName(cityName));
+        if (!panels) return false;
+
+        const style =
+            refs.cityPanelStyleRef.current.get(matchedKey) ??
+            refs.pendingCityPanelStylesRef.current.get(matchedKey) ??
+            refs.pendingCityPanelStylesRef.current.get(normalizeCityName(matchedKey)) ??
+            refs.pendingCityPanelStylesRef.current.get(cityName) ??
+            refs.pendingCityPanelStylesRef.current.get(normalizeCityName(cityName));
+        showCityPanels(matchedKey, panels, style);
+        return true;
+    }, [refs, findCityKey, showCityPanels]);
+
     const clearCityPanels = useCallback(
         (cityName: string) => {
             const matchedKey = findCityKey(cityName);
@@ -300,5 +345,5 @@ export function useCityPanels(
         refs.showCityPanelsRef.current = showCityPanels;
     }, [refs.showCityPanelsRef, showCityPanels]);
 
-    return { showCityPanels, clearCityPanels };
+    return { showCityPanels, clearCityPanels, cacheCityPanels, showCachedCityPanels };
 }
