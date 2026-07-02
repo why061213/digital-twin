@@ -81,6 +81,6 @@ export const LABEL_CONFIG = {
         focusHold: 4000,     // 聚焦单个仓库的停留时间
         overviewHold: 900,   // 俯瞰所有仓库的停留时间
         loopHold: 900,       // 每轮巡游结束后的等待时间
-        startDelay: 500,     // 开始到镜头爬升的等待时间
+        startDelay: 3000,     // 开始到镜头爬升的等待时间
     },
 };

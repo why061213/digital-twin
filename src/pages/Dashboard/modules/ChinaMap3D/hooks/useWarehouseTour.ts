@@ -11,6 +11,7 @@ export function useWarehouseTour(
     refreshWarehouseLabels: () => void,
     setLabelVisibility: (visibility: { mode: 'all' | 'focus'; focusedKey?: string }) => void,
     findCityKey: (cityName: string) => string | undefined,
+    showCachedCityPanels: (cityName: string) => boolean,
 ) {
     const startWarehouseTour = useCallback(() => {
         const runId = refs.warehouseTourRunRef.current + 1;
@@ -83,6 +84,7 @@ export function useWarehouseTour(
                     setLabelVisibility({ mode: 'focus', focusedKey: key });
                     await focusPoints([center], undefined, 'focus');
                     if (refs.warehouseTourRunRef.current !== runId) return;
+                    showCachedCityPanels(key);
                     refreshWarehouseLabels();
                     await wait(WAREHOUSE_TOUR_FOCUS_HOLD);
                 }
@@ -98,7 +100,7 @@ export function useWarehouseTour(
         };
 
         void runTour();
-    }, [refs, focusPoints, refreshWarehouseLabels, setLabelVisibility, findCityKey]);
+    }, [refs, focusPoints, refreshWarehouseLabels, setLabelVisibility, findCityKey, showCachedCityPanels]);
 
     return { startWarehouseTour };
 }

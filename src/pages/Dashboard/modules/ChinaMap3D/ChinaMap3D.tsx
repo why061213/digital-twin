@@ -18,7 +18,14 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
     const cities = useCityControls(refs, labels, camera.focusFreightNodes);
     const flyLines = useFlyLines(refs, camera.focusFreightNodes);
     const panels = useCityPanels(refs, cities.findCityKey, labels.applyLabelVisibility);
-    const tour = useWarehouseTour(refs, camera.focusPoints, labels.refreshWarehouseLabels, labels.setLabelVisibility, cities.findCityKey);
+    const tour = useWarehouseTour(
+        refs,
+        camera.focusPoints,
+        labels.refreshWarehouseLabels,
+        labels.setLabelVisibility,
+        cities.findCityKey,
+        panels.showCachedCityPanels,
+    );
     const hover = useMapHover(refs);
 
     useMapScene(refs, {
@@ -38,9 +45,12 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         removeFlyLine: flyLines.removeFlyLine,
         updateCityData: cities.updateCityData,
         focusOnCities: camera.focusOnCities,
+        isReady: () => Boolean(refs.mapGroupRef.current && Object.keys(refs.meshMapRef.current).length > 0),
         startWarehouseTour: tour.startWarehouseTour,
         showCityPanels: panels.showCityPanels,
         clearCityPanels: panels.clearCityPanels,
+        cacheCityPanels: panels.cacheCityPanels,
+        showCachedCityPanels: panels.showCachedCityPanels,
     }));
 
     return <div ref={refs.containerRef} style={{ width: '100%', height: '100%', position: 'relative' }} />;
