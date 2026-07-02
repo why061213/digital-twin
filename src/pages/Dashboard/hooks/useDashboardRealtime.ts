@@ -49,6 +49,17 @@ export type WarehouseFocusPanel = {
     option?: any;
 };
 
+export type WarehouseFocusStyle = {
+    width?: number;
+    maxHeight?: number;
+    padding?: number;
+    titleFontSize?: number;
+    bodyFontSize?: number;
+    chartTextFontSize?: number;
+    placement?: string;
+    theme?: string;
+};
+
 type DashboardMessage =
     | CityRaiseMessage
     | CityFallMessage
@@ -76,7 +87,7 @@ type UseDashboardRealtimeOptions = {
     onRoadPath?: (message: RoadPathMessage) => void;
     onTruckPosition?: (message: TruckPositionMessage) => void;
     onWarehouseUpdate?: (cityName: string, action: string, displayData: Record<string, any>) => void;
-    onWarehouseFocus?: (cityName: string, panels: WarehouseFocusPanel[]) => void;
+    onWarehouseFocus?: (cityName: string, panels: WarehouseFocusPanel[], style?: WarehouseFocusStyle) => void;
     onCameraControl?: (cityNames: string[], mode: 'overview' | 'focus') => void;
 };
 
@@ -90,6 +101,10 @@ const FLY_LINE_DELAY = CITY_RISE_DELAY + CITY_RISE_DURATION + 120;
 const FLY_GROW_DURATION = 1300;
 const FLY_TRAVEL_DURATION = 2400;
 const ROUTE_MIN_LIFETIME = FLY_LINE_DELAY + FLY_GROW_DURATION + FLY_TRAVEL_DURATION * 2;
+const HEARTBEAT_INTERVAL_MS = 20_000;
+const HEARTBEAT_STALE_MS = 55_000;
+const RECONNECT_BASE_DELAY_MS = 1_000;
+const RECONNECT_MAX_DELAY_MS = 10_000;
 
 function buildRealtimeUrl() {
     const baseUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws';
@@ -137,6 +152,9 @@ export function useDashboardRealtime({
     const activeCityCountRef = useRef<Map<string, number>>(new Map());
     const cityFallTimersRef = useRef<Map<string, number>>(new Map());
     const reconnectTimerRef = useRef<number | null>(null);
+    const heartbeatTimerRef = useRef<number | null>(null);
+    const reconnectAttemptRef = useRef(0);
+    const lastMessageAtRef = useRef(0);
 
     useEffect(() => {
         let socket: WebSocket | null = null;
@@ -220,8 +238,8 @@ export function useDashboardRealtime({
                 return;
             }
             if (message.type === 'warehouse_focus' && onWarehouseFocus) {
-                const { cityName, panels } = message as any;
-                onWarehouseFocus(cityName, panels ?? []);
+                const { cityName, panels, style } = message as any;
+                onWarehouseFocus(cityName, panels ?? [], style);
                 return;
             }
             if (message.type === 'camera_control' && onCameraControl) {
@@ -231,21 +249,79 @@ export function useDashboardRealtime({
             }
         };
 
+        const clearHeartbeat = () => {
+            if (heartbeatTimerRef.current !== null) {
+                window.clearInterval(heartbeatTimerRef.current);
+                heartbeatTimerRef.current = null;
+            }
+        };
+
+        const scheduleReconnect = () => {
+            if (disposed || reconnectTimerRef.current !== null) return;
+            const attempt = reconnectAttemptRef.current;
+            const delay = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** attempt);
+            reconnectAttemptRef.current = Math.min(attempt + 1, 6);
+            reconnectTimerRef.current = window.setTimeout(() => {
+                reconnectTimerRef.current = null;
+                connect();
+            }, delay);
+        };
+
+        const startHeartbeat = (currentSocket: WebSocket) => {
+            clearHeartbeat();
+            lastMessageAtRef.current = Date.now();
+            heartbeatTimerRef.current = window.setInterval(() => {
+                if (currentSocket.readyState !== WebSocket.OPEN) return;
+
+                const silentMs = Date.now() - lastMessageAtRef.current;
+                if (silentMs > HEARTBEAT_STALE_MS) {
+                    console.warn(`WebSocket heartbeat timeout after ${silentMs}ms, reconnecting`);
+                    currentSocket.close(4000, 'heartbeat timeout');
+                    return;
+                }
+
+                // 应用层心跳：浏览器不能主动发 websocket ping 帧，所以用 JSON ping/pong 保活和探活。
+                currentSocket.send(JSON.stringify({ type: 'ping', clientTime: Date.now() }));
+            }, HEARTBEAT_INTERVAL_MS);
+        };
 
         const connect = () => {
+            if (disposed) return;
+            if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+
             socket = new WebSocket(buildRealtimeUrl());
 
+            socket.onopen = () => {
+                reconnectAttemptRef.current = 0;
+                startHeartbeat(socket as WebSocket);
+                console.info('WebSocket connected');
+            };
+
             socket.onmessage = (event) => {
+                lastMessageAtRef.current = Date.now();
                 try {
-                    handleMessage(JSON.parse(event.data));
+                    const message = JSON.parse(event.data);
+                    if (message?.type === 'pong') return;
+                    handleMessage(message);
                 } catch (error) {
                     console.warn('Invalid dashboard websocket message', error);
                 }
             };
 
-            socket.onclose = () => {
+            socket.onerror = (event) => {
+                console.warn('WebSocket error', event);
+            };
+
+            socket.onclose = (event) => {
+                clearHeartbeat();
                 if (disposed) return;
-                reconnectTimerRef.current = window.setTimeout(connect, 3000);
+                console.warn('WebSocket closed, scheduling reconnect', {
+                    code: event.code,
+                    reason: event.reason,
+                    wasClean: event.wasClean,
+                });
+                socket = null;
+                scheduleReconnect();
             };
         };
 
@@ -255,10 +331,12 @@ export function useDashboardRealtime({
             disposed = true;
             if (reconnectTimerRef.current !== null) {
                 window.clearTimeout(reconnectTimerRef.current);
+                reconnectTimerRef.current = null;
             }
+            clearHeartbeat();
             cityFallTimersRef.current.forEach((timer) => window.clearTimeout(timer));
             cityFallTimersRef.current.clear();
-            socket?.close();
+            socket?.close(1000, 'component unmounted');
         };
     }, [onCityFall, onCityRaise, onRoadPath, onRouteFall, onRouteRaise, onTruckPosition, onWarehouseUpdate, onWarehouseFocus, onCameraControl]);
 }

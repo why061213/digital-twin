@@ -145,6 +145,7 @@ type LabelLayout = {
     x: number;
     y: number;
     align: 'left' | 'right';
+    startOffset: [number, number];
 };
 
 type MarkedWarehouse = {
@@ -155,12 +156,25 @@ type MarkedWarehouse = {
     data: Record<string, any>;
 };
 
-// const LABEL_NEIGHBOR_RADIUS = 128;
-// const LABEL_MIN_DISTANCE = 78;
-// const LABEL_MAX_DISTANCE = 140;
-// const LABEL_CARD_WIDTH = 132;
-// const LABEL_CARD_HEIGHT = 56;
-// const LABEL_CITY_SAFE_MARGIN = 22;
+type ScreenRect = {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+};
+
+type PanelPlacement = {
+    x: number;
+    y: number;
+    align: 'left' | 'right';
+    startOffset: [number, number];
+    attachSide: 'left' | 'right' | 'top' | 'bottom';
+    direction: THREE.Vector2;
+};
+
+const OCTAGON_ORDER = [0, 2, 4, 6, 1, 3, 5, 7];
+const LABEL_ANCHOR_RADIUS = 38;
+const LABEL_ANCHOR_CENTER_Y = -28;
 
 function equalCircleOverlapRatio(distance: number, radius: number) {
     if (distance >= radius * 2) return 0;
@@ -171,38 +185,237 @@ function equalCircleOverlapRatio(distance: number, radius: number) {
     return area / (Math.PI * radius * radius);
 }
 
-function warehouseLabelHtml(cityName: string, data: Record<string, any>, layout: LabelLayout) {
-    const label = data.label || cityName;
-    const cardTransform = layout.align === 'right' ? 'translateX(-100%)' : 'none';
-    const sign = layout.x < 0 ? -1 : 1;
-    const cardEdgeX = layout.x;
-    const cardEdgeY = layout.y + 24;
-    const lineEndX = cardEdgeX - sign * 8;
-    const absX = Math.abs(lineEndX);
-    const absY = Math.abs(cardEdgeY);
-    let pathPoints: Array<[number, number]>;
-    if (absX < 18 || absY < 18) {
-        pathPoints = [[0, 0], [lineEndX, cardEdgeY]];
-    } else if (absX < 42) {
-        pathPoints = [[0, 0], [0, cardEdgeY], [lineEndX, cardEdgeY]];
-    } else if (absY < 42) {
-        pathPoints = [[0, 0], [lineEndX, 0], [lineEndX, cardEdgeY]];
-    } else {
-        const elbowX = sign * Math.min(42, Math.max(24, absX * 0.38));
-        pathPoints = [[0, 0], [elbowX, 0], [elbowX, cardEdgeY], [lineEndX, cardEdgeY]];
+function panelPlacementFromRect(
+    anchorScreen: THREE.Vector2,
+    rect: ScreenRect,
+    preferredAlign: 'left' | 'right',
+    startOffset: [number, number] = [0, 0],
+    attachSide: 'left' | 'right' | 'top' | 'bottom' = 'left'
+): PanelPlacement {
+    const centerX = (rect.left + rect.right) / 2;
+    const align = Math.abs(centerX - anchorScreen.x) < 24 ? preferredAlign : centerX < anchorScreen.x ? 'right' : 'left';
+    return {
+        x: align === 'right' ? rect.right - anchorScreen.x : rect.left - anchorScreen.x,
+        y: rect.top - anchorScreen.y,
+        align,
+        startOffset,
+        attachSide,
+        direction: new THREE.Vector2(1, 0),
+    };
+}
+
+function clampRectToViewport(rect: ScreenRect, viewport: { width: number; height: number }, margin: number) {
+    const dx = Math.max(margin - rect.left, 0) - Math.max(rect.right - (viewport.width - margin), 0);
+    const dy = Math.max(margin - rect.top, 0) - Math.max(rect.bottom - (viewport.height - margin), 0);
+    return {
+        left: rect.left + dx,
+        top: rect.top + dy,
+        right: rect.right + dx,
+        bottom: rect.bottom + dy,
+    };
+}
+
+function rectFromCenter(center: THREE.Vector2, size: { width: number; height: number }): ScreenRect {
+    return {
+        left: center.x - size.width / 2,
+        top: center.y - size.height / 2,
+        right: center.x + size.width / 2,
+        bottom: center.y + size.height / 2,
+    };
+}
+
+function octagonDirections() {
+    const root = Math.SQRT1_2;
+    // 1-8 从东侧开始顺时针编号，使用时按 1,3,5,7,2,4,6,8 分散占位。
+    return [
+        new THREE.Vector2(1, 0),
+        new THREE.Vector2(root, root),
+        new THREE.Vector2(0, 1),
+        new THREE.Vector2(-root, root),
+        new THREE.Vector2(-1, 0),
+        new THREE.Vector2(-root, -root),
+        new THREE.Vector2(0, -1),
+        new THREE.Vector2(root, -root),
+    ];
+}
+
+function octagonStartOffset(orderIndex: number, scale = 1): [number, number] {
+    const directions = octagonDirections();
+    const direction = directions[OCTAGON_ORDER[orderIndex % OCTAGON_ORDER.length]];
+    const centerScale = Math.pow(scale, 1.25);
+    return [
+        direction.x * LABEL_ANCHOR_RADIUS * scale,
+        LABEL_ANCHOR_CENTER_Y * centerScale + direction.y * LABEL_ANCHOR_RADIUS * scale,
+    ];
+}
+
+function labelAnchorScale(camera: THREE.PerspectiveCamera | null) {
+    if (!camera) return 1;
+    // 镜头越高，屏幕中的地图越小；对应把八边形出线圈和面板距离收一点。
+    return THREE.MathUtils.clamp(68 / Math.max(camera.position.y, 1), 0.38, 1.02);
+}
+
+function attachSideFromDirection(direction: THREE.Vector2): 'left' | 'right' | 'top' | 'bottom' {
+    if (Math.abs(direction.y) > Math.abs(direction.x)) {
+        return direction.y > 0 ? 'top' : 'bottom';
     }
+    return direction.x > 0 ? 'left' : 'right';
+}
+
+function attachSideFromCard(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    align: 'left' | 'right',
+    startOffset: [number, number]
+) {
+    const cardLeft = align === 'right' ? x - width : x;
+    const cardCenter = new THREE.Vector2(cardLeft + width / 2, y + height / 2);
+    const start = new THREE.Vector2(startOffset[0], startOffset[1]);
+    const direction = cardCenter.sub(start);
+    if (direction.lengthSq() < 0.001) {
+        direction.set(1, 0);
+    }
+    return attachSideFromDirection(direction);
+}
+
+function layoutPanelPlacements(
+    anchorScreen: THREE.Vector2,
+    panelSizes: Array<{ width: number; height: number }>,
+    viewport: { width: number; height: number },
+    orderOffset = 0,
+    anchorScale = 1
+) {
+    void orderOffset;
+    const placements: PanelPlacement[] = [];
+    const slots = [
+        { col: 1, row: 2, direction: new THREE.Vector2(0, 1) },
+        { col: 2, row: 1, direction: new THREE.Vector2(1, 0) },
+        { col: 1, row: 0, direction: new THREE.Vector2(0, -1) },
+        { col: 0, row: 1, direction: new THREE.Vector2(-1, 0) },
+        { col: 2, row: 2, direction: new THREE.Vector2(1, 1).normalize() },
+        { col: 2, row: 0, direction: new THREE.Vector2(1, -1).normalize() },
+        { col: 0, row: 0, direction: new THREE.Vector2(-1, -1).normalize() },
+        { col: 0, row: 2, direction: new THREE.Vector2(-1, 1).normalize() },
+    ];
+    const margin = 24;
+    const cellWidth = viewport.width / 3;
+    const cellHeight = viewport.height / 3;
+
+    panelSizes.forEach((size, index) => {
+        const slot = slots[index % slots.length];
+        const direction = slot.direction;
+        const startOffset: [number, number] = [0, 0];
+        const slotCenter = new THREE.Vector2(
+            cellWidth * (slot.col + 0.5),
+            cellHeight * (slot.row + 0.5)
+        );
+        // 1/3/5/7 是以城市为原点的直角坐标轴；斜向点才落到对应九宫格角区。
+        const center = slotCenter.clone();
+        if (Math.abs(direction.x) < 0.01) {
+            center.x = anchorScreen.x;
+        }
+        if (Math.abs(direction.y) < 0.01) {
+            center.y = anchorScreen.y;
+        }
+        center.add(direction.clone().multiplyScalar(18 * anchorScale));
+        const desiredRect = rectFromCenter(center, size);
+        const rect = clampRectToViewport(desiredRect, viewport, margin);
+        const preferredAlign = direction.x < -0.2 ? 'right' : 'left';
+        const placement = panelPlacementFromRect(anchorScreen, rect, preferredAlign, startOffset, attachSideFromDirection(direction));
+        placement.direction = direction.clone();
+        placements.push(placement);
+    });
+
+    return placements;
+}
+
+function leaderLineHtml(
+    cardX: number,
+    cardY: number,
+    cardHeight: number,
+    align: 'left' | 'right',
+    endInset = 8,
+    opacity = 0.58,
+    startOffset: [number, number] = [0, 0],
+    attachSide: 'left' | 'right' | 'top' | 'bottom' = align === 'right' ? 'right' : 'left',
+    cardWidth = LABEL_CONFIG.cardWidth,
+    simpleDirection?: THREE.Vector2
+) {
+    const [startX, startY] = startOffset;
+    const cardLeft = align === 'right' ? cardX - cardWidth : cardX;
+    const cardRight = cardLeft + cardWidth;
+    const cardTop = cardY;
+    const cardBottom = cardTop + cardHeight;
+    let lineEndX: number;
+    let lineEndY: number;
+
+    if (attachSide === 'right') {
+        lineEndX = cardRight + endInset;
+        lineEndY = cardTop + (simpleDirection ? cardHeight * 0.5 : Math.min(cardHeight * 0.5, 32));
+    } else if (attachSide === 'top') {
+        lineEndX = cardLeft + cardWidth * 0.5;
+        lineEndY = cardTop - endInset;
+    } else if (attachSide === 'bottom') {
+        lineEndX = cardLeft + cardWidth * 0.5;
+        lineEndY = cardBottom + endInset;
+    } else {
+        lineEndX = cardLeft - endInset;
+        lineEndY = cardTop + (simpleDirection ? cardHeight * 0.5 : Math.min(cardHeight * 0.5, 32));
+    }
+
+    const deltaX = lineEndX - startX;
+    const deltaY = lineEndY - startY;
+    const absX = Math.abs(deltaX);
+    const absY = Math.abs(deltaY);
+    let pathPoints: Array<[number, number]>;
+
+    // 聚焦态数据面板只需要简单引导线：上下左右直连，复合方向做一次 90 度折线。
+    if (simpleDirection && Math.abs(simpleDirection.x) > 0.01 && Math.abs(simpleDirection.y) > 0.01) {
+        const horizontalFirst = Math.abs(simpleDirection.x) >= Math.abs(simpleDirection.y);
+        pathPoints = horizontalFirst
+            ? [[startX, startY], [lineEndX, startY], [lineEndX, lineEndY]]
+            : [[startX, startY], [startX, lineEndY], [lineEndX, lineEndY]];
+    } else if (simpleDirection || absX < 18 || absY < 18) {
+        pathPoints = [[startX, startY], [lineEndX, lineEndY]];
+    } else if (attachSide === 'top' || attachSide === 'bottom') {
+        const elbowY = startY + deltaY * 0.52;
+        pathPoints = [[startX, startY], [startX, elbowY], [lineEndX, elbowY], [lineEndX, lineEndY]];
+    } else {
+        const elbowX = startX + deltaX * 0.52;
+        pathPoints = [[startX, startY], [elbowX, startY], [elbowX, lineEndY], [lineEndX, lineEndY]];
+    }
+
     const minX = Math.min(...pathPoints.map(([x]) => x)) - 8;
     const minY = Math.min(...pathPoints.map(([, y]) => y)) - 8;
     const maxX = Math.max(...pathPoints.map(([x]) => x)) + 8;
     const maxY = Math.max(...pathPoints.map(([, y]) => y)) + 8;
     const points = pathPoints.map(([x, y]) => `${x - minX},${y - minY}`).join(' ');
     const endDot = pathPoints[pathPoints.length - 1];
+
     return `
-        <span style="position:absolute;left:-4px;top:-4px;width:8px;height:8px;border-radius:999px;background:#67e8f9;box-shadow:0 0 16px rgba(103,232,249,0.95)"></span>
         <svg style="position:absolute;left:${minX}px;top:${minY}px;width:${maxX - minX}px;height:${maxY - minY}px;overflow:visible;pointer-events:none;z-index:1">
-            <polyline points="${points}" fill="none" stroke="rgba(103,232,249,0.58)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"></polyline>
+            <polyline points="${points}" fill="none" stroke="rgba(103,232,249,${opacity})" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"></polyline>
         </svg>
+        <span style="position:absolute;left:${startX - 3}px;top:${startY - 3}px;width:6px;height:6px;border-radius:999px;background:rgba(103,232,249,0.82);box-shadow:0 0 10px rgba(103,232,249,0.7);z-index:2"></span>
         <span style="position:absolute;left:${endDot[0] - 3}px;top:${endDot[1] - 3}px;width:6px;height:6px;border-radius:999px;background:rgba(103,232,249,0.92);box-shadow:0 0 10px rgba(103,232,249,0.76);z-index:2"></span>
+    `;
+}
+
+function warehouseLabelHtml(cityName: string, data: Record<string, any>, layout: LabelLayout) {
+    const label = data.label || cityName;
+    const cardTransform = layout.align === 'right' ? 'translateX(-100%)' : 'none';
+    const attachSide = attachSideFromCard(
+        layout.x,
+        layout.y,
+        LABEL_CONFIG.cardWidth,
+        LABEL_CONFIG.cardHeight,
+        layout.align,
+        layout.startOffset
+    );
+    return `
+        ${leaderLineHtml(layout.x, layout.y, LABEL_CONFIG.cardHeight, layout.align, 8, 0.58, layout.startOffset, attachSide, LABEL_CONFIG.cardWidth)}
         <span style="
             position:absolute;
             left:${layout.x}px;
@@ -265,7 +478,10 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
     const warehouseTourTimeoutRef = useRef<number | null>(null);
     const warehouseTourRunRef = useRef(0);
     const cityPanelMapRef = useRef<Map<string, HTMLDivElement>>(new Map());
+    const cityPanelDataRef = useRef<Map<string, PanelData[]>>(new Map());
     const cityPanelChartsRef = useRef<Map<string, echarts.ECharts[]>>(new Map());
+    const pendingCityPanelsRef = useRef<Map<string, PanelData[]>>(new Map());
+    const showCityPanelsRef = useRef<(cityName: string, panels: PanelData[]) => void>(() => {});
 
     // 标签相关
     const labelRendererRef = useRef<CSS2DRenderer | null>(null);
@@ -293,6 +509,11 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         cityPanelMapRef.current.forEach((panel, key) => {
             const shouldShow = visibility.mode === 'focus' && key === visibility.focusedKey;
             panel.style.display = shouldShow ? 'block' : 'none';
+            if (shouldShow) {
+                window.setTimeout(() => {
+                    cityPanelChartsRef.current.get(key)?.forEach((chart) => chart.resize());
+                }, 0);
+            }
         });
         if (labelRendererRef.current) {
             labelRendererRef.current.domElement.style.opacity = '1';
@@ -311,6 +532,8 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
         if (!camera || !controls || !container) return;
         const cameraDistance = camera.position.distanceTo(controls.target);
         const zoomScale = THREE.MathUtils.clamp(LABEL_CONFIG.zoomScaleFactor / Math.max(cameraDistance, 1), 0.5, 1.08);
+        const anchorScale = labelAnchorScale(camera);
+        const isFocusMode = labelVisibilityRef.current.mode === 'focus';
 
         const entries = Object.entries(meshMapRef.current)
             .map(([name, group]) => {
@@ -430,9 +653,10 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                 LABEL_CONFIG.maxDistance
             );
             const labelDistance = THREE.MathUtils.clamp(rawLabelDistance * zoomScale, LABEL_CONFIG.zoomClampMin, LABEL_CONFIG.maxDistance);
-            let x = direction.x * labelDistance;
+            const labelStartOffset: [number, number] = isFocusMode ? octagonStartOffset(0, anchorScale) : [0, 0];
+            let x = labelStartOffset[0] + direction.x * labelDistance;
             const verticalBias = Math.abs(direction.y) < 0.22 ? ((hash % 3) - 1) * LABEL_CONFIG.verticalBiasRange : 0;
-            let y = direction.y * labelDistance * LABEL_CONFIG.verticalCompression + verticalBias;
+            let y = labelStartOffset[1] + direction.y * labelDistance * LABEL_CONFIG.verticalCompression + verticalBias;
             let align: 'left' | 'right' = x < 0 ? 'right' : 'left';
 
             for (let pass = 0; pass < LABEL_CONFIG.safeMarginPasses; pass++) {
@@ -465,7 +689,7 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                 });
             }
 
-            item.group.userData.labelLayout = { x, y, align } satisfies LabelLayout;
+            item.group.userData.labelLayout = { x, y, align, startOffset: labelStartOffset } satisfies LabelLayout;
             const labelObj = cityLabelMapRef.current.get(item.name);
             if (labelObj) {
                 const element = labelObj.element as HTMLDivElement;
@@ -868,6 +1092,7 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                     x: 96,
                     y: -58,
                     align: 'left',
+                    startOffset: octagonStartOffset(0),
                 });
                 div.innerHTML = initialHtml;
                 div.dataset.labelHtml = initialHtml;
@@ -892,6 +1117,7 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                         x: 96,
                         y: -58,
                         align: 'left',
+                        startOffset: octagonStartOffset(0),
                     });
                     if (element.dataset.labelHtml !== nextHtml) {
                         element.innerHTML = nextHtml;
@@ -899,6 +1125,12 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                     }
                     existingLabel.position.copy(group.userData.labelAnchor ?? new THREE.Vector3(0, 1.2, 0));
                 }
+            }
+            const pendingPanels = pendingCityPanelsRef.current.get(matchedKey) ?? pendingCityPanelsRef.current.get(normalizeCityName(cityName));
+            if (pendingPanels) {
+                pendingCityPanelsRef.current.delete(matchedKey);
+                pendingCityPanelsRef.current.delete(normalizeCityName(cityName));
+                window.setTimeout(() => showCityPanelsRef.current(cityName, pendingPanels), 0);
             }
             refreshWarehouseLabels();
         } else {
@@ -1179,9 +1411,16 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
 
     const showCityPanels = useCallback((cityName: string, panels: PanelData[]) => {
         const matchedKey = findCityKey(cityName);
-        if (!matchedKey) return;
+        if (!matchedKey) {
+            pendingCityPanelsRef.current.set(normalizeCityName(cityName), panels);
+            return;
+        }
+        cityPanelDataRef.current.set(matchedKey, panels);
         const group = meshMapRef.current[matchedKey];
-        if (!group) return;
+        if (!group) {
+            pendingCityPanelsRef.current.set(matchedKey, panels);
+            return;
+        }
 
         // 移除旧面板
         const oldPanel = cityPanelMapRef.current.get(matchedKey);
@@ -1192,22 +1431,33 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
             cityPanelMapRef.current.delete(matchedKey);
         }
 
-        // 创建面板容器
+        const layout = (group.userData.labelLayout as LabelLayout | undefined) ?? {
+            x: 96,
+            y: -58,
+            align: 'left' as const,
+            startOffset: octagonStartOffset(0, labelAnchorScale(cameraRef.current)),
+        };
+        const panelWidth = LABEL_CONFIG.panels.width;
+        const anchor = group.userData.labelAnchor as THREE.Vector3 | undefined;
+        const camera = cameraRef.current;
+        const containerEl = containerRef.current;
+        if (!anchor || !camera || !containerEl) {
+            pendingCityPanelsRef.current.set(matchedKey, panels);
+            return;
+        }
+        const anchorScreen = anchor && camera && containerEl
+            ? projectToScreen(anchor, camera, containerEl)
+            : new THREE.Vector2(containerEl?.clientWidth ? containerEl.clientWidth / 2 : 0, containerEl?.clientHeight ? containerEl.clientHeight / 2 : 0);
+
+        // 聚焦态数据面板按屏幕九宫格绝对布局；城市锚点只作为连线起点，不参与面板落点。
         const panelDiv = document.createElement('div');
         panelDiv.style.position = 'absolute';
-        panelDiv.style.width = `${LABEL_CONFIG.panels.width}px`;
-        panelDiv.style.maxHeight = `${LABEL_CONFIG.panels.maxHeight}px`;
-        panelDiv.style.background = LABEL_CONFIG.panels.backgroundColor;
-        panelDiv.style.border = LABEL_CONFIG.panels.border;
-        panelDiv.style.borderRadius = `${LABEL_CONFIG.panels.borderRadius}px`;
-        panelDiv.style.padding = `${LABEL_CONFIG.panels.padding}px`;
-        panelDiv.style.overflowY = 'auto';
-        panelDiv.style.zIndex = '100';
-        panelDiv.style.backdropFilter = 'blur(10px)';
-        panelDiv.style.boxShadow = '0 18px 42px rgba(2,8,23,0.5)';
-        panelDiv.style.left = `${LABEL_CONFIG.panels.width + LABEL_CONFIG.panels.gapFromLabel}px`;
+        panelDiv.style.left = '0';
         panelDiv.style.top = '0';
-        panelDiv.style.pointerEvents = 'auto';
+        panelDiv.style.width = '100%';
+        panelDiv.style.height = '100%';
+        panelDiv.style.zIndex = '90';
+        panelDiv.style.pointerEvents = 'none';
         panelDiv.style.display = 'none';
         panelDiv.dataset.cityPanel = matchedKey;
 
@@ -1234,6 +1484,7 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                     cell.style.padding = '3px 0';
                     cell.style.textAlign = index === 0 ? 'left' : 'right';
                     cell.style.fontWeight = index === 0 ? '400' : '600';
+                    cell.style.whiteSpace = 'nowrap';
                     tr.appendChild(cell);
                 });
                 table.appendChild(tr);
@@ -1253,7 +1504,12 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                 chart.setOption({
                     textStyle: { color: '#cbd5e1', fontSize: 10 },
                     color: ['#22d3ee', '#fbbf24', '#38bdf8', '#34d399', '#a78bfa'],
-                    tooltip: { trigger: 'item', backgroundColor: 'rgba(2,6,23,0.92)', borderColor: 'rgba(103,232,249,0.28)', textStyle: { color: '#e2e8f0' } },
+                    tooltip: {
+                        trigger: 'item',
+                        backgroundColor: 'rgba(2,6,23,0.92)',
+                        borderColor: 'rgba(103,232,249,0.28)',
+                        textStyle: { color: '#e2e8f0' },
+                    },
                     ...panel.option,
                 });
                 charts.push(chart);
@@ -1261,19 +1517,81 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
             }, 0);
         };
 
-        // 构建面板内容
-        panels.forEach(panel => {
+        const panelSizes = panels.map((panel) => ({
+            width: panelWidth,
+            height: Math.min(
+                LABEL_CONFIG.panels.maxHeight,
+                panel.chartType === 'table' ? 112 : (panel.height ?? 120) + 42
+            ),
+        }));
+        const panelPlacements = layoutPanelPlacements(
+            anchorScreen,
+            panelSizes,
+            {
+                width: containerEl?.clientWidth || 1920,
+                height: containerEl?.clientHeight || 1080,
+            },
+            1,
+            labelAnchorScale(camera)
+        );
+
+        panels.forEach((panel, index) => {
+            const cardX = anchorScreen.x + placement.x;
+            const cardY = anchorScreen.y + placement.y;
+            const cardHeight = panelSizes[index].height;
+            const placement = panelPlacements[index] ?? {
+                x: layout.x,
+                y: layout.y + (index + 1) * (cardHeight + 12),
+                align: layout.align,
+                startOffset: [0, 0],
+                attachSide: attachSideFromCard(layout.x, layout.y, panelWidth, cardHeight, layout.align, [0, 0]),
+                direction: new THREE.Vector2(layout.x || 1, layout.y || 0).normalize(),
+            };
+            panelDiv.insertAdjacentHTML(
+                'beforeend',
+                leaderLineHtml(
+                    cardX,
+                    cardY,
+                    cardHeight,
+                    placement.align,
+                    8,
+                    index === 0 ? 0.48 : 0.34,
+                    [anchorScreen.x, anchorScreen.y],
+                    placement.attachSide,
+                    panelWidth,
+                    placement.direction
+                )
+            );
+
             const section = document.createElement('div');
-            section.style.marginBottom = '12px';
+            section.style.position = 'absolute';
+            section.style.left = `${cardX}px`;
+            section.style.top = `${cardY}px`;
+            section.style.transform = placement.align === 'right' ? 'translateX(-100%)' : 'none';
+            section.style.width = `${panelWidth}px`;
+            section.style.maxHeight = `${cardHeight}px`;
+            section.style.boxSizing = 'border-box';
+            section.style.padding = `${LABEL_CONFIG.panels.padding}px`;
+            section.style.overflow = 'hidden';
+            section.style.pointerEvents = 'auto';
+            section.style.zIndex = `${12 + index}`;
+            section.style.border = LABEL_CONFIG.panels.border;
+            section.style.borderRadius = `${LABEL_CONFIG.panels.borderRadius}px`;
+            section.style.background = 'linear-gradient(180deg, rgba(15,23,42,0.95), rgba(8,13,24,0.86))';
+            section.style.boxShadow = '0 12px 28px rgba(8,47,73,0.38), inset 0 1px 0 rgba(255,255,255,0.07)';
+            section.style.backdropFilter = 'blur(8px)';
+            section.style.whiteSpace = 'normal';
 
             const title = document.createElement('div');
             title.textContent = panel.title;
             title.style.color = '#cffafe';
             title.style.fontSize = `${LABEL_CONFIG.panels.titleFontSize}px`;
-            title.style.fontWeight = 'bold';
-            title.style.marginBottom = '6px';
-            title.style.borderBottom = '1px solid rgba(103,232,249,0.2)';
-            title.style.paddingBottom = '4px';
+            title.style.fontWeight = '700';
+            title.style.lineHeight = '16px';
+            title.style.marginBottom = '7px';
+            title.style.paddingBottom = '5px';
+            title.style.borderBottom = '1px solid rgba(103,232,249,0.18)';
+            title.style.textShadow = '0 1px 10px rgba(8,47,73,0.9)';
             section.appendChild(title);
 
             if (panel.chartType === 'table') {
@@ -1284,20 +1602,17 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
             panelDiv.appendChild(section);
         });
 
-        // 将面板添加到场景中的 CSS2DObject 容器
-        const labelObj = cityLabelMapRef.current.get(matchedKey);
-        const container = labelObj?.element as HTMLDivElement;
-        if (container) {
-            container.appendChild(panelDiv);
-            cityPanelMapRef.current.set(matchedKey, panelDiv);
-            applyLabelVisibility();
-        }
+        containerEl.appendChild(panelDiv);
+        cityPanelMapRef.current.set(matchedKey, panelDiv);
+        applyLabelVisibility();
     }, [applyLabelVisibility, findCityKey]);
+    showCityPanelsRef.current = showCityPanels;
 
 // 清除指定城市的面板
     const clearCityPanels = useCallback((cityName: string) => {
         const matchedKey = findCityKey(cityName);
         if (!matchedKey) return;
+        cityPanelDataRef.current.delete(matchedKey);
         const panel = cityPanelMapRef.current.get(matchedKey);
         if (panel) {
             cityPanelChartsRef.current.get(matchedKey)?.forEach((chart) => chart.dispose());
@@ -1497,6 +1812,7 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
                     x,
                     y,
                     align: x < 0 ? 'right' : 'left',
+                    startOffset: octagonStartOffset(0),
                 } satisfies LabelLayout;
 
                 if (shouldRise) {
@@ -1612,6 +1928,7 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle>((_props, ref) => {
             flyRemovalTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
             cityPanelChartsRef.current.forEach((charts) => charts.forEach((chart) => chart.dispose()));
             cityPanelChartsRef.current.clear();
+            cityPanelDataRef.current.clear();
             cityPanelMapRef.current.forEach((panel) => panel.remove());
             cityPanelMapRef.current.clear();
             flyLinesRef.current.forEach((line) => disposeObject3D(line));
