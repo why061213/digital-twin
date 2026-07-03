@@ -109,3 +109,34 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.dashboard-auto-scroll {
+  mask-image: linear-gradient(to bottom, transparent, #000 8%, #000 92%, transparent);
+}
+
+.dashboard-auto-scroll-track {
+  animation: dashboard-auto-scroll 24s linear infinite;
+  will-change: transform;
+}
+
+.dashboard-auto-scroll:hover .dashboard-auto-scroll-track {
+  animation-play-state: paused;
+}
+
+@keyframes dashboard-auto-scroll {
+  from {
+    transform: translateY(0);
+  }
+
+  to {
+    transform: translateY(-33.333%);
+  }
+}

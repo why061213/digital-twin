@@ -20,6 +20,11 @@ export type RoadPathMessage = {
     type: 'road_path';
     lineId: string;
     groupId?: string;
+    orderId?: string;
+    orderName?: string;
+    orderTotalTons?: number;
+    orderVehicleCount?: number;
+    pathKey?: string;
     from?: string;
     to?: string;
     coordinates: [number, number][];

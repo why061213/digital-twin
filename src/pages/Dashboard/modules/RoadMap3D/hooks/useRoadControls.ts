@@ -146,8 +146,13 @@ export function useRoadControls(
     const clearRoads = useCallback(() => {
         Array.from(refs.roadsMapRef.current.keys()).forEach((id) => clearRoad(id));
         refs.roadsMapRef.current.clear();
+        refs.manualMarkersRef.current.forEach((marker) => {
+            refs.sceneRef.current?.remove(marker);
+            disposeObject3D(marker);
+        });
+        refs.manualMarkersRef.current.clear();
         refs.selectedRoadIdRef.current = null;
-    }, [clearRoad, refs.roadsMapRef, refs.selectedRoadIdRef]);
+    }, [clearRoad, refs]);
 
     const addRoadPath = useCallback(
         (id: string, coords: [number, number][], info: RoadObjectInfo = {}) => {
@@ -171,18 +176,35 @@ export function useRoadControls(
             }
 
             const grayTubeGeo = new THREE.TubeGeometry(pathCurve, tubularSegments, 0.08, radialSegments, false);
-            const grayTube = new THREE.Mesh(grayTubeGeo, new THREE.MeshBasicMaterial({ color: 0x475569, transparent: true, opacity: 0.76 }));
+            const grayTube = new THREE.Mesh(grayTubeGeo, new THREE.MeshBasicMaterial({
+                color: 0x475569,
+                transparent: true,
+                opacity: 0.76,
+                depthWrite: false,
+            }));
+            grayTube.renderOrder = 2;
             grayTube.userData = { roadId: id, objectType: '路线' };
 
             const selectionTubeGeo = new THREE.TubeGeometry(pathCurve, tubularSegments, 0.16, radialSegments, false);
             const selectionTube = new THREE.Mesh(selectionTubeGeo, new THREE.MeshBasicMaterial({
                 color: 0x38bdf8, transparent: true, opacity: 0, depthWrite: false,
             }));
+            selectionTube.renderOrder = 12;
             selectionTube.userData = { roadId: id, objectType: '路线' };
 
-            const greenTubeGeo = new THREE.TubeGeometry(pathCurve, tubularSegments, 0.105, radialSegments, false);
+            const greenTubeGeo = new THREE.TubeGeometry(pathCurve, tubularSegments, 0.115, radialSegments, false);
             greenTubeGeo.setDrawRange(0, 0);
-            const greenTube = new THREE.Mesh(greenTubeGeo, new THREE.MeshBasicMaterial({ color: 0x22c55e, transparent: true, opacity: 0.92 }));
+            const greenTube = new THREE.Mesh(greenTubeGeo, new THREE.MeshBasicMaterial({
+                color: 0x22c55e,
+                transparent: true,
+                opacity: 0.94,
+                depthWrite: false,
+                polygonOffset: true,
+                polygonOffsetFactor: -6,
+                polygonOffsetUnits: -6,
+            }));
+            greenTube.position.y += 0.035;
+            greenTube.renderOrder = 8;
             greenTube.userData = { roadId: id, objectType: '已行驶路线' };
 
             const startPoint = samples[0].clone();
@@ -203,6 +225,9 @@ export function useRoadControls(
             truckGlow.position.copy(startPoint);
             selectionRing.position.copy(startPoint);
             selectionRing.rotation.x = Math.PI / 2;
+            truck.renderOrder = 20;
+            truckGlow.renderOrder = 19;
+            selectionRing.renderOrder = 18;
             truck.userData = { roadId: id, objectType: '车辆' };
             truckGlow.userData = { roadId: id, objectType: '车辆光晕' };
 
@@ -267,16 +292,47 @@ export function useRoadControls(
 
     const updateTruckPosition = useCallback((lineId: string, position: [number, number], info: RoadObjectInfo = {}) => {
         const road = refs.roadsMapRef.current.get(lineId);
-        if (!road) return;
         const worldPos = mapPosition(position, TRUCK_LIFT);
         if (!worldPos) return;
+        if (!road) {
+            let marker = refs.manualMarkersRef.current.get(lineId);
+            if (!marker) {
+                // 手动查询车辆位置没有路线时，使用独立小圆点落到地图上。
+                marker = new THREE.Group();
+                const dot = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.36, 24, 24),
+                    new THREE.MeshBasicMaterial({ color: 0x22d3ee })
+                );
+                const glow = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.72, 24, 24),
+                    new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.22, depthWrite: false })
+                );
+                const ring = new THREE.Mesh(
+                    new THREE.RingGeometry(0.78, 1.05, 64),
+                    new THREE.MeshBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: 0.72, side: THREE.DoubleSide, depthWrite: false })
+                );
+                ring.rotation.x = Math.PI / 2;
+                marker.add(glow, dot, ring);
+                marker.userData = {
+                    roadId: lineId,
+                    objectType: '手动查询车辆',
+                    info,
+                };
+                refs.manualMarkersRef.current.set(lineId, marker);
+                refs.sceneRef.current?.add(marker);
+            }
+            marker.position.copy(worldPos);
+            marker.userData.info = { ...(marker.userData.info ?? {}), ...info };
+            focusPath([worldPos]);
+            return;
+        }
         road.truck.position.copy(worldPos);
         road.truckGlow.position.copy(worldPos);
         road.selectionRing.position.copy(worldPos);
         road.currentCoords = position;
         road.info = { ...road.info, ...info };
         updateProgressFromTruck(lineId);
-    }, [refs.roadsMapRef, updateProgressFromTruck]);
+    }, [focusPath, refs, updateProgressFromTruck]);
 
     const refreshAllPositions = useCallback(() => {
         // 由父组件实现位置刷新逻辑，这里仅暴露接口

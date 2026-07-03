@@ -51,9 +51,9 @@ export const LABEL_CONFIG = {
         /** 面板宽度（像素） */
         width: 180,
         /** 面板最小宽度（像素） */
-        minWidth: 180,
+        minWidth: 240,
         /** 面板最小高度（像素） */
-        minHeight: 118,
+        minHeight: 200,
         /** 面板最大高度（像素） */
         maxHeight: 240,
         /** 是否显示面板引导线和端点 */

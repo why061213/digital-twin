@@ -21,13 +21,17 @@ function MainLayout({ header, leftPanel, centerPanel, rightPanel }: MainLayoutPr
                 <div className="pointer-events-auto h-full">{header}</div>
             </div>
 
-            <aside className="pointer-events-none absolute bottom-4 left-4 top-20 z-20 w-[22%] min-w-[260px]">
-                <div className="pointer-events-auto h-full">{leftPanel}</div>
-            </aside>
+            {leftPanel && (
+                <aside className="pointer-events-none absolute bottom-4 left-4 top-20 z-20 w-[22%] min-w-[260px]">
+                    <div className="pointer-events-auto h-full">{leftPanel}</div>
+                </aside>
+            )}
 
-            <aside className="pointer-events-none absolute bottom-4 right-4 top-20 z-20 w-[25%] min-w-[300px]">
-                <div className="pointer-events-auto flex h-full flex-col gap-3">{rightPanel}</div>
-            </aside>
+            {rightPanel && (
+                <aside className="pointer-events-none absolute bottom-4 right-4 top-20 z-20 w-[25%] min-w-[300px]">
+                    <div className="pointer-events-auto flex h-full flex-col gap-3">{rightPanel}</div>
+                </aside>
+            )}
         </div>
     );
 }

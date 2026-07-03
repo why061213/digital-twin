@@ -12,6 +12,7 @@ export function useWarehouseTour(
     setLabelVisibility: (visibility: { mode: 'all' | 'focus'; focusedKey?: string }) => void,
     findCityKey: (cityName: string) => string | undefined,
     showCachedCityPanels: (cityName: string) => boolean,
+    onTourStateChange?: (state: { mode: 'overview' | 'focus'; cityName?: string; displayData?: Record<string, any> }) => void,
 ) {
     const startWarehouseTour = useCallback(() => {
         const runId = refs.warehouseTourRunRef.current + 1;
@@ -35,6 +36,11 @@ export function useWarehouseTour(
             if (!group) return null;
             const box = new THREE.Box3().setFromObject(group);
             return box.isEmpty() ? null : box.getCenter(new THREE.Vector3());
+        };
+
+        const cityDisplayDataByKey = (key: string) => {
+            const group = refs.meshMapRef.current[key];
+            return group?.userData.displayData ?? {};
         };
 
         const runTour = async () => {
@@ -71,6 +77,7 @@ export function useWarehouseTour(
 
                 refs.isCameraMovingRef.current = true;
                 setLabelVisibility({ mode: 'all' });
+                onTourStateChange?.({ mode: 'overview' });
                 await focusPoints(overviewPoints, isFirstLoop ? refs.initialCameraPoseRef.current ?? undefined : undefined, 'overview');
                 isFirstLoop = false;
                 if (refs.warehouseTourRunRef.current !== runId) return;
@@ -82,9 +89,15 @@ export function useWarehouseTour(
                     if (!center) continue;
                     refs.isCameraMovingRef.current = true;
                     setLabelVisibility({ mode: 'focus', focusedKey: key });
+                    onTourStateChange?.({ mode: 'overview' });
                     await focusPoints([center], undefined, 'focus');
                     if (refs.warehouseTourRunRef.current !== runId) return;
                     showCachedCityPanels(key);
+                    onTourStateChange?.({
+                        mode: 'focus',
+                        cityName: key,
+                        displayData: cityDisplayDataByKey(key),
+                    });
                     refreshWarehouseLabels();
                     await wait(WAREHOUSE_TOUR_FOCUS_HOLD);
                 }
@@ -92,6 +105,7 @@ export function useWarehouseTour(
                 if (refs.warehouseTourRunRef.current !== runId) return;
                 refs.isCameraMovingRef.current = true;
                 setLabelVisibility({ mode: 'all' });
+                onTourStateChange?.({ mode: 'overview' });
                 await focusPoints(overviewPoints, undefined, 'overview');
                 if (refs.warehouseTourRunRef.current !== runId) return;
                 refreshWarehouseLabels();
@@ -100,7 +114,7 @@ export function useWarehouseTour(
         };
 
         void runTour();
-    }, [refs, focusPoints, refreshWarehouseLabels, setLabelVisibility, findCityKey, showCachedCityPanels]);
+    }, [refs, focusPoints, refreshWarehouseLabels, setLabelVisibility, findCityKey, showCachedCityPanels, onTourStateChange]);
 
     return { startWarehouseTour };
 }
