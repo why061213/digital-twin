@@ -101,6 +101,101 @@ export function useCityPanels(
             panelDiv.dataset.cityPanel = matchedKey;
 
             const charts: echarts.ECharts[] = [];
+            const titleBlockHeight =
+                Math.round(titleFontSize * 1.35) +
+                Math.max(5, Math.round(titleFontSize * 0.55)) +
+                Math.max(4, Math.round(titleFontSize * 0.42));
+
+            const responsiveChartOption = (
+                panel: PanelData,
+                chartWidth: number,
+                chartHeight: number,
+            ) => {
+                const baseOption = panel.option ?? {};
+                const series = Array.isArray(baseOption.series) ? baseOption.series : [];
+                const isCircularChart = panel.chartType === 'pie' || panel.chartType === 'ring';
+                const shortSide = Math.max(80, Math.min(chartWidth, chartHeight));
+                const labelFontSize = Math.max(9, Math.min(13, chartTextFontSize));
+                const circularLabelWidth = Math.max(34, Math.floor((chartWidth - shortSide * 0.62) / 2));
+
+                const nextSeries = series.map((item: any) => {
+                    if (item?.type !== 'pie') {
+                        return {
+                            ...item,
+                            symbolSize: panel.chartType === 'line' ? Math.max(4, Math.round(shortSide * 0.045)) : item?.symbolSize,
+                            barWidth: panel.chartType === 'bar' ? `${Math.max(24, Math.min(48, Math.round(chartWidth * 0.12)))}%` : item?.barWidth,
+                        };
+                    }
+
+                    return {
+                        ...item,
+                        center: item.center ?? ['50%', chartHeight < 145 ? '50%' : '52%'],
+                        radius: panel.chartType === 'ring'
+                            ? [
+                                `${Math.max(30, Math.min(44, Math.round(shortSide * 0.2)))}%`,
+                                `${Math.max(50, Math.min(66, Math.round(shortSide * 0.34)))}%`,
+                            ]
+                            : `${Math.max(44, Math.min(58, Math.round(shortSide * 0.32)))}%`,
+                        avoidLabelOverlap: true,
+                        minShowLabelAngle: chartWidth < 260 ? 10 : 5,
+                        label: {
+                            show: true,
+                            color: '#e2e8f0',
+                            fontSize: labelFontSize,
+                            width: circularLabelWidth,
+                            overflow: 'truncate',
+                            ellipsis: '…',
+                            ...(item.label ?? {}),
+                        },
+                        labelLine: {
+                            show: true,
+                            length: Math.max(8, Math.round(shortSide * 0.08)),
+                            length2: Math.max(8, Math.round(chartWidth * 0.06)),
+                            smooth: 0.25,
+                            ...(item.labelLine ?? {}),
+                        },
+                    };
+                });
+
+                return {
+                    ...baseOption,
+                    textStyle: {
+                        color: '#cbd5e1',
+                        fontSize: chartTextFontSize,
+                        ...(baseOption.textStyle ?? {}),
+                    },
+                    color: baseOption.color ?? ['#22d3ee', '#fbbf24', '#38bdf8', '#34d399', '#a78bfa'],
+                    tooltip: {
+                        trigger: 'item',
+                        backgroundColor: 'rgba(2,6,23,0.92)',
+                        borderColor: 'rgba(103,232,249,0.28)',
+                        textStyle: { color: '#e2e8f0' },
+                        ...(baseOption.tooltip ?? {}),
+                    },
+                    grid: !isCircularChart
+                        ? {
+                            left: Math.max(28, Math.round(chartWidth * 0.13)),
+                            right: Math.max(10, Math.round(chartWidth * 0.05)),
+                            top: Math.max(12, Math.round(chartHeight * 0.12)),
+                            bottom: Math.max(20, Math.round(chartHeight * 0.18)),
+                            containLabel: true,
+                            ...(baseOption.grid ?? {}),
+                        }
+                        : baseOption.grid,
+                    legend: isCircularChart
+                        ? {
+                            show: false,
+                            ...(baseOption.legend ?? {}),
+                            textStyle: {
+                                color: '#cbd5e1',
+                                fontSize: labelFontSize,
+                                ...(baseOption.legend?.textStyle ?? {}),
+                            },
+                        }
+                        : baseOption.legend,
+                    series: nextSeries,
+                };
+            };
 
             const renderTable = (section: HTMLDivElement, panel: PanelData) => {
                 const table = document.createElement('table');
@@ -131,43 +226,35 @@ export function useCityPanels(
                 section.appendChild(table);
             };
 
-            const renderChart = (section: HTMLDivElement, panel: PanelData) => {
+            const renderChart = (section: HTMLDivElement, panel: PanelData, chartHeight: number, chartWidth: number) => {
                 const chartDiv = document.createElement('div');
                 chartDiv.style.width = '100%';
-                chartDiv.style.height = `${panel.height ?? 120}px`;
+                chartDiv.style.height = `${chartHeight}px`;
+                chartDiv.style.minHeight = `${chartHeight}px`;
                 section.appendChild(chartDiv);
 
                 window.setTimeout(() => {
                     if (!chartDiv.isConnected) return;
                     const chart = echarts.init(chartDiv, undefined, { renderer: 'canvas' });
-                    chart.setOption({
-                        textStyle: { color: '#cbd5e1', fontSize: chartTextFontSize },
-                        color: ['#22d3ee', '#fbbf24', '#38bdf8', '#34d399', '#a78bfa'],
-                        tooltip: {
-                            trigger: 'item',
-                            backgroundColor: 'rgba(2,6,23,0.92)',
-                            borderColor: 'rgba(103,232,249,0.28)',
-                            textStyle: { color: '#e2e8f0' },
-                        },
-                        ...panel.option,
-                    });
+                    chart.setOption(responsiveChartOption(panel, chartWidth, chartHeight));
                     charts.push(chart);
                     refs.cityPanelChartsRef.current.set(matchedKey, charts);
+                    chart.resize({ width: chartWidth, height: chartHeight });
                 }, 0);
             };
 
             const panelSizes = panels.map((panel) => {
-                const titleBlockHeight =
-                    Math.round(titleFontSize * 1.35) +
-                    Math.max(5, Math.round(titleFontSize * 0.55)) +
-                    Math.max(4, Math.round(titleFontSize * 0.42));
                 const rowCount = Math.max(1, panel.rows?.length ?? 3);
                 const tableContentHeight = rowCount * Math.round(bodyFontSize * 1.95);
                 // 表格高度不能只按配置硬裁，否则标题 + 多行数据会被 overflow:hidden 切掉。
                 const tableMinHeight = panelPadding * 2 + titleBlockHeight + tableContentHeight;
+                const chartNaturalHeight = Math.max(
+                    panel.height ?? 110,
+                    Math.round(panelWidth * (panel.chartType === 'pie' || panel.chartType === 'ring' ? 0.58 : 0.48)),
+                );
                 const desiredHeight = panel.chartType === 'table'
                     ? Math.max(panel.height ?? 96, tableMinHeight)
-                    : (panel.height ?? 110) + Math.round(titleFontSize * 3.2);
+                    : panelPadding * 2 + titleBlockHeight + chartNaturalHeight;
 
                 return {
                     width: panelWidth,
@@ -262,7 +349,11 @@ export function useCityPanels(
                 if (panel.chartType === 'table') {
                     renderTable(section, panel);
                 } else {
-                    renderChart(section, panel);
+                    const chartHeight = Math.max(
+                        80,
+                        cardHeight - panelPadding * 2 - titleBlockHeight,
+                    );
+                    renderChart(section, panel, chartHeight, panelWidth - panelPadding * 2);
                 }
                 panelDiv.appendChild(section);
             });

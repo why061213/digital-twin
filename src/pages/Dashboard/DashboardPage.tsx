@@ -6,6 +6,8 @@ import ChinaMap3D from './modules/ChinaMap3D/index';
 import type { ChinaMap3DHandle } from './modules/ChinaMap3D';
 import RoadMap3D from './modules/RoadMap3D';
 import type { RoadMap3DHandle } from './modules/RoadMap3D';
+import DashboardSidePanels from './modules/DashboardSidePanels';
+import type { WarehouseFocusState, RoadGroupPanelState } from './modules/DashboardSidePanels';
 import { useDashboardRealtime } from './hooks/useDashboardRealtime';
 import type { RoadPathMessage, RouteOrder, TruckPositionMessage, WarehouseFocusPanel, WarehouseFocusStyle } from './hooks/useDashboardRealtime';
 import type { PanelData } from './modules/ChinaMap3D/types';
@@ -13,12 +15,18 @@ import {
     loadTruckPositionsFromCache,
     saveTruckPositionToCache,
 } from './modules/RoadMap3D/utils';
+import { RoadConstant } from '@/config/roadConstant';
 
 
 type ViewMode = 'warehouse' | 'chinaMap' | 'roadMap';
 type LonLat = [number, number];
 
 type ActiveRoute = RouteOrder & {
+    orderId?: string;
+    orderName?: string;
+    orderTotalTons?: number;
+    orderVehicleCount?: number;
+    pathKey?: string;
     startedAt: number;
     fallbackDuration: number;
     coordinates: LonLat[];
@@ -36,10 +44,16 @@ type RoadGroupSummary = {
     groupId: string;
     index: number;
     count: number;
+    groupScenario?: string;
+    displayTemplate?: string;
+    scenarioReason?: string;
+    groupKey?: string;
+    orderIds?: string[];
 };
 
 type RoadGroupsResponse = {
     groupSize: number;
+    strategy?: string;
     totalRoutes: number;
     groups: RoadGroupSummary[];
 };
@@ -67,7 +81,6 @@ const DEFAULT_SLOW_POSITION_QUERY_INTERVAL_MS = 15_000;
 const DEFAULT_REAL_SLOW_POSITION_QUERY_INTERVAL_MS = 300_000;
 const DEFAULT_POSITION_RENDER_TICK_MS = 500;
 const DEFAULT_LOW_SPEED_THRESHOLD_KMH = 50;
-const DEFAULT_ROAD_GROUP_DISPLAY_MS = 10_000;
 const DEFAULT_MAP_VIEW_TRANSITION_MS = 800;
 const DEFAULT_ROAD_GROUP_TRANSITION_MS = 420;
 const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api').replace(/\/$/, '');
@@ -87,11 +100,22 @@ const SLOW_POSITION_QUERY_INTERVAL_MS = SIMULATION_PROFILE === 'real'
     : readPositiveEnv('VITE_TRUCK_SLOW_POSITION_QUERY_INTERVAL_TEST_MS', DEFAULT_SLOW_POSITION_QUERY_INTERVAL_MS);
 const LOW_SPEED_THRESHOLD_KMH = readPositiveEnv('VITE_TRUCK_LOW_SPEED_THRESHOLD_KMH', DEFAULT_LOW_SPEED_THRESHOLD_KMH);
 const POSITION_RENDER_TICK_MS = readPositiveEnv('VITE_TRUCK_POSITION_RENDER_TICK_MS', DEFAULT_POSITION_RENDER_TICK_MS);
-const ROAD_GROUP_DISPLAY_MS = readPositiveEnv('VITE_ROAD_GROUP_DISPLAY_MS', DEFAULT_ROAD_GROUP_DISPLAY_MS);
 const MAP_VIEW_TRANSITION_MS = readPositiveEnv('VITE_MAP_VIEW_TRANSITION_MS', DEFAULT_MAP_VIEW_TRANSITION_MS);
 const MAP_VIEW_RELEASE_DELAY_MS = Math.max(220, Math.round(MAP_VIEW_TRANSITION_MS * 0.45));
 const ROAD_GROUP_TRANSITION_MS = readPositiveEnv('VITE_ROAD_GROUP_TRANSITION_MS', DEFAULT_ROAD_GROUP_TRANSITION_MS);
 const ROAD_GROUP_SWAP_DELAY_MS = Math.max(120, Math.round(ROAD_GROUP_TRANSITION_MS * 0.45));
+
+function roadGroupDisplayMs(routeCount: number) {
+    const safeRouteCount = Math.max(0, routeCount);
+    return Math.max(1_000, RoadConstant.displayBase + safeRouteCount * RoadConstant.displayAdd);
+}
+
+const ROAD_GROUP_STRATEGIES: Array<{ value: 'business-priority' | 'by-order' | 'by-path' | 'by-route'; label: string; badge?: string }> = [
+    { value: 'business-priority', label: '综合', badge: '荐' },
+    { value: 'by-order', label: '订单' },
+    { value: 'by-path', label: '共路' },
+    { value: 'by-route', label: '城市' },
+];
 
 function hashText(text: string) {
     return Array.from(text).reduce((sum, char) => sum + char.charCodeAt(0), 0);
@@ -231,11 +255,76 @@ function nextQueryInterval(speedKmh: number | null) {
     return POSITION_QUERY_INTERVAL_MS;
 }
 
+function initialPositionQueryDelay(lineId: string) {
+    return 800 + (hashText(lineId) % 4_200);
+}
+
+function routeProgressPatch(route: ActiveRoute, now: number) {
+    const currentDistance = predictedDistance(route, now);
+    return {
+        progress: route.pathLength > 0 ? clamp01(currentDistance / route.pathLength) : 0,
+        calibratedDistance: currentDistance,
+        pathLength: route.pathLength,
+        routeLengthKm: route.routeLengthKm,
+        speedKmh: route.speedKmh,
+    };
+}
+
+function applyTruckPositionToRoute(route: ActiveRoute, message: TruckPositionMessage, now: number) {
+    const pushedVelocity = message.velocity ?? message.speed;
+    const elapsedSinceLastCalibration = now - route.calibratedAt;
+    const nextDistance = projectDistanceOnPath(route.coordinates, message.position);
+    const measuredPathSpeed = elapsedSinceLastCalibration > 0
+        ? Math.max(0, (nextDistance - route.calibratedDistance) / elapsedSinceLastCalibration)
+        : route.pathSpeed;
+    const measuredSpeedKmh = elapsedSinceLastCalibration > 0 && route.pathLength > 0
+        ? measuredPathSpeed / route.pathLength * route.routeLengthKm * 3_600_000
+        : null;
+    const pushedPathSpeed = pushedVelocity
+        ? Math.sqrt(pushedVelocity[0] * pushedVelocity[0] + pushedVelocity[1] * pushedVelocity[1])
+        : null;
+
+    route.pathSpeed = pushedPathSpeed ?? measuredPathSpeed ?? route.pathSpeed;
+    route.speedKmh = message.speedKmh ?? measuredSpeedKmh ?? route.speedKmh;
+    route.calibratedAt = now;
+    route.calibratedDistance = nextDistance;
+    route.nextCalibrationAt = now + nextQueryInterval(route.speedKmh);
+    route.arrivalCheckRequested = false;
+}
+
+function mergeVisibleRouteOrders(previous: RouteOrder[], incoming: ActiveRoute[], completedIds: Set<string>) {
+    const merged = new Map<string, RouteOrder>();
+
+    previous.forEach((route) => {
+        merged.set(route.lineId, route);
+    });
+
+    incoming.forEach((route) => {
+        const old = merged.get(route.lineId);
+        merged.set(route.lineId, {
+            ...old,
+            ...route,
+            status: completedIds.has(route.lineId) ? '已完成' : route.status,
+        });
+    });
+
+    completedIds.forEach((lineId) => {
+        const route = merged.get(lineId);
+        if (route) {
+            merged.set(lineId, { ...route, status: '已完成' });
+        }
+    });
+
+    return Array.from(merged.values());
+}
+
 function DashboardPage() {
     const [view, setView] = useState<ViewMode>('warehouse');
-    const [, setRouteOrders] = useState<RouteOrder[]>([]);
+    const [routeOrders, setRouteOrders] = useState<RouteOrder[]>([]);
     const [roadGroups, setRoadGroups] = useState<RoadGroupSummary[]>([]);
     const [activeRoadGroupId, setActiveRoadGroupId] = useState<string | null>(null);
+    const [roadGroupStrategy, setRoadGroupStrategy] = useState<(typeof ROAD_GROUP_STRATEGIES)[number]['value']>('business-priority');
+    const [warehouseFocus, setWarehouseFocus] = useState<WarehouseFocusState | null>(null);
     const [isDispatching, setIsDispatching] = useState(false);
     const [isLoadingRoadGroup, setIsLoadingRoadGroup] = useState(false);
     const [chinaMapSession, setChinaMapSession] = useState(0);
@@ -249,6 +338,9 @@ function DashboardPage() {
     const [isRoadMapVisualReady, setIsRoadMapVisualReady] = useState(false);
     const [isRoadMapDataReady, setIsRoadMapDataReady] = useState(false);
     const [isRoadGroupFading, setIsRoadGroupFading] = useState(false);
+    const [manualCarId, setManualCarId] = useState('');
+    const [manualQueryStatus, setManualQueryStatus] = useState('');
+    const [isManualQuerying, setIsManualQuerying] = useState(false);
     const mapRef = useRef<ChinaMap3DHandle>(null);
     const roadMapRef = useRef<RoadMap3DHandle>(null);
     const chinaMapPrepareRunRef = useRef(0);
@@ -256,14 +348,26 @@ function DashboardPage() {
     const roadMapPrepareRunRef = useRef(0);
     const roadMapRevealTimerRef = useRef<number | null>(null);
     const activeRoutesRef = useRef<Map<string, ActiveRoute>>(new Map());
+    const routeOrdersRef = useRef<RouteOrder[]>([]);
     const positionRequestsRef = useRef<Set<string>>(new Set());
     const activeRoadGroupIdRef = useRef<string | null>(null);
-    const roadGroupRingRef = useRef<RoadGroupRing>({ head: null, tail: null, current: null, nodes: new Map() });
+    const roadGroupRingRef = useRef<RoadGroupRing>({head: null, tail: null, current: null, nodes: new Map()});
     const roadGroupSummariesRef = useRef<Map<string, RoadGroupSummary>>(new Map());
     const roadGroupRouteIdsRef = useRef<Map<string, Set<string>>>(new Map());
     const completedRouteIdsRef = useRef<Set<string>>(new Set());
     const routeGroupIdRef = useRef<Map<string, string>>(new Map());
     const roadGroupLoadingRef = useRef(false);
+    const warehouseDisplayDataRef = useRef<Map<string, Record<string, any>>>(new Map());
+    const roadPathRefreshTimerRef = useRef<number | null>(null);
+    const pendingRoadGroupRefreshIdRef = useRef<string | undefined>(undefined);
+    const roadGroupRefreshInFlightRef = useRef(false);
+    const queuedRoadGroupRefreshIdRef = useRef<string | null | undefined>(undefined);
+    const roadGroupAdvanceTimerRef = useRef<number | null>(null);
+    const skipNextRoadMapRefreshRef = useRef(false);
+
+    useEffect(() => {
+        routeOrdersRef.current = routeOrders;
+    }, [routeOrders]);
 
     const removeRoadGroupFromRing = useCallback((groupId: string) => {
         const ring = roadGroupRingRef.current;
@@ -306,6 +410,8 @@ function DashboardPage() {
         if (activeRoadGroupIdRef.current === groupId) {
             activeRoadGroupIdRef.current = null;
             setActiveRoadGroupId(null);
+            routeOrdersRef.current = [];
+            setRouteOrders([]);
         }
     }, []);
 
@@ -315,7 +421,7 @@ function DashboardPage() {
             roadGroupSummariesRef.current.set(group.groupId, group);
             if (ring.nodes.has(group.groupId)) return;
 
-            const node: RoadGroupNode = { groupId: group.groupId, next: null };
+            const node: RoadGroupNode = {groupId: group.groupId, next: null};
             ring.nodes.set(group.groupId, node);
             if (!ring.head || !ring.tail) {
                 ring.head = node;
@@ -364,6 +470,7 @@ function DashboardPage() {
             roadMapRevealTimerRef.current = null;
         }
         roadMapPrepareRunRef.current += 1;
+        skipNextRoadMapRefreshRef.current = false;
         setIsPreparingRoadMap(false);
         setIsRevealingRoadMap(false);
         setIsRoadMapVisualReady(false);
@@ -421,6 +528,11 @@ function DashboardPage() {
                 const currentPosition = predictedPosition(existing, now);
                 const updated: ActiveRoute = {
                     ...existing,
+                    orderId: message.orderId ?? existing.orderId,
+                    orderName: message.orderName ?? existing.orderName,
+                    orderTotalTons: message.orderTotalTons ?? existing.orderTotalTons,
+                    orderVehicleCount: message.orderVehicleCount ?? existing.orderVehicleCount,
+                    pathKey: message.pathKey ?? existing.pathKey,
                     from: message.from ?? existing.from,
                     to: message.to ?? existing.to,
                     fromCoords: message.coordinates[0],
@@ -446,6 +558,11 @@ function DashboardPage() {
 
             const route: ActiveRoute = {
                 lineId: message.lineId,
+                orderId: message.orderId,
+                orderName: message.orderName,
+                orderTotalTons: message.orderTotalTons,
+                orderVehicleCount: message.orderVehicleCount,
+                pathKey: message.pathKey,
                 from: message.from ?? '起点',
                 to: message.to ?? '目的地',
                 fromCoords: message.coordinates[0],
@@ -468,6 +585,7 @@ function DashboardPage() {
                 nextCalibrationAt: now,
             };
 
+            route.nextCalibrationAt = now + initialPositionQueryDelay(message.lineId);
             activeRoutesRef.current.set(route.lineId, route);
             return route;
         },
@@ -477,7 +595,6 @@ function DashboardPage() {
     const showRoutes = useCallback(
         (routes: ActiveRoute[]) => {
             const now = performance.now();
-            setRouteOrders(routes);
             routes.forEach((route) => {
                 syncRoadRoute(route);
                 renderTruckPosition(route, now);
@@ -487,14 +604,16 @@ function DashboardPage() {
     );
 
     const fetchRoadGroups = useCallback(async () => {
-        const response = await fetch(`${API_BASE_URL}/road/groups`);
+        const response = await fetch(`${API_BASE_URL}/road/groups?strategy=${encodeURIComponent(roadGroupStrategy)}`);
         if (!response.ok) throw new Error(`Groups request failed: ${response.status}`);
         const data = await response.json() as RoadGroupsResponse;
         const groups = data.groups ?? [];
+        roadGroupRingRef.current = {head: null, tail: null, current: null, nodes: new Map()};
+        roadGroupSummariesRef.current.clear();
         syncRoadGroupRing(groups);
         setRoadGroups(groups);
         return groups;
-    }, [syncRoadGroupRing]);
+    }, [roadGroupStrategy, syncRoadGroupRing]);
 
     const loadRoadGroup = useCallback(
         async (groupId: string) => {
@@ -502,7 +621,7 @@ function DashboardPage() {
             roadGroupLoadingRef.current = true;
             setIsLoadingRoadGroup(true);
             try {
-                const response = await fetch(`${API_BASE_URL}/road/groups/${encodeURIComponent(groupId)}/routes`);
+                const response = await fetch(`${API_BASE_URL}/road/groups/${encodeURIComponent(groupId)}/routes?strategy=${encodeURIComponent(roadGroupStrategy)}`);
                 if (!response.ok) throw new Error(`Group routes request failed: ${response.status}`);
                 const data = await response.json() as RoadGroupRoutesResponse;
                 const loadedGroupId = data.groupId || groupId;
@@ -533,9 +652,14 @@ function DashboardPage() {
                     completedRouteIdsRef.current.delete(route.lineId);
                 });
 
+                const visibleRoutes = isSameGroup
+                    ? mergeVisibleRouteOrders(routeOrdersRef.current, routes, completedRouteIdsRef.current)
+                    : routes;
+
                 activeRoutesRef.current = new Map(routes.map((route) => [route.lineId, route]));
                 setCurrentRoadGroup(loadedGroupId);
-                setRouteOrders(routes);
+                routeOrdersRef.current = visibleRoutes;
+                setRouteOrders(visibleRoutes);
 
                 const nextIds = new Set(routes.map((route) => route.lineId));
                 if (!isSameGroup) {
@@ -573,11 +697,16 @@ function DashboardPage() {
                 setIsLoadingRoadGroup(false);
             }
         },
-        [createActiveRoute, removeRoadGroupFromRing, renderTruckPosition, setCurrentRoadGroup, showRoutes, syncRoadRoute, view]
+        [createActiveRoute, removeRoadGroupFromRing, renderTruckPosition, roadGroupStrategy, setCurrentRoadGroup, showRoutes, syncRoadRoute, view]
     );
 
     const refreshRoadGroups = useCallback(
         async (preferredGroupId?: string) => {
+            if (roadGroupRefreshInFlightRef.current || roadGroupLoadingRef.current) {
+                queuedRoadGroupRefreshIdRef.current = preferredGroupId ?? null;
+                return;
+            }
+            roadGroupRefreshInFlightRef.current = true;
             try {
                 const groups = await fetchRoadGroups();
                 const currentGroupId = activeRoadGroupIdRef.current;
@@ -594,22 +723,49 @@ function DashboardPage() {
                 }
             } catch (error) {
                 console.warn('Road groups refresh failed', error);
+            } finally {
+                roadGroupRefreshInFlightRef.current = false;
+                const queuedGroupId = queuedRoadGroupRefreshIdRef.current;
+                queuedRoadGroupRefreshIdRef.current = undefined;
+                if (queuedGroupId !== undefined) {
+                    window.setTimeout(() => {
+                        void refreshRoadGroups(queuedGroupId ?? undefined);
+                    }, 120);
+                }
             }
         },
         [fetchRoadGroups, loadRoadGroup, setCurrentRoadGroup]
     );
 
-    const handleRoadPath = useCallback(
-        (message: RoadPathMessage) => {
-            // 新路线只刷新队列；已有可见 group 时不抢屏，等循环链表自然播到队尾的新 group。
-            void refreshRoadGroups(activeRoadGroupIdRef.current ?? message.groupId);
+    const scheduleRoadGroupRefresh = useCallback(
+        (preferredGroupId?: string | null, delay = 600) => {
+            if (preferredGroupId) {
+                pendingRoadGroupRefreshIdRef.current = preferredGroupId;
+            }
+            if (roadPathRefreshTimerRef.current !== null) {
+                window.clearTimeout(roadPathRefreshTimerRef.current);
+            }
+            roadPathRefreshTimerRef.current = window.setTimeout(() => {
+                roadPathRefreshTimerRef.current = null;
+                const pendingGroupId = pendingRoadGroupRefreshIdRef.current;
+                pendingRoadGroupRefreshIdRef.current = undefined;
+                void refreshRoadGroups(activeRoadGroupIdRef.current ?? pendingGroupId);
+            }, delay);
         },
         [refreshRoadGroups]
+    );
+
+    const handleRoadPath = useCallback(
+        (message: RoadPathMessage) => {
+            scheduleRoadGroupRefresh(message.groupId);
+        },
+        [scheduleRoadGroupRefresh]
     );
 
     const advanceRoadGroup = useCallback(async () => {
         const ring = roadGroupRingRef.current;
         if (!ring.head || roadGroupLoadingRef.current) return;
+        if (ring.nodes.size <= 1) return;
 
         let candidate = ring.current?.next ?? ring.head;
         const maxAttempts = Math.max(1, ring.nodes.size);
@@ -633,15 +789,10 @@ function DashboardPage() {
         completedRouteIdsRef.current.add(lineId);
         activeRoutesRef.current.delete(lineId);
         roadMapRef.current?.removeRoadPath(lineId);
-        const groupId = routeGroupIdRef.current.get(lineId) ?? activeRoadGroupIdRef.current;
-        if (groupId && isRoadGroupComplete(groupId)) {
-            removeRoadGroupFromRing(groupId);
-            window.setTimeout(() => void advanceRoadGroup(), 0);
-        }
         setRouteOrders((prev) =>
-            prev.map((item) => (item.lineId === lineId ? { ...item, status: '已完成' } : item))
+            prev.map((item) => (item.lineId === lineId ? {...item, status: '已完成'} : item))
         );
-    }, [advanceRoadGroup, isRoadGroupComplete, removeRoadGroupFromRing]);
+    }, []);
 
     const handleRouteRaise = useCallback((_order: RouteOrder) => {
         // 城市飞线事件由 ChinaMap3D 处理；道路级地图只加载后端分组后的路线。
@@ -689,7 +840,14 @@ function DashboardPage() {
             });
 
             renderTruckPosition(route, now);
-            setRouteOrders((prev) => prev.map((item) => (item.lineId === route.lineId ? { ...item, speedKmh: route.speedKmh } : item)));
+            setRouteOrders((prev) => {
+                const next = prev.map((item) => (item.lineId === route.lineId ? {
+                    ...item,
+                    ...routeProgressPatch(route, now),
+                } : item));
+                routeOrdersRef.current = next;
+                return next;
+            });
         },
         [finishRoute, renderTruckPosition]
     );
@@ -717,6 +875,7 @@ function DashboardPage() {
     );
 
     const requestViewChange = useCallback((nextView: ViewMode) => {
+        setWarehouseFocus(null);
         if (nextView === 'chinaMap') {
             if (view === 'chinaMap' || isPreparingChinaMap || isRevealingChinaMap) return;
             cancelRoadMapTransition();
@@ -733,6 +892,7 @@ function DashboardPage() {
             if (view === 'roadMap' || isPreparingRoadMap || isRevealingRoadMap) return;
             cancelChinaMapTransition();
             roadMapPrepareRunRef.current += 1;
+            skipNextRoadMapRefreshRef.current = false;
             setIsPreparingRoadMap(true);
             setIsRevealingRoadMap(false);
             setIsRoadMapVisualReady(false);
@@ -759,7 +919,7 @@ function DashboardPage() {
         setIsDispatching(true);
         requestViewChange('roadMap');
         try {
-            const response = await fetch(`${API_BASE_URL}/road/dispatch`, { method: 'POST' });
+            const response = await fetch(`${API_BASE_URL}/road/dispatch`, {method: 'POST'});
             if (!response.ok) throw new Error(`Dispatch failed: ${response.status}`);
             const route = await response.json() as RoadPathMessage;
             await refreshRoadGroups(activeRoadGroupIdRef.current ?? route.groupId);
@@ -770,17 +930,60 @@ function DashboardPage() {
         }
     }, [isDispatching, refreshRoadGroups, requestViewChange]);
 
+    const requestBulkDispatch = useCallback(async () => {
+        if (isDispatching) return;
+        setIsDispatching(true);
+        try {
+            const response = await fetch(`${API_BASE_URL}/road/dispatch/bulk?vehicleCount=24`, {method: 'POST'});
+            if (response.status === 404) {
+                // 后端未重启或暂未部署大宗订单接口时，退回普通调度兜底，避免按钮不可用。
+                // 注意：兜底模式不具备“同一订单多车”的业务语义，只用于临时演示。
+                for (let i = 0; i < 8; i++) {
+                    await fetch(`${API_BASE_URL}/road/dispatch`, {method: 'POST'});
+                }
+            } else {
+                if (!response.ok) throw new Error(`Bulk dispatch failed: ${response.status}`);
+                await response.json();
+            }
+            // 大宗订单只是向后端追加一批路线；只有当前已经在道路地图时才刷新显示，不主动切换视图。
+            if (view === 'roadMap') {
+            }
+        } catch (error) {
+            console.warn('Bulk route dispatch failed', error);
+        } finally {
+            setIsDispatching(false);
+        }
+    }, [isDispatching]);
+
 
     const handleWarehouseUpdate = useCallback((cityName: string, action: string, displayData: Record<string, any>) => {
         console.log('🏗️ 处理仓库更新:', cityName, action, displayData);
         const hasDisplayData = Boolean(displayData && Object.keys(displayData).length > 0);
         if (action !== 'fall' || hasDisplayData) {
+            warehouseDisplayDataRef.current.set(cityName, displayData ?? {});
             mapRef.current?.riseCity(cityName);
             mapRef.current?.updateCityData(cityName, displayData);
         } else if (action === 'fall') {
+            warehouseDisplayDataRef.current.delete(cityName);
             mapRef.current?.fallCity(cityName);
             mapRef.current?.updateCityData(cityName, null);
         }
+    }, []);
+
+    const handleWarehouseTourStateChange = useCallback((state: {
+        mode: 'overview' | 'focus';
+        cityName?: string;
+        displayData?: Record<string, any>
+    }) => {
+        if (state.mode !== 'focus' || !state.cityName) {
+            setWarehouseFocus(null);
+            return;
+        }
+
+        setWarehouseFocus({
+            cityName: state.cityName,
+            displayData: state.displayData ?? warehouseDisplayDataRef.current.get(state.cityName) ?? {},
+        });
     }, []);
 
     const handleCameraControl = useCallback((cityNames: string[], mode: string) => {
@@ -814,6 +1017,7 @@ function DashboardPage() {
         try {
             await refreshRoadGroups(activeRoadGroupIdRef.current ?? undefined);
             if (roadMapPrepareRunRef.current !== prepareRunId) return;
+            skipNextRoadMapRefreshRef.current = true;
             setIsRoadMapDataReady(true);
         } catch (error) {
             console.warn('Road map prepare failed', error);
@@ -828,7 +1032,7 @@ function DashboardPage() {
     const requestWarehouseSnapshot = useCallback(async (prepareRunId: number) => {
         try {
             // 1. 推送仓库快照，让所有城市升起
-            const response = await fetch(`${API_BASE_URL}/warehouse/snapshot/push`, { method: 'POST' });
+            const response = await fetch(`${API_BASE_URL}/warehouse/snapshot/push`, {method: 'POST'});
             if (!response.ok) throw new Error(`Warehouse snapshot request failed: ${response.status}`);
             const messages = await response.json() as Array<{
                 cityName: string;
@@ -892,18 +1096,35 @@ function DashboardPage() {
 
     useEffect(() => {
         if (view !== 'roadMap') return;
+        if (skipNextRoadMapRefreshRef.current) {
+            skipNextRoadMapRefreshRef.current = false;
+            return;
+        }
         void refreshRoadGroups(activeRoadGroupIdRef.current ?? undefined);
     }, [refreshRoadGroups, view]);
 
     useEffect(() => {
         if (view !== 'roadMap') return;
+        if (roadGroups.length <= 1) return;
 
-        const timer = window.setInterval(() => {
+        const currentGroup = activeRoadGroupIdRef.current
+            ? roadGroupSummariesRef.current.get(activeRoadGroupIdRef.current)
+            : null;
+        const routeCount = currentGroup?.count ?? routeOrdersRef.current.length;
+        const delay = roadGroupDisplayMs(routeCount);
+
+        roadGroupAdvanceTimerRef.current = window.setTimeout(() => {
+            roadGroupAdvanceTimerRef.current = null;
             void advanceRoadGroup();
-        }, ROAD_GROUP_DISPLAY_MS);
+        }, delay);
 
-        return () => window.clearInterval(timer);
-    }, [advanceRoadGroup, view]);
+        return () => {
+            if (roadGroupAdvanceTimerRef.current !== null) {
+                window.clearTimeout(roadGroupAdvanceTimerRef.current);
+                roadGroupAdvanceTimerRef.current = null;
+            }
+        };
+    }, [activeRoadGroupId, advanceRoadGroup, roadGroups, routeOrders.length, view]);
 
     useEffect(() => {
         if (!isPreparingChinaMap) return;
@@ -956,6 +1177,14 @@ function DashboardPage() {
                 window.clearTimeout(roadMapRevealTimerRef.current);
                 roadMapRevealTimerRef.current = null;
             }
+            if (roadPathRefreshTimerRef.current !== null) {
+                window.clearTimeout(roadPathRefreshTimerRef.current);
+                roadPathRefreshTimerRef.current = null;
+            }
+            if (roadGroupAdvanceTimerRef.current !== null) {
+                window.clearTimeout(roadGroupAdvanceTimerRef.current);
+                roadGroupAdvanceTimerRef.current = null;
+            }
         };
     }, []);
 
@@ -976,8 +1205,10 @@ function DashboardPage() {
     useEffect(() => {
         const timer = window.setInterval(() => {
             const now = performance.now();
+            const progressUpdates = new Map<string, ReturnType<typeof routeProgressPatch>>();
             activeRoutesRef.current.forEach((route) => {
                 renderTruckPosition(route, now);
+                progressUpdates.set(route.lineId, routeProgressPatch(route, now));
                 const reachedPredictedEnd = route.pathLength > 0 && predictedDistance(route, now) >= route.pathLength - 0.0001;
                 if (reachedPredictedEnd && !route.arrivalCheckRequested) {
                     route.arrivalCheckRequested = true;
@@ -990,6 +1221,20 @@ function DashboardPage() {
                     void requestTruckPosition(route.lineId);
                 }
             });
+            if (progressUpdates.size > 0) {
+                setRouteOrders((prev) => {
+                    let changed = false;
+                    const next = prev.map((item) => {
+                        const update = progressUpdates.get(item.lineId);
+                        if (!update) return item;
+                        changed = true;
+                        return {...item, ...update};
+                    });
+                    if (!changed) return prev;
+                    routeOrdersRef.current = next;
+                    return next;
+                });
+            }
         }, POSITION_RENDER_TICK_MS);
 
         return () => window.clearInterval(timer);
@@ -1009,7 +1254,7 @@ function DashboardPage() {
             <>
                 {view === 'warehouse' && (
                     <div className="absolute inset-0">
-                        <Warehouse3D key="warehouse" />
+                        <Warehouse3D key="warehouse"/>
                     </div>
                 )}
                 {showRoadMapLayer && (
@@ -1043,6 +1288,7 @@ function DashboardPage() {
                             key={`chinaMap-${chinaMapSession}`}
                             ref={mapRef}
                             onVisualReady={handleChinaMapVisualReady}
+                            onTourStateChange={handleWarehouseTourStateChange}
                         />
                     </div>
                 )}
@@ -1079,7 +1325,8 @@ function DashboardPage() {
     );
 
     const roadGroupQueue = view === 'roadMap' && roadGroups.length > 0 && (
-        <div className="absolute left-4 top-4 z-40 flex max-w-[calc(100%-2rem)] gap-2 overflow-x-auto rounded-md border border-white/10 bg-slate-950/65 p-2 text-xs text-slate-300 shadow-xl backdrop-blur-md pointer-events-auto">
+        <div
+            className="no-scrollbar absolute left-4 top-4 z-40 flex max-w-[calc(100%-2rem)] gap-2 overflow-x-auto rounded-md border border-white/10 bg-slate-950/65 p-2 text-xs text-slate-300 shadow-xl backdrop-blur-md pointer-events-auto">
             {roadGroups.map((group) => (
                 <button
                     key={group.groupId}
@@ -1107,17 +1354,162 @@ function DashboardPage() {
         </button>
     );
 
+    const bulkDispatchButton = view === 'roadMap' && (
+        <button
+            onClick={requestBulkDispatch}
+            disabled={isDispatching}
+            className="absolute bottom-20 left-[calc(50%+5.8rem)] z-40 rounded-full border border-cyan-300/30 bg-cyan-400/10 px-4 py-2 text-xs text-cyan-100 shadow-lg backdrop-blur-md transition-all pointer-events-auto hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+            模拟大宗订单
+        </button>
+    );
+    const handleManualQuery = useCallback(async () => {
+        const carId = manualCarId.trim();
+        if (!carId || isManualQuerying) return;
+
+        setIsManualQuerying(true);
+        setManualQueryStatus('查询中...');
+        try {
+            const res = await fetch(`${API_BASE_URL}/road/routes/query-position`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ carId }),
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                throw new Error(data.error || `Manual position query failed: ${res.status}`);
+            }
+            if (!data.found) {
+                setManualQueryStatus('未查询到该车辆位置');
+                return;
+            }
+
+            roadMapRef.current?.updateTruckPosition(
+                `manual-${carId}`,
+                [data.lng, data.lat],
+                { plate: carId, speedKmh: data.speedKmh, status: '临时查询' },
+            );
+            setManualQueryStatus(`经度 ${Number(data.lng).toFixed(5)} / 纬度 ${Number(data.lat).toFixed(5)} / ${Math.round(Number(data.speedKmh) || 0)} km/h`);
+        } catch (error) {
+            console.error('手动查询失败', error);
+            setManualQueryStatus('查询失败，请检查车辆 ID 或后端接口');
+        } finally {
+            setIsManualQuerying(false);
+        }
+    }, [isManualQuerying, manualCarId]);
+
+    const manualPositionLookup = view === 'roadMap' && (
+        <div className="absolute bottom-36 left-4 z-40 w-[min(24rem,calc(100%-2rem))] rounded-md border border-white/10 bg-slate-950/75 p-2 text-xs text-slate-300 shadow-xl backdrop-blur-md pointer-events-auto">
+            <div className="flex gap-2">
+                <input
+                    type="text"
+                    value={manualCarId}
+                    onChange={(e) => setManualCarId(e.target.value)}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                            void handleManualQuery();
+                        }
+                    }}
+                    placeholder="输入车辆ID"
+                    className="min-w-0 flex-1 rounded border border-white/10 bg-slate-900/80 px-3 py-1.5 text-xs text-white outline-none transition-colors placeholder:text-slate-500 focus:border-cyan-300/45"
+                />
+                <button
+                    onClick={() => void handleManualQuery()}
+                    disabled={isManualQuerying || !manualCarId.trim()}
+                    className="shrink-0 rounded border border-cyan-400/30 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-200 transition-colors hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                    {isManualQuerying ? '查询中' : '查询位置'}
+                </button>
+            </div>
+            {manualQueryStatus && (
+                <div className="mt-2 truncate text-[11px] text-slate-400" title={manualQueryStatus}>
+                    {manualQueryStatus}
+                </div>
+            )}
+        </div>
+    );
+
+
+    const roadStrategyTabs = view === 'roadMap' && (
+        <div
+            className="absolute right-[calc(25%+2rem)] top-24 z-50 rounded-full border border-white/10 bg-slate-950/75 p-2 shadow-xl backdrop-blur-md pointer-events-auto">
+            <div className="relative flex">
+                <span
+                    className="absolute top-0 h-8 w-16 rounded-full border border-cyan-300/25 bg-cyan-300/15 shadow-[0_0_18px_rgba(34,211,238,0.18)] transition-transform duration-300"
+                    style={{
+                        transform: `translateX(${ROAD_GROUP_STRATEGIES.findIndex((item) => item.value === roadGroupStrategy) * 4}rem)`,
+                    }}
+                />
+                {ROAD_GROUP_STRATEGIES.map((item) => (
+                    <button
+                        key={item.value}
+                        onClick={() => {
+                            setRoadGroupStrategy(item.value);
+                            setCurrentRoadGroup(null);
+                            activeRoutesRef.current.clear();
+                            routeOrdersRef.current = [];
+                            setRouteOrders([]);
+                            roadMapRef.current?.clearRoads();
+                        }}
+                        className={`relative z-10 flex h-8 w-16 items-center justify-center rounded-full text-xs transition-colors ${
+                            roadGroupStrategy === item.value ? 'text-cyan-100' : 'text-slate-400 hover:text-slate-100'
+                        }`}
+                    >
+                        {item.label}
+                        {item.badge && (
+                            <span
+                                className="absolute -right-0.5 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-cyan-300 px-1 text-[9px] text-slate-950">
+                                {item.badge}
+                            </span>
+                        )}
+                    </button>
+                ))}
+            </div>
+        </div>
+    );
+
+    const activeRoadGroup = activeRoadGroupId
+        ? roadGroups.find((group) => group.groupId === activeRoadGroupId) ?? null
+        : null;
+    const shouldShowRoadPanel = view === 'roadMap' && Boolean(activeRoadGroup);
+    const sidePanelMode: 'hidden' | 'warehouse_focus' | 'road_group_focus' =
+        view === 'chinaMap' && warehouseFocus
+            ? 'warehouse_focus'
+            : shouldShowRoadPanel
+                ? 'road_group_focus'
+                : 'hidden';
+    const roadPanelState: RoadGroupPanelState | null = activeRoadGroup
+        ? {
+            groupId: activeRoadGroup.groupId,
+            groupIndex: activeRoadGroup.index,
+            groupCount: activeRoadGroup.count,
+            groupKey: activeRoadGroup.groupKey,
+            groupScenario: activeRoadGroup.groupScenario,
+            scenarioReason: activeRoadGroup.scenarioReason,
+            orderIds: activeRoadGroup.orderIds,
+            routes: routeOrders,
+        }
+        : null;
+
     return (
         <MainLayout
-            header={<Header />}
+            header={<Header/>}
             // leftPanel={<InventoryStats />}
             leftPanel={null}
             centerPanel={
                 <div className="relative h-full w-full">
                     {renderCenterPanel()}
+                    <DashboardSidePanels
+                        mode={sidePanelMode}
+                        warehouseFocus={warehouseFocus}
+                        roadGroup={roadPanelState}
+                    />
                     {roadGroupQueue}
+                    {roadStrategyTabs}
                     {viewButtons}
                     {dispatchButton}
+                    {bulkDispatchButton}
+                    {manualPositionLookup}
                 </div>
             }
             rightPanel={null}

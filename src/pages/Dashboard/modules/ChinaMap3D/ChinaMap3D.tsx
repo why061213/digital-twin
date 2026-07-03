@@ -12,9 +12,10 @@ import { useMapScene } from './hooks/useMapScene';
 
 type ChinaMap3DProps = {
     onVisualReady?: () => void;
+    onTourStateChange?: (state: { mode: 'overview' | 'focus'; cityName?: string; displayData?: Record<string, any> }) => void;
 };
 
-const ChinaMap3D = forwardRef<ChinaMap3DHandle, ChinaMap3DProps>(({ onVisualReady }, ref) => {
+const ChinaMap3D = forwardRef<ChinaMap3DHandle, ChinaMap3DProps>(({ onVisualReady, onTourStateChange }, ref) => {
     const refs = useChinaMapRefs();
 
     const labels = useWarehouseLabels(refs);
@@ -29,6 +30,7 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle, ChinaMap3DProps>(({ onVisualRead
         labels.setLabelVisibility,
         cities.findCityKey,
         panels.showCachedCityPanels,
+        onTourStateChange,
     );
     const hover = useMapHover(refs);
 
