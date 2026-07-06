@@ -18,6 +18,7 @@ export type RoadObjectInfo = {
     speedKmh?: number | null;
     routeLengthKm?: number;
     orderId?: string;
+    orderFamilyId?: string;
     orderName?: string;
     pathKey?: string;
     manualMarker?: boolean;

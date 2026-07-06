@@ -21,6 +21,7 @@ export type RoadPathMessage = {
     lineId: string;
     groupId?: string;
     orderId?: string;
+    orderFamilyId?: string;
     orderName?: string;
     orderTotalTons?: number;
     orderVehicleCount?: number;
@@ -142,17 +143,8 @@ function createRouteOrder(line: CityRaiseMessage): RouteOrder {
     };
 }
 
-export function useDashboardRealtime({
-    onCityRaise,
-    onCityFall,
-    onRouteRaise,
-    onRouteFall,
-    onRoadPath,
-    onTruckPosition,
-    onWarehouseUpdate,
-    onWarehouseFocus,
-    onCameraControl,
-}: UseDashboardRealtimeOptions) {
+export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
+    const optionsRef = useRef(options);
     const activeLinesRef = useRef<Map<string, { from: string; to: string; startedAt: number }>>(new Map());
     const activeCityCountRef = useRef<Map<string, number>>(new Map());
     const cityFallTimersRef = useRef<Map<string, number>>(new Map());
@@ -160,6 +152,8 @@ export function useDashboardRealtime({
     const heartbeatTimerRef = useRef<number | null>(null);
     const reconnectAttemptRef = useRef(0);
     const lastMessageAtRef = useRef(0);
+
+    optionsRef.current = options;
 
     useEffect(() => {
         let socket: WebSocket | null = null;
@@ -169,7 +163,7 @@ export function useDashboardRealtime({
         const riseTrackedCity = (cityName: string) => {
             const normalized = normalizeCityName(cityName);
             activeCityCountRef.current.set(normalized, (activeCityCountRef.current.get(normalized) ?? 0) + 1);
-            onCityRaise(normalized);
+            optionsRef.current.onCityRaise(normalized);
         };
 
         const fallTrackedCity = (cityName: string) => {
@@ -183,7 +177,7 @@ export function useDashboardRealtime({
             }
 
             activeCityCountRef.current.delete(normalized);
-            onCityFall(normalized);
+            optionsRef.current.onCityFall(normalized);
         };
 
         const handleMessage = (message: DashboardMessage) => {
@@ -196,7 +190,7 @@ export function useDashboardRealtime({
                     cityFallTimersRef.current.delete(line.lineId);
                 }
                 activeLinesRef.current.set(line.lineId, { from: line.from, to: line.to, startedAt: performance.now() });
-                onRouteRaise(createRouteOrder(line));
+                optionsRef.current.onRouteRaise(createRouteOrder(line));
                 riseTrackedCity(line.from);
                 riseTrackedCity(line.to);
                 return;
@@ -208,7 +202,7 @@ export function useDashboardRealtime({
                 if (!activeLine) return;
 
                 activeLinesRef.current.delete(line.lineId);
-                onRouteFall?.(line.lineId);
+                optionsRef.current.onRouteFall?.(line.lineId);
 
                 const elapsed = performance.now() - activeLine.startedAt;
                 const remaining = Math.max(0, ROUTE_MIN_LIFETIME - elapsed);
@@ -228,28 +222,28 @@ export function useDashboardRealtime({
             }
 
             if (message.type === 'road_path') {
-                onRoadPath?.(message as RoadPathMessage);
+                optionsRef.current.onRoadPath?.(message as RoadPathMessage);
                 return;
             }
 
             if (message.type === 'truck_position') {
-                onTruckPosition?.(message as TruckPositionMessage);
+                optionsRef.current.onTruckPosition?.(message as TruckPositionMessage);
             }
 
-            if (message.type === 'warehouse_update' && onWarehouseUpdate) {
+            if (message.type === 'warehouse_update' && optionsRef.current.onWarehouseUpdate) {
                 const { cityName, action, displayData } = message as any;
                 console.log('🏭 仓库更新:', cityName, action, displayData);
-                onWarehouseUpdate(cityName, action, displayData);
+                optionsRef.current.onWarehouseUpdate(cityName, action, displayData ??{});
                 return;
             }
-            if (message.type === 'warehouse_focus' && onWarehouseFocus) {
+            if (message.type === 'warehouse_focus' && optionsRef.current.onWarehouseFocus) {
                 const { cityName, panels, style } = message as any;
-                onWarehouseFocus(cityName, panels ?? [], style);
+                optionsRef.current.onWarehouseFocus(cityName, panels ?? [], style);
                 return;
             }
-            if (message.type === 'camera_control' && onCameraControl) {
+            if (message.type === 'camera_control' && optionsRef.current.onCameraControl) {
                 const { cityNames, mode } = message as any;
-                onCameraControl(cityNames, mode);
+                optionsRef.current.onCameraControl(cityNames, mode);
                 return;
             }
         };
@@ -343,5 +337,5 @@ export function useDashboardRealtime({
             cityFallTimersRef.current.clear();
             socket?.close(1000, 'component unmounted');
         };
-    }, [onCityFall, onCityRaise, onRoadPath, onRouteFall, onRouteRaise, onTruckPosition, onWarehouseUpdate, onWarehouseFocus, onCameraControl]);
+    }, []);
 }
