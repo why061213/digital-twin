@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { DragControls } from 'three/examples/jsm/controls/DragControls.js';
 
 export type RoadMap3DHandle = {
     setRoadPath: (coords: [number, number][]) => void;
@@ -18,6 +17,7 @@ export type RoadObjectInfo = {
     status?: string;
     speedKmh?: number | null;
     routeLengthKm?: number;
+    manualMarker?: boolean;
 };
 
 export interface RoadState {
@@ -28,7 +28,6 @@ export interface RoadState {
     truck: THREE.Mesh;
     truckGlow: THREE.Mesh;
     selectionRing: THREE.Mesh;
-    dragControls: DragControls | null;
     samples: THREE.Vector3[];
     cumulativeLengths: number[];
     totalLength: number;

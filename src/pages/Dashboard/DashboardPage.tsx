@@ -20,6 +20,7 @@ import { RoadConstant } from '@/config/roadConstant';
 
 type ViewMode = 'warehouse' | 'chinaMap' | 'roadMap';
 type LonLat = [number, number];
+type RoadGroupStrategy = 'business-priority' | 'by-order' | 'by-path' | 'by-route';
 
 type ActiveRoute = RouteOrder & {
     orderId?: string;
@@ -110,12 +111,25 @@ function roadGroupDisplayMs(routeCount: number) {
     return Math.max(1_000, RoadConstant.displayBase + safeRouteCount * RoadConstant.displayAdd);
 }
 
-const ROAD_GROUP_STRATEGIES: Array<{ value: 'business-priority' | 'by-order' | 'by-path' | 'by-route'; label: string; badge?: string }> = [
+const ROAD_GROUP_STRATEGIES: Array<{ value: RoadGroupStrategy; label: string; badge?: string }> = [
     { value: 'business-priority', label: '综合', badge: '荐' },
     { value: 'by-order', label: '订单' },
     { value: 'by-path', label: '共路' },
     { value: 'by-route', label: '城市' },
 ];
+
+function createRoadGroupRing(): RoadGroupRing {
+    return {head: null, tail: null, current: null, nodes: new Map()};
+}
+
+function ensureRoadGroupRing(rings: Map<RoadGroupStrategy, RoadGroupRing>, strategy: RoadGroupStrategy) {
+    let ring = rings.get(strategy);
+    if (!ring) {
+        ring = createRoadGroupRing();
+        rings.set(strategy, ring);
+    }
+    return ring;
+}
 
 function hashText(text: string) {
     return Array.from(text).reduce((sum, char) => sum + char.charCodeAt(0), 0);
@@ -323,7 +337,7 @@ function DashboardPage() {
     const [routeOrders, setRouteOrders] = useState<RouteOrder[]>([]);
     const [roadGroups, setRoadGroups] = useState<RoadGroupSummary[]>([]);
     const [activeRoadGroupId, setActiveRoadGroupId] = useState<string | null>(null);
-    const [roadGroupStrategy, setRoadGroupStrategy] = useState<(typeof ROAD_GROUP_STRATEGIES)[number]['value']>('business-priority');
+    const [roadGroupStrategy, setRoadGroupStrategy] = useState<RoadGroupStrategy>('business-priority');
     const [warehouseFocus, setWarehouseFocus] = useState<WarehouseFocusState | null>(null);
     const [isDispatching, setIsDispatching] = useState(false);
     const [isLoadingRoadGroup, setIsLoadingRoadGroup] = useState(false);
@@ -338,6 +352,7 @@ function DashboardPage() {
     const [isRoadMapVisualReady, setIsRoadMapVisualReady] = useState(false);
     const [isRoadMapDataReady, setIsRoadMapDataReady] = useState(false);
     const [isRoadGroupFading, setIsRoadGroupFading] = useState(false);
+    const [roadGroupAdvanceTick, setRoadGroupAdvanceTick] = useState(0);
     const [manualCarId, setManualCarId] = useState('');
     const [manualQueryStatus, setManualQueryStatus] = useState('');
     const [isManualQuerying, setIsManualQuerying] = useState(false);
@@ -351,9 +366,9 @@ function DashboardPage() {
     const routeOrdersRef = useRef<RouteOrder[]>([]);
     const positionRequestsRef = useRef<Set<string>>(new Set());
     const activeRoadGroupIdRef = useRef<string | null>(null);
-    const roadGroupRingRef = useRef<RoadGroupRing>({head: null, tail: null, current: null, nodes: new Map()});
-    const roadGroupSummariesRef = useRef<Map<string, RoadGroupSummary>>(new Map());
-    const roadGroupRouteIdsRef = useRef<Map<string, Set<string>>>(new Map());
+    const roadGroupRingsRef = useRef<Map<RoadGroupStrategy, RoadGroupRing>>(new Map());
+    const roadGroupSummariesByStrategyRef = useRef<Map<RoadGroupStrategy, Map<string, RoadGroupSummary>>>(new Map());
+    const roadGroupRouteIdsByStrategyRef = useRef<Map<RoadGroupStrategy, Map<string, Set<string>>>>(new Map());
     const completedRouteIdsRef = useRef<Set<string>>(new Set());
     const routeGroupIdRef = useRef<Map<string, string>>(new Map());
     const roadGroupLoadingRef = useRef(false);
@@ -369,8 +384,29 @@ function DashboardPage() {
         routeOrdersRef.current = routeOrders;
     }, [routeOrders]);
 
+    const currentRoadGroupRing = useCallback(
+        () => ensureRoadGroupRing(roadGroupRingsRef.current, roadGroupStrategy),
+        [roadGroupStrategy]
+    );
+    const currentRoadGroupSummaries = useCallback(() => {
+        let summaries = roadGroupSummariesByStrategyRef.current.get(roadGroupStrategy);
+        if (!summaries) {
+            summaries = new Map();
+            roadGroupSummariesByStrategyRef.current.set(roadGroupStrategy, summaries);
+        }
+        return summaries;
+    }, [roadGroupStrategy]);
+    const currentRoadGroupRouteIds = useCallback(() => {
+        let routeIds = roadGroupRouteIdsByStrategyRef.current.get(roadGroupStrategy);
+        if (!routeIds) {
+            routeIds = new Map();
+            roadGroupRouteIdsByStrategyRef.current.set(roadGroupStrategy, routeIds);
+        }
+        return routeIds;
+    }, [roadGroupStrategy]);
+
     const removeRoadGroupFromRing = useCallback((groupId: string) => {
-        const ring = roadGroupRingRef.current;
+        const ring = currentRoadGroupRing();
         const target = ring.nodes.get(groupId);
         if (!target) return;
 
@@ -404,8 +440,8 @@ function DashboardPage() {
         }
 
         ring.nodes.delete(groupId);
-        roadGroupSummariesRef.current.delete(groupId);
-        roadGroupRouteIdsRef.current.delete(groupId);
+        currentRoadGroupSummaries().delete(groupId);
+        currentRoadGroupRouteIds().delete(groupId);
         setRoadGroups((prev) => prev.filter((group) => group.groupId !== groupId));
         if (activeRoadGroupIdRef.current === groupId) {
             activeRoadGroupIdRef.current = null;
@@ -413,12 +449,13 @@ function DashboardPage() {
             routeOrdersRef.current = [];
             setRouteOrders([]);
         }
-    }, []);
+    }, [currentRoadGroupRing, currentRoadGroupRouteIds, currentRoadGroupSummaries]);
 
     const syncRoadGroupRing = useCallback((groups: RoadGroupSummary[]) => {
-        const ring = roadGroupRingRef.current;
+        const ring = currentRoadGroupRing();
+        const summaries = currentRoadGroupSummaries();
         groups.forEach((group) => {
-            roadGroupSummariesRef.current.set(group.groupId, group);
+            summaries.set(group.groupId, group);
             if (ring.nodes.has(group.groupId)) return;
 
             const node: RoadGroupNode = {groupId: group.groupId, next: null};
@@ -433,24 +470,24 @@ function DashboardPage() {
                 ring.tail = node;
             }
         });
-    }, []);
+    }, [currentRoadGroupRing, currentRoadGroupSummaries]);
 
     const isRoadGroupComplete = useCallback((groupId: string) => {
-        const routeIds = roadGroupRouteIdsRef.current.get(groupId);
+        const routeIds = currentRoadGroupRouteIds().get(groupId);
         if (!routeIds || routeIds.size === 0) return false;
         return Array.from(routeIds).every((lineId) => completedRouteIdsRef.current.has(lineId));
-    }, []);
+    }, [currentRoadGroupRouteIds]);
 
     const setCurrentRoadGroup = useCallback((groupId: string | null) => {
         activeRoadGroupIdRef.current = groupId;
         setActiveRoadGroupId(groupId);
 
         if (!groupId) return;
-        const node = roadGroupRingRef.current.nodes.get(groupId);
+        const node = currentRoadGroupRing().nodes.get(groupId);
         if (node) {
-            roadGroupRingRef.current.current = node;
+            currentRoadGroupRing().current = node;
         }
-    }, []);
+    }, [currentRoadGroupRing]);
 
     const cancelChinaMapTransition = useCallback(() => {
         if (chinaMapRevealTimerRef.current !== null) {
@@ -608,12 +645,45 @@ function DashboardPage() {
         if (!response.ok) throw new Error(`Groups request failed: ${response.status}`);
         const data = await response.json() as RoadGroupsResponse;
         const groups = data.groups ?? [];
-        roadGroupRingRef.current = {head: null, tail: null, current: null, nodes: new Map()};
-        roadGroupSummariesRef.current.clear();
+        roadGroupRingsRef.current.set(roadGroupStrategy, createRoadGroupRing());
+        roadGroupSummariesByStrategyRef.current.set(roadGroupStrategy, new Map());
+        roadGroupRouteIdsByStrategyRef.current.set(roadGroupStrategy, new Map());
         syncRoadGroupRing(groups);
         setRoadGroups(groups);
         return groups;
     }, [roadGroupStrategy, syncRoadGroupRing]);
+
+    const prefetchRoutePositions = useCallback(async (routes: ActiveRoute[]) => {
+        await Promise.all(routes.map(async (route) => {
+            if (positionRequestsRef.current.has(route.lineId)) return;
+            positionRequestsRef.current.add(route.lineId);
+            try {
+                const response = await fetch(`${API_BASE_URL}/road/routes/${encodeURIComponent(route.lineId)}/position`);
+                if (!response.ok) throw new Error(`Position request failed: ${response.status}`);
+                const message = await response.json() as TruckPositionMessage;
+                if (message.status === 'finished') {
+                    completedRouteIdsRef.current.add(route.lineId);
+                    return;
+                }
+                if (!message.position) return;
+                const now = performance.now();
+                applyTruckPositionToRoute(route, message, now);
+                saveTruckPositionToCache({
+                    lineId: message.lineId,
+                    position: message.position,
+                    status: message.status,
+                    speedKmh: route.speedKmh,
+                    updatedAt: new Date().toISOString(),
+                });
+            } catch (error) {
+                console.warn('Truck position prefetch failed', error);
+                route.nextCalibrationAt = performance.now() + initialPositionQueryDelay(route.lineId);
+            } finally {
+                positionRequestsRef.current.delete(route.lineId);
+            }
+        }));
+        return routes.filter((route) => !completedRouteIdsRef.current.has(route.lineId));
+    }, []);
 
     const loadRoadGroup = useCallback(
         async (groupId: string) => {
@@ -627,13 +697,17 @@ function DashboardPage() {
                 const loadedGroupId = data.groupId || groupId;
                 const isSameGroup = activeRoadGroupIdRef.current === loadedGroupId;
                 const previousIds = new Set(activeRoutesRef.current.keys());
-                const routes = (data.routes ?? [])
+                let routes = (data.routes ?? [])
                     .map(createActiveRoute)
                     .filter((route): route is ActiveRoute => Boolean(route));
                 const shouldAnimateGroupSwap =
                     view === 'roadMap' &&
                     isSameGroup === false &&
                     activeRoutesRef.current.size > 0;
+
+                if (!isSameGroup) {
+                    routes = await prefetchRoutePositions(routes);
+                }
 
                 if (routes.length === 0) {
                     removeRoadGroupFromRing(loadedGroupId);
@@ -646,7 +720,7 @@ function DashboardPage() {
                 }
 
                 const routeIds = new Set(routes.map((route) => route.lineId));
-                roadGroupRouteIdsRef.current.set(loadedGroupId, routeIds);
+                currentRoadGroupRouteIds().set(loadedGroupId, routeIds);
                 routes.forEach((route) => {
                     routeGroupIdRef.current.set(route.lineId, loadedGroupId);
                     completedRouteIdsRef.current.delete(route.lineId);
@@ -697,7 +771,7 @@ function DashboardPage() {
                 setIsLoadingRoadGroup(false);
             }
         },
-        [createActiveRoute, removeRoadGroupFromRing, renderTruckPosition, roadGroupStrategy, setCurrentRoadGroup, showRoutes, syncRoadRoute, view]
+        [createActiveRoute, currentRoadGroupRouteIds, prefetchRoutePositions, removeRoadGroupFromRing, renderTruckPosition, roadGroupStrategy, setCurrentRoadGroup, showRoutes, syncRoadRoute, view]
     );
 
     const refreshRoadGroups = useCallback(
@@ -763,7 +837,7 @@ function DashboardPage() {
     );
 
     const advanceRoadGroup = useCallback(async () => {
-        const ring = roadGroupRingRef.current;
+        const ring = currentRoadGroupRing();
         if (!ring.head || roadGroupLoadingRef.current) return;
         if (ring.nodes.size <= 1) return;
 
@@ -783,7 +857,7 @@ function DashboardPage() {
             if (hasLiveRoutes) return;
             candidate = nextCandidate;
         }
-    }, [isRoadGroupComplete, loadRoadGroup, removeRoadGroupFromRing]);
+    }, [currentRoadGroupRing, isRoadGroupComplete, loadRoadGroup, removeRoadGroupFromRing]);
 
     const finishRoute = useCallback((lineId: string) => {
         completedRouteIdsRef.current.add(lineId);
@@ -811,25 +885,7 @@ function DashboardPage() {
             const now = performance.now();
             if (!forceCalibration && now < route.nextCalibrationAt) return;
 
-            const pushedVelocity = message.velocity ?? message.speed;
-            const elapsedSinceLastCalibration = now - route.calibratedAt;
-            const nextDistance = projectDistanceOnPath(route.coordinates, message.position);
-            const measuredPathSpeed = elapsedSinceLastCalibration > 0
-                ? Math.max(0, (nextDistance - route.calibratedDistance) / elapsedSinceLastCalibration)
-                : route.pathSpeed;
-            const measuredSpeedKmh = elapsedSinceLastCalibration > 0 && route.pathLength > 0
-                ? measuredPathSpeed / route.pathLength * route.routeLengthKm * 3_600_000
-                : null;
-            const pushedPathSpeed = pushedVelocity
-                ? Math.sqrt(pushedVelocity[0] * pushedVelocity[0] + pushedVelocity[1] * pushedVelocity[1])
-                : null;
-
-            route.pathSpeed = pushedPathSpeed ?? measuredPathSpeed ?? route.pathSpeed;
-            route.speedKmh = message.speedKmh ?? measuredSpeedKmh ?? route.speedKmh;
-            route.calibratedAt = now;
-            route.calibratedDistance = nextDistance;
-            route.nextCalibrationAt = now + nextQueryInterval(route.speedKmh);
-            route.arrivalCheckRequested = false;
+            applyTruckPositionToRoute(route, message, now);
 
             saveTruckPositionToCache({
                 lineId: message.lineId,
@@ -1108,14 +1164,16 @@ function DashboardPage() {
         if (roadGroups.length <= 1) return;
 
         const currentGroup = activeRoadGroupIdRef.current
-            ? roadGroupSummariesRef.current.get(activeRoadGroupIdRef.current)
+            ? currentRoadGroupSummaries().get(activeRoadGroupIdRef.current)
             : null;
         const routeCount = currentGroup?.count ?? routeOrdersRef.current.length;
         const delay = roadGroupDisplayMs(routeCount);
 
         roadGroupAdvanceTimerRef.current = window.setTimeout(() => {
             roadGroupAdvanceTimerRef.current = null;
-            void advanceRoadGroup();
+            void advanceRoadGroup().finally(() => {
+                setRoadGroupAdvanceTick((tick) => tick + 1);
+            });
         }, delay);
 
         return () => {
@@ -1124,7 +1182,7 @@ function DashboardPage() {
                 roadGroupAdvanceTimerRef.current = null;
             }
         };
-    }, [activeRoadGroupId, advanceRoadGroup, roadGroups, routeOrders.length, view]);
+    }, [activeRoadGroupId, advanceRoadGroup, currentRoadGroupSummaries, roadGroupAdvanceTick, roadGroups, routeOrders.length, view]);
 
     useEffect(() => {
         if (!isPreparingChinaMap) return;
@@ -1387,7 +1445,7 @@ function DashboardPage() {
             roadMapRef.current?.updateTruckPosition(
                 `manual-${carId}`,
                 [data.lng, data.lat],
-                { plate: carId, speedKmh: data.speedKmh, status: '临时查询' },
+                { plate: carId, speedKmh: data.speedKmh, status: '临时查询', manualMarker: true },
             );
             setManualQueryStatus(`经度 ${Number(data.lng).toFixed(5)} / 纬度 ${Number(data.lat).toFixed(5)} / ${Math.round(Number(data.speedKmh) || 0)} km/h`);
         } catch (error) {

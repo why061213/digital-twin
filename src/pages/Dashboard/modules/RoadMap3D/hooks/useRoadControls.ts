@@ -1,6 +1,5 @@
 import { useCallback } from 'react';
 import * as THREE from 'three';
-import { DragControls } from 'three/examples/jsm/controls/DragControls.js';
 import { mapPosition } from '../geo';
 import { disposeObject3D, clamp01, makePathCurve, indexCount } from '../utils';
 import { ROAD_LIFT, TRUCK_LIFT, PATH_SAMPLE_COUNT, CAMERA_TILT_RATIO } from '../constants';
@@ -137,7 +136,6 @@ export function useRoadControls(
     const clearRoad = useCallback((id: string) => {
         const road = refs.roadsMapRef.current.get(id);
         if (!road) return;
-        road.dragControls?.dispose();
         refs.sceneRef.current?.remove(road.group);
         disposeObject3D(road.group);
         refs.roadsMapRef.current.delete(id);
@@ -146,11 +144,6 @@ export function useRoadControls(
     const clearRoads = useCallback(() => {
         Array.from(refs.roadsMapRef.current.keys()).forEach((id) => clearRoad(id));
         refs.roadsMapRef.current.clear();
-        refs.manualMarkersRef.current.forEach((marker) => {
-            refs.sceneRef.current?.remove(marker);
-            disposeObject3D(marker);
-        });
-        refs.manualMarkersRef.current.clear();
         refs.selectedRoadIdRef.current = null;
     }, [clearRoad, refs]);
 
@@ -238,7 +231,6 @@ export function useRoadControls(
             const progressRef = { current: 0 };
             const road: RoadState = {
                 group, grayTube, selectionTube, greenTube, truck, truckGlow, selectionRing,
-                dragControls: null,
                 samples, cumulativeLengths,
                 totalLength: cumulativeLengths[cumulativeLengths.length - 1] ?? 0,
                 tubularSegments, radialSegments, progressRef,
@@ -247,31 +239,6 @@ export function useRoadControls(
                 info,
                 isSelected: false,
             };
-
-            if (refs.rendererRef.current && refs.cameraRef.current) {
-                const dragControls = new DragControls([truck], refs.cameraRef.current, refs.rendererRef.current.domElement);
-                dragControls.addEventListener('dragstart', () => {
-                    if (refs.controlsRef.current) refs.controlsRef.current.enabled = false;
-                });
-                dragControls.addEventListener('drag', () => {
-                    const draggedId = truck.userData.roadId;
-                    if (draggedId) {
-                        truck.position.y = TRUCK_LIFT;
-                        truckGlow.position.copy(truck.position);
-                        updateProgressFromTruck(draggedId);
-                    }
-                });
-                dragControls.addEventListener('dragend', () => {
-                    const draggedId = truck.userData.roadId;
-                    if (draggedId) {
-                        truck.position.y = TRUCK_LIFT;
-                        truckGlow.position.copy(truck.position);
-                        updateProgressFromTruck(draggedId);
-                    }
-                    if (refs.controlsRef.current) refs.controlsRef.current.enabled = true;
-                });
-                road.dragControls = dragControls;
-            }
 
             refs.roadsMapRef.current.set(id, road);
             road.group.visible = true;
@@ -295,6 +262,7 @@ export function useRoadControls(
         const worldPos = mapPosition(position, TRUCK_LIFT);
         if (!worldPos) return;
         if (!road) {
+            if (!info.manualMarker) return;
             let marker = refs.manualMarkersRef.current.get(lineId);
             if (!marker) {
                 // 手动查询车辆位置没有路线时，使用独立小圆点落到地图上。
