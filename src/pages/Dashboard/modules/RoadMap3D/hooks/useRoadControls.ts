@@ -45,7 +45,7 @@ function trackKeyFor(id: string, coords: [number, number][], info: RoadObjectInf
 }
 
 function orderKeyFor(lineId: string, info: RoadObjectInfo) {
-    return info.orderId ?? `order-${lineId}`;
+    return info.orderFamilyId ?? info.orderId ?? `order-${lineId}`;
 }
 
 function orderColor(orderId: string, index: number) {
