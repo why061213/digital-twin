@@ -10,6 +10,7 @@ export function useRoadMapRefs() {
     const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
     const controlsRef = useRef<OrbitControls | null>(null);
     const roadsMapRef = useRef<Map<string, RoadState>>(new Map());
+    const lineTrackMapRef = useRef<Map<string, string>>(new Map());
     const manualMarkersRef = useRef<Map<string, THREE.Group>>(new Map());
     const renderFrameRef = useRef<number>(0);
     const raycasterRef = useRef(new THREE.Raycaster());
@@ -25,6 +26,7 @@ export function useRoadMapRefs() {
         rendererRef,
         controlsRef,
         roadsMapRef,
+        lineTrackMapRef,
         manualMarkersRef,
         renderFrameRef,
         raycasterRef,

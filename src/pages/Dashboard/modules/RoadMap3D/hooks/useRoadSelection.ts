@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import * as THREE from 'three';
-import type { HoverInfo } from '../types';
+import type { HoverInfo, RoadObjectInfo } from '../types';
 import { formatNumber, screenPosition } from '../utils';
 import { useRoadMapRefs } from './useRoadMapRefs';
 
@@ -16,33 +16,42 @@ export function useRoadSelection(refs: ReturnType<typeof useRoadMapRefs>) {
 
             const grayMat = road.grayTube.material as THREE.MeshBasicMaterial;
             const selectionMat = road.selectionTube.material as THREE.MeshBasicMaterial;
-            const greenMat = road.greenTube.material as THREE.MeshBasicMaterial;
-            const glowMat = road.truckGlow.material as THREE.MeshBasicMaterial;
-            const ringMat = road.selectionRing.material as THREE.MeshBasicMaterial;
-
-            grayMat.opacity = selected ? 0.9 : 0.76;
-            selectionMat.opacity = selected ? 0.22 : 0;
-            greenMat.opacity = selected ? 1 : 0.92;
-            glowMat.opacity = selected ? 0.42 : 0.24;
-            ringMat.opacity = selected ? 0.34 : 0;
-            road.truck.scale.setScalar(selected ? 1.12 : 1);
-            road.truckGlow.scale.setScalar(selected ? 1.12 : 1);
+            grayMat.opacity = selected ? 0.88 : 0.7;
+            selectionMat.opacity = selected ? 0.2 : 0;
+            road.orders.forEach((lane) => {
+                const mat = lane.progressTube.material as THREE.MeshBasicMaterial;
+                mat.opacity = selected ? 1 : 0.95;
+                lane.vehicles.forEach((vehicle) => {
+                    vehicle.bar.scale.copy(vehicle.baseScale).multiplyScalar(selected ? 1.12 : 1);
+                });
+            });
         });
     }, [refs]);
 
-    const buildHoverInfo = useCallback((roadId: string, objectType: string, x: number, y: number): HoverInfo | null => {
+    const findVehicleInfo = useCallback((roadId: string, lineId?: string): { info: RoadObjectInfo; coords: [number, number] } | null => {
         const road = refs.roadsMapRef.current.get(roadId);
         if (!road) return null;
-        const info = road.info;
-        const coords = road.currentCoords;
+        if (!lineId) return { info: road.info, coords: road.currentCoords };
+        for (const lane of road.orders.values()) {
+            const vehicle = lane.vehicles.get(lineId);
+            if (vehicle) return { info: vehicle.info, coords: vehicle.currentCoords };
+        }
+        return { info: road.info, coords: road.currentCoords };
+    }, [refs.roadsMapRef]);
+
+    const buildHoverInfo = useCallback((roadId: string, objectType: string, x: number, y: number, lineId?: string): HoverInfo | null => {
+        const found = findVehicleInfo(roadId, lineId);
+        if (!found) return null;
+        const { info, coords } = found;
         const routeTitle = `${info.from ?? '--'} -> ${info.to ?? '--'}`;
         return {
             x,
             y,
-            title: info.plate ?? (objectType === '车辆' || objectType === '车辆光晕' ? '车辆信息' : '路线信息'),
+            title: info.plate ?? (objectType === '车辆进度条' ? '车辆信息' : '路线信息'),
             subtitle: routeTitle,
             status: info.status ?? '--',
             rows: [
+                ['订单', info.orderName ?? info.orderId ?? '--'],
                 ['货物', info.cargo ?? '--'],
                 ['当前经度', formatNumber(coords[0], 6)],
                 ['当前纬度', formatNumber(coords[1], 6)],
@@ -50,7 +59,7 @@ export function useRoadSelection(refs: ReturnType<typeof useRoadMapRefs>) {
                 ['路线长度', `${formatNumber(info.routeLengthKm, 1)} km`],
             ],
         };
-    }, [refs.roadsMapRef]);
+    }, [findVehicleInfo]);
 
     const updateHoverPosition = useCallback(() => {
         const camera = refs.cameraRef.current;
@@ -88,11 +97,12 @@ export function useRoadSelection(refs: ReturnType<typeof useRoadMapRefs>) {
         refs.raycasterRef.current.setFromCamera(refs.pointerRef.current, camera);
 
         const objects = Array.from(refs.roadsMapRef.current.values()).flatMap((road) => [
-            road.truck,
-            road.truckGlow,
-            road.greenTube,
             road.grayTube,
             road.selectionTube,
+            ...Array.from(road.orders.values()).flatMap((lane) => [
+                lane.progressTube,
+                ...Array.from(lane.vehicles.values()).map((vehicle) => vehicle.bar),
+            ]),
         ]);
         const hit = refs.raycasterRef.current.intersectObjects(objects, false)[0];
         const roadId = hit?.object.userData.roadId;
@@ -103,12 +113,13 @@ export function useRoadSelection(refs: ReturnType<typeof useRoadMapRefs>) {
         }
 
         const objectType = String(hit.object.userData.objectType ?? '对象');
+        const lineId = typeof hit.object.userData.lineId === 'string' ? hit.object.userData.lineId : undefined;
         setSelectedRoad(roadId);
         const road = refs.roadsMapRef.current.get(roadId);
         const label = road
             ? screenPosition(road.labelAnchor, camera, container)
             : screenPosition(hit.point, camera, container);
-        setHoverInfo(buildHoverInfo(roadId, objectType, label.x, label.y));
+        setHoverInfo(buildHoverInfo(roadId, objectType, label.x, label.y, lineId));
     }, [refs, buildHoverInfo, setSelectedRoad]);
 
     const handlePointerLeave = useCallback(() => {

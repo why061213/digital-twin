@@ -531,6 +531,9 @@ function DashboardPage() {
             status: route.status,
             speedKmh: route.speedKmh,
             routeLengthKm: route.routeLengthKm,
+            orderId: route.orderId,
+            orderName: route.orderName,
+            pathKey: route.pathKey,
         });
     }, []);
 
@@ -543,6 +546,9 @@ function DashboardPage() {
             status: route.status,
             speedKmh: route.speedKmh,
             routeLengthKm: route.routeLengthKm,
+            orderId: route.orderId,
+            orderName: route.orderName,
+            pathKey: route.pathKey,
         });
     }, []);
 

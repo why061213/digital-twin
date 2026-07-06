@@ -123,9 +123,11 @@ export function useRoadMapScene(
             refs.roadsMapRef.current.forEach((road) => {
                 if (!road.isSelected) return;
                 const pulse = 1 + Math.sin(now / 260) * 0.08;
-                road.selectionRing.scale.setScalar(pulse);
-                road.selectionRing.rotation.z += 0.018;
-
+                road.orders.forEach((lane) => {
+                    lane.vehicles.forEach((vehicle) => {
+                        vehicle.bar.scale.copy(vehicle.baseScale).multiplyScalar(pulse);
+                    });
+                });
             });
             selectionRef.current.updateHoverPosition();
             orbitControls.update();
@@ -195,6 +197,7 @@ export function useRoadMapScene(
             refs.controlsRef.current = null;
             refs.cameraMoveFrameRef.current = 0;
             refs.roadsMapRef.current.clear();
+            refs.lineTrackMapRef.current.clear();
             refs.selectedRoadIdRef.current = null;
         };
     }, [refs]);
