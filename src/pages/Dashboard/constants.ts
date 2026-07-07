@@ -9,6 +9,7 @@ const DEFAULT_POSITION_RENDER_TICK_MS = 500;
 const DEFAULT_LOW_SPEED_THRESHOLD_KMH = 50;
 const DEFAULT_MAP_VIEW_TRANSITION_MS = 800;
 const DEFAULT_ROAD_GROUP_TRANSITION_MS = 420;
+const ROAD_GROUP_DISPLAY_MAX_MS = 30_000;
 
 export const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api').replace(/\/$/, '');
 
@@ -35,7 +36,8 @@ export const MAX_ROADS_PER_GROUP = 24; // 画布运输上限
 
 export function roadGroupDisplayMs(routeCount: number) {
     const safeRouteCount = Math.max(0, routeCount);
-    return Math.max(1_000, RoadConstant.displayBase + safeRouteCount * RoadConstant.displayAdd);
+    const displayMs = Math.max(1_000, RoadConstant.displayBase + safeRouteCount * RoadConstant.displayAdd);
+    return Math.min(ROAD_GROUP_DISPLAY_MAX_MS, displayMs);
 }
 
 export const ROAD_GROUP_STRATEGIES: Array<{ value: RoadGroupStrategy; label: string; badge?: string }> = [

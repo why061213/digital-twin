@@ -184,9 +184,6 @@ export function useRoadMapScene(
 
             renderer.dispose();
 
-            // 可选：如果你频繁进入/退出这个 3D 页面，可以释放 WebGL context
-            renderer.forceContextLoss();
-
             if (renderer.domElement.parentElement === container) {
                 container.removeChild(renderer.domElement);
             }
