@@ -10,7 +10,6 @@ import type { RoadPathMessage, RouteOrder, TruckPositionMessage, WarehouseFocusP
 import type { PanelData } from './modules/ChinaMap3D/types';
 import { DispatchButtons } from './components/DispatchButtons';
 import { DashboardCenterPanel } from './components/DashboardCenterPanel';
-import { ManualPositionLookup } from './components/ManualPositionLookup';
 import { RoadGroupQueue } from './components/RoadGroupQueue';
 import { RoadGroupTabs } from './components/RoadGroupTabs';
 import { ViewButtons } from './components/ViewButtons';
@@ -30,7 +29,7 @@ import type {
 } from './types';
 import {
     API_BASE_URL,
-    MAP_VIEW_RELEASE_DELAY_MS, MAX_ROADS_PER_GROUP,
+    MAP_VIEW_RELEASE_DELAY_MS,
     POSITION_QUERY_INTERVAL_MS,
     POSITION_RENDER_TICK_MS,
     ROAD_GROUP_SWAP_DELAY_MS,
@@ -54,9 +53,14 @@ import {
     waitFrame,
     waitMs,
 } from './utils';
+
+const ROAD_PATH_BUFFER_QUIET_MS = 650;
+const ROAD_PATH_BUFFER_MAX_WAIT_MS = 1600;
+
 function DashboardPage() {
-    const pendingGroupCacheRef = useRef<Array<{ groupId: string; addedAt: number }>>([]);
-    const isProcessingQueueRef = useRef(false);
+    const roadGroupKeepCurrentRefreshRef = useRef(false);
+    const roadGroupKeepCurrentEmptyRef = useRef(false);
+    const staleRoadGroupFallbackIdRef = useRef<string | null>(null);
     const pendingNextGroupIdRef = useRef<string | null>(null);
     const [view, setView] = useState<ViewMode>('warehouse');
     const [routeOrders, setRouteOrders] = useState<RouteOrder[]>([]);
@@ -78,9 +82,6 @@ function DashboardPage() {
     const [isRoadMapDataReady, setIsRoadMapDataReady] = useState(false);
     const [isRoadGroupFading, setIsRoadGroupFading] = useState(false);
     const [roadGroupAdvanceTick, setRoadGroupAdvanceTick] = useState(0);
-    const [manualCarId, setManualCarId] = useState('');
-    const [manualQueryStatus, setManualQueryStatus] = useState('');
-    const [isManualQuerying, setIsManualQuerying] = useState(false);
     const mapRef = useRef<ChinaMap3DHandle>(null);
     const roadMapRef = useRef<RoadMap3DHandle>(null);
     const chinaMapPrepareRunRef = useRef(0);
@@ -99,8 +100,12 @@ function DashboardPage() {
     const roadGroupLoadingRef = useRef(false);
     const warehouseDisplayDataRef = useRef<Map<string, Record<string, any>>>(new Map());
     const roadPathRefreshTimerRef = useRef<number | null>(null);
-    const pendingRoadGroupRefreshIdRef = useRef<string | undefined>(undefined);
+    const roadPathBufferTimerRef = useRef<number | null>(null);
+    const roadPathBufferStartedAtRef = useRef(0);
+    const roadPathBroadcastBufferRef = useRef<Map<string, RoadPathMessage>>(new Map());
+    const pendingRoadGroupRefreshIdRef = useRef<string | null | undefined>(undefined);
     const roadGroupRefreshInFlightRef = useRef(false);
+    const queuedRoadGroupRefreshPendingRef = useRef(false);
     const queuedRoadGroupRefreshIdRef = useRef<string | null | undefined>(undefined);
     const roadGroupAdvanceTimerRef = useRef<number | null>(null);
     const skipNextRoadMapRefreshRef = useRef(false);
@@ -131,8 +136,32 @@ function DashboardPage() {
         return routeIds;
     }, [roadGroupStrategy]);
 
+    const normalizeRoadGroupRing = useCallback((ring: RoadGroupRing) => {
+        const nodes = Array.from(ring.nodes.values());
+        if (nodes.length === 0) {
+            ring.head = null;
+            ring.tail = null;
+            ring.current = null;
+            return;
+        }
+
+        if (!ring.head || !ring.nodes.has(ring.head.groupId)) {
+            ring.head = nodes[0];
+        }
+        if (!ring.current || !ring.nodes.has(ring.current.groupId)) {
+            ring.current = ring.head;
+        }
+
+        nodes.forEach((node, index) => {
+            node.next = nodes[(index + 1) % nodes.length];
+        });
+        ring.tail = nodes[nodes.length - 1];
+        ring.tail.next = ring.head;
+    }, []);
+
     const removeRoadGroupFromRing = useCallback((groupId: string) => {
         const ring = currentRoadGroupRing();
+        console.log('[removeRoadGroupFromRing] removing:', groupId, 'head:', ring.head?.groupId, 'current:', ring.current?.groupId);
         const target = ring.nodes.get(groupId);
         if (!target) return;
 
@@ -166,6 +195,7 @@ function DashboardPage() {
         }
 
         ring.nodes.delete(groupId);
+        normalizeRoadGroupRing(ring);
         currentRoadGroupSummaries().delete(groupId);
         currentRoadGroupRouteIds().delete(groupId);
         setRoadGroups((prev) => prev.filter((group) => group.groupId !== groupId));
@@ -176,11 +206,18 @@ function DashboardPage() {
             setRouteOrders([]);
             roadMapRef.current?.clearRoads();
         }
-    }, [currentRoadGroupRing, currentRoadGroupRouteIds, currentRoadGroupSummaries]);
+        console.log('[removeRoadGroupFromRing] after remove, head:', ring.head?.groupId, 'current:', ring.current?.groupId);
+    }, [currentRoadGroupRing, currentRoadGroupRouteIds, currentRoadGroupSummaries, normalizeRoadGroupRing]);
 
     const syncRoadGroupRing = useCallback((groups: RoadGroupSummary[]) => {
         const ring = currentRoadGroupRing();
         const summaries = currentRoadGroupSummaries();
+        const nextGroupIds = new Set(groups.map((group) => group.groupId));
+        Array.from(ring.nodes.keys()).forEach((groupId) => {
+            if (!nextGroupIds.has(groupId) && groupId !== activeRoadGroupIdRef.current) {
+                removeRoadGroupFromRing(groupId);
+            }
+        });
         groups.forEach((group) => {
             summaries.set(group.groupId, group);
             if (ring.nodes.has(group.groupId)) return;
@@ -197,7 +234,8 @@ function DashboardPage() {
                 ring.tail = node;
             }
         });
-    }, [currentRoadGroupRing, currentRoadGroupSummaries]);
+        normalizeRoadGroupRing(ring);
+    }, [currentRoadGroupRing, currentRoadGroupSummaries, normalizeRoadGroupRing, removeRoadGroupFromRing]);
 
     const isRoadGroupComplete = useCallback((groupId: string) => {
         const routeIds = currentRoadGroupRouteIds().get(groupId);
@@ -382,9 +420,6 @@ function DashboardPage() {
         if (!response.ok) throw new Error(`Groups request failed: ${response.status}`);
         const data = await response.json() as RoadGroupsResponse;
         const groups = data.groups ?? [];
-        roadGroupRingsRef.current.set(roadGroupStrategy, createRoadGroupRing());
-        roadGroupSummariesByStrategyRef.current.set(roadGroupStrategy, new Map());
-        roadGroupRouteIdsByStrategyRef.current.set(roadGroupStrategy, new Map());
         syncRoadGroupRing(groups);
         setRoadGroups(groups);
         return groups;
@@ -424,7 +459,8 @@ function DashboardPage() {
 
     const loadRoadGroup = useCallback(
         async (groupId: string) => {
-            // if (roadGroupLoadingRef.current) return false;
+            console.trace('[loadRoadGroup] called with:', groupId);
+            console.log('[loadRoadGroup] called with:', groupId, 'active before:', activeRoadGroupIdRef.current, 'strategy:', roadGroupStrategy);
             const transitionRunId = roadGroupTransitionRunRef.current + 1;
             roadGroupTransitionRunRef.current = transitionRunId;
             roadGroupLoadingRef.current = true;
@@ -434,6 +470,7 @@ function DashboardPage() {
                 if (!response.ok) throw new Error(`Group routes request failed: ${response.status}`);
                 const data = await response.json() as RoadGroupRoutesResponse;
                 const loadedGroupId = data.groupId || groupId;
+                // 注意：isSameGroup 必须在这之后定义，不能提前使用
                 const isSameGroup = activeRoadGroupIdRef.current === loadedGroupId;
                 const previousIds = new Set(activeRoutesRef.current.keys());
                 let routes = (data.routes ?? [])
@@ -441,14 +478,24 @@ function DashboardPage() {
                     .filter((route): route is ActiveRoute => Boolean(route));
                 const shouldAnimateGroupSwap =
                     view === 'roadMap' &&
+                    activeRoadGroupIdRef.current !== null &&   // 新增：必须已有活跃组
                     isSameGroup === false &&
                     activeRoutesRef.current.size > 0;
+
+                console.log('[loadRoadGroup] loadedGroupId:', loadedGroupId, 'routes:', routes.length, 'isSameGroup:', isSameGroup, 'shouldAnimateGroupSwap:', shouldAnimateGroupSwap);
 
                 if (!isSameGroup) {
                     routes = await prefetchRoutePositions(routes);
                 }
 
                 if (routes.length === 0) {
+                    // 如果是“保持当前组”的刷新，忽略空结果，避免删除当前组
+                    if (roadGroupKeepCurrentRefreshRef.current) {
+                        roadGroupKeepCurrentEmptyRef.current = true;
+                        console.log('[loadRoadGroup] keep current refresh ignored empty routes');
+                        return false;  // 返回 false 表示刷新失败
+                    }
+                    // 自动选择模式下，允许删除旧组
                     removeRoadGroupFromRing(loadedGroupId);
                     if (activeRoadGroupIdRef.current === loadedGroupId) {
                         activeRoutesRef.current.clear();
@@ -479,6 +526,7 @@ function DashboardPage() {
                 if (!isSameGroup) {
                     if (shouldAnimateGroupSwap) {
                         setIsRoadGroupFading(true);
+                        console.log('[loadRoadGroup] animating swap');
                         await waitMs(ROAD_GROUP_SWAP_DELAY_MS);
                         if (roadGroupTransitionRunRef.current !== transitionRunId) {
                             setIsRoadGroupFading(false);
@@ -491,6 +539,7 @@ function DashboardPage() {
                         window.requestAnimationFrame(() => setIsRoadGroupFading(false));
                     }
                     pendingNextGroupIdRef.current = null;
+                    console.log('[loadRoadGroup] loaded new group, done');
                     return true;
                 }
 
@@ -521,25 +570,63 @@ function DashboardPage() {
     );
 
     const refreshRoadGroups = useCallback(
-        async (preferredGroupId?: string) => {
+        async (preferredGroupId?: string | null) => {
+            const scheduleDebouncedAutoFallback = (staleGroupId: string | null, delay = 300) => {
+                staleRoadGroupFallbackIdRef.current = staleGroupId;
+                pendingRoadGroupRefreshIdRef.current = undefined;
+                if (roadPathRefreshTimerRef.current !== null) {
+                    window.clearTimeout(roadPathRefreshTimerRef.current);
+                }
+                roadPathRefreshTimerRef.current = window.setTimeout(() => {
+                    roadPathRefreshTimerRef.current = null;
+                    const pendingGroupId = pendingRoadGroupRefreshIdRef.current;
+                    pendingRoadGroupRefreshIdRef.current = undefined;
+                    void refreshRoadGroups(pendingGroupId);
+                }, delay);
+            };
+
             if (roadGroupRefreshInFlightRef.current || roadGroupLoadingRef.current) {
-                queuedRoadGroupRefreshIdRef.current = preferredGroupId ?? null;
+                queuedRoadGroupRefreshPendingRef.current = true;
+                queuedRoadGroupRefreshIdRef.current = preferredGroupId;
                 return;
             }
             roadGroupRefreshInFlightRef.current = true;
             try {
+                // ====== 保持当前组的快速通道 ======
+                if (preferredGroupId === null && activeRoadGroupIdRef.current) {
+                    const staleGroupId = activeRoadGroupIdRef.current;
+                    roadGroupKeepCurrentRefreshRef.current = true;
+                    roadGroupKeepCurrentEmptyRef.current = false;
+                    const success = await loadRoadGroup(activeRoadGroupIdRef.current);
+                    roadGroupKeepCurrentRefreshRef.current = false;
+                    if (success) {
+                        // 当前组仍然有效，无需切换
+                        return;
+                    }
+                    if (roadGroupKeepCurrentEmptyRef.current) {
+                        roadGroupKeepCurrentEmptyRef.current = false;
+                        // 当前组已失效（后端返回空），通过同一个防抖入口延迟回退。
+                        // 连续路线消息会覆盖旧回退，只让最后一次自动选组生效。
+                        scheduleDebouncedAutoFallback(staleGroupId);
+                    }
+                    return;
+                }
+
+                // ====== 自动选择逻辑 ======
                 const groups = await fetchRoadGroups();
                 const currentGroupId = activeRoadGroupIdRef.current;
+                const staleFallbackGroupId = staleRoadGroupFallbackIdRef.current;
+                staleRoadGroupFallbackIdRef.current = null;
                 let nextGroupId: string | null | undefined;
 
-                if (preferredGroupId === null) {
-                    // 强制刷新当前组（保持组不变）
-                    nextGroupId = currentGroupId;
-                } else if (preferredGroupId !== undefined) {
+                if (preferredGroupId !== undefined && preferredGroupId !== null) {
                     nextGroupId = preferredGroupId;
+                } else if (staleFallbackGroupId && currentGroupId === staleFallbackGroupId) {
+                    nextGroupId = groups.find((group) => group.groupId !== staleFallbackGroupId)?.groupId
+                        ?? groups[0]?.groupId;
                 } else {
-                    // 自动选择：保持当前组或第一个
-                    nextGroupId = currentGroupId && groups.some((group) => group.groupId === currentGroupId)
+                    // 自动选择：优先保持当前组（如果还在列表中），否则取第一个
+                    nextGroupId = currentGroupId && groups.some(g => g.groupId === currentGroupId)
                         ? currentGroupId
                         : groups[0]?.groupId;
                 }
@@ -556,11 +643,13 @@ function DashboardPage() {
                 console.warn('Road groups refresh failed', error);
             } finally {
                 roadGroupRefreshInFlightRef.current = false;
+                const hasQueuedRefresh = queuedRoadGroupRefreshPendingRef.current;
                 const queuedGroupId = queuedRoadGroupRefreshIdRef.current;
+                queuedRoadGroupRefreshPendingRef.current = false;
                 queuedRoadGroupRefreshIdRef.current = undefined;
-                if (queuedGroupId !== undefined) {
+                if (hasQueuedRefresh) {
                     window.setTimeout(() => {
-                        void refreshRoadGroups(queuedGroupId ?? undefined);
+                        void refreshRoadGroups(queuedGroupId);
                     }, 120);
                 }
             }
@@ -580,79 +669,121 @@ function DashboardPage() {
                 roadPathRefreshTimerRef.current = null;
                 const pendingGroupId = pendingRoadGroupRefreshIdRef.current;
                 pendingRoadGroupRefreshIdRef.current = undefined;
-                void refreshRoadGroups(pendingGroupId ?? undefined);
+                void refreshRoadGroups(pendingGroupId);
             }, delay);
         },
         [refreshRoadGroups]
     );
 
-    const processQueue = useCallback(async () => {
-        if (isProcessingQueueRef.current || pendingGroupCacheRef.current.length === 0) return;
-        isProcessingQueueRef.current = true;
-
-        try {
-            // 先获取最新的分组列表
-            await fetchRoadGroups();
-            while (pendingGroupCacheRef.current.length > 0) {
-                const next = pendingGroupCacheRef.current.shift()!;
-                await loadRoadGroup(next.groupId);
-            }
-        } finally {
-            isProcessingQueueRef.current = false;
+    const flushRoadPathBroadcastBuffer = useCallback(() => {
+        if (roadPathBufferTimerRef.current !== null) {
+            window.clearTimeout(roadPathBufferTimerRef.current);
+            roadPathBufferTimerRef.current = null;
         }
-    }, [loadRoadGroup, fetchRoadGroups]);
+
+        const bufferedMessages = Array.from(roadPathBroadcastBufferRef.current.values());
+        roadPathBroadcastBufferRef.current.clear();
+        roadPathBufferStartedAtRef.current = 0;
+        if (bufferedMessages.length === 0) return;
+
+        const firstGroupId = bufferedMessages.find((message) => message.groupId)?.groupId ?? null;
+        const preferredGroupId = activeRoadGroupIdRef.current ? null : firstGroupId;
+        console.log('[road_path buffer] flush broadcasts:', bufferedMessages.length, 'preferredGroupId:', preferredGroupId);
+        scheduleRoadGroupRefresh(preferredGroupId, 120);
+        setRoadGroupAdvanceTick((tick) => tick + 1);
+    }, [scheduleRoadGroupRefresh]);
+
 
     const handleRoadPath = useCallback(
         (message: RoadPathMessage) => {
-            // 将新消息加入缓存队列（去重）
-            const exists = pendingGroupCacheRef.current.some(item => item.groupId === message.groupId);
-            if (!exists) {
-                pendingGroupCacheRef.current.push({
-                    groupId: message.groupId,
-                    addedAt: performance.now(),
-                });
+            roadPathBroadcastBufferRef.current.set(message.lineId, message);
+
+            const now = performance.now();
+            if (roadPathBufferStartedAtRef.current === 0) {
+                roadPathBufferStartedAtRef.current = now;
             }
 
-            // 启动队列处理（如果未在处理中）
-            processQueue();
+            if (roadPathBufferTimerRef.current !== null) {
+                window.clearTimeout(roadPathBufferTimerRef.current);
+            }
+
+            const elapsed = now - roadPathBufferStartedAtRef.current;
+            const delay = Math.max(
+                0,
+                Math.min(ROAD_PATH_BUFFER_QUIET_MS, ROAD_PATH_BUFFER_MAX_WAIT_MS - elapsed),
+            );
+
+            roadPathBufferTimerRef.current = window.setTimeout(flushRoadPathBroadcastBuffer, delay);
         },
-        []
+        [flushRoadPathBroadcastBuffer]
     );
 
     const advanceRoadGroup = useCallback(async () => {
         const ring = currentRoadGroupRing();
-        if (!ring.head || roadGroupLoadingRef.current) return;
+        normalizeRoadGroupRing(ring);
+        console.log('[advanceRoadGroup] start', {
+            ringSize: ring.nodes.size,
+            head: ring.head?.groupId,
+            current: ring.current?.groupId,
+            active: activeRoadGroupIdRef.current,
+            loading: roadGroupLoadingRef.current,
+            nextCached: pendingNextGroupIdRef.current,
+        });
+
+        if (!ring.head || roadGroupLoadingRef.current) {
+            console.log('[advanceRoadGroup] aborted (no head or loading)');
+            return;
+        }
 
         // 优先处理缓存中的下一个组（只有在当前主组完成时才切换）
         const nextCached = pendingNextGroupIdRef.current;
         if (nextCached && isRoadGroupComplete(activeRoadGroupIdRef.current ?? '')) {
-            const index = pendingGroupCacheRef.current.findIndex(item => item.groupId === nextCached);
-            if (index !== -1) pendingGroupCacheRef.current.splice(index, 1);
+            console.log('[advanceRoadGroup] using cached next group:', nextCached);
             pendingNextGroupIdRef.current = null; // 重置，等待下次计算
             await loadRoadGroup(nextCached);
+            console.log('[advanceRoadGroup] loaded cached group, done');
             return;
         }
 
-        // 原有链表遍历逻辑不变
-        if (ring.nodes.size <= 1) return;
+        // 原有链表遍历逻辑
+        if (ring.nodes.size <= 1) {
+            console.log('[advanceRoadGroup] only one node, skipping');
+            return;
+        }
+
         let candidate = ring.current?.next ?? ring.head;
         const maxAttempts = Math.max(1, ring.nodes.size);
+        console.log('[advanceRoadGroup] starting traverse, maxAttempts:', maxAttempts, 'startCandidate:', candidate?.groupId);
+
         for (let attempt = 0; candidate && attempt < maxAttempts; attempt++) {
-            if (roadGroupLoadingRef.current) return;
+            if (roadGroupLoadingRef.current) {
+                console.log('[advanceRoadGroup] loading detected mid-traverse, abort');
+                return;
+            }
+
             const groupId = candidate.groupId;
             const nextCandidate = candidate.next ?? ring.head;
 
+            console.log(`[advanceRoadGroup] attempt ${attempt}: checking group ${groupId}, isComplete: ${isRoadGroupComplete(groupId)}`);
+
             if (isRoadGroupComplete(groupId)) {
+                console.log(`[advanceRoadGroup] group ${groupId} is complete, removing`);
                 removeRoadGroupFromRing(groupId);
                 candidate = nextCandidate;
                 continue;
             }
 
+            console.log(`[advanceRoadGroup] trying to load group ${groupId}`);
             const hasLiveRoutes = await loadRoadGroup(groupId);
-            if (hasLiveRoutes) return;
+            if (hasLiveRoutes) {
+                console.log(`[advanceRoadGroup] loaded group ${groupId} successfully`);
+                return;
+            }
+            console.log(`[advanceRoadGroup] group ${groupId} had no live routes, moving to next`);
             candidate = nextCandidate;
         }
-    }, [currentRoadGroupRing, isRoadGroupComplete, loadRoadGroup, removeRoadGroupFromRing]);
+        console.log('[advanceRoadGroup] traversal ended without loading any group');
+    }, [currentRoadGroupRing, isRoadGroupComplete, loadRoadGroup, normalizeRoadGroupRing, removeRoadGroupFromRing]);
 
 
     const finishRoute = useCallback((lineId: string) => {
@@ -951,24 +1082,43 @@ function DashboardPage() {
             skipNextRoadMapRefreshRef.current = false;
             return;
         }
-        void refreshRoadGroups(activeRoadGroupIdRef.current ?? undefined);
+        // void refreshRoadGroups(activeRoadGroupIdRef.current ?? undefined);
     }, [refreshRoadGroups, view]);
 
     useEffect(() => {
         if (view !== 'roadMap') return;
-        if (roadGroups.length <= 1) return;
+        const ring = currentRoadGroupRing();
+        normalizeRoadGroupRing(ring);
+        if (ring.nodes.size <= 1) {
+            console.log('[roadGroupAdvanceTimer] skipped, ring size:', ring.nodes.size, 'roadGroups:', roadGroups.length);
+            return;
+        }
 
         const currentGroup = activeRoadGroupIdRef.current
             ? currentRoadGroupSummaries().get(activeRoadGroupIdRef.current)
             : null;
         const routeCount = currentGroup?.count ?? routeOrdersRef.current.length;
         const delay = roadGroupDisplayMs(routeCount);
+        console.log('[roadGroupAdvanceTimer] scheduled', {
+            delay,
+            ringSize: ring.nodes.size,
+            active: activeRoadGroupIdRef.current,
+            routeCount,
+            head: ring.head?.groupId,
+            tail: ring.tail?.groupId,
+            current: ring.current?.groupId,
+            next: ring.current?.next?.groupId,
+        });
 
         roadGroupAdvanceTimerRef.current = window.setTimeout(() => {
             roadGroupAdvanceTimerRef.current = null;
-            void advanceRoadGroup().finally(() => {
-                setRoadGroupAdvanceTick((tick) => tick + 1);
-            });
+            void fetchRoadGroups()
+                .catch((error) => console.warn('Road groups refresh before advance failed', error))
+                .finally(() => {
+                    void advanceRoadGroup().finally(() => {
+                        setRoadGroupAdvanceTick((tick) => tick + 1);
+                    });
+                });
         }, delay);
 
         return () => {
@@ -977,7 +1127,7 @@ function DashboardPage() {
                 roadGroupAdvanceTimerRef.current = null;
             }
         };
-    }, [activeRoadGroupId, advanceRoadGroup, currentRoadGroupSummaries, roadGroupAdvanceTick, roadGroups, view]);
+    }, [activeRoadGroupId, advanceRoadGroup, currentRoadGroupRing, currentRoadGroupSummaries, fetchRoadGroups, normalizeRoadGroupRing, roadGroupAdvanceTick, roadGroups.length, view]);
 
 
     useEffect(() => {
@@ -1035,6 +1185,12 @@ function DashboardPage() {
                 window.clearTimeout(roadPathRefreshTimerRef.current);
                 roadPathRefreshTimerRef.current = null;
             }
+            if (roadPathBufferTimerRef.current !== null) {
+                window.clearTimeout(roadPathBufferTimerRef.current);
+                roadPathBufferTimerRef.current = null;
+            }
+            roadPathBroadcastBufferRef.current.clear();
+            roadPathBufferStartedAtRef.current = 0;
             if (roadGroupAdvanceTimerRef.current !== null) {
                 window.clearTimeout(roadGroupAdvanceTimerRef.current);
                 roadGroupAdvanceTimerRef.current = null;
@@ -1139,63 +1295,20 @@ function DashboardPage() {
             onBulkDispatch={requestBulkDispatch}
         />
     );
-    const handleManualQuery = useCallback(async () => {
-        const carId = manualCarId.trim();
-        if (!carId || isManualQuerying) return;
-
-        setIsManualQuerying(true);
-        setManualQueryStatus('查询中...');
-        try {
-            const res = await fetch(`${API_BASE_URL}/road/routes/query-position`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ carId }),
-            });
-            const data = await res.json();
-            if (!res.ok || data.error) {
-                throw new Error(data.error || `Manual position query failed: ${res.status}`);
-            }
-            if (!data.found) {
-                setManualQueryStatus('未查询到该车辆位置');
-                return;
-            }
-
-            roadMapRef.current?.updateTruckPosition(
-                `manual-${carId}`,
-                [data.lng, data.lat],
-                { plate: carId, speedKmh: data.speedKmh, status: '临时查询', manualMarker: true },
-            );
-            setManualQueryStatus(`经度 ${Number(data.lng).toFixed(5)} / 纬度 ${Number(data.lat).toFixed(5)} / ${Math.round(Number(data.speedKmh) || 0)} km/h`);
-        } catch (error) {
-            console.error('手动查询失败', error);
-            setManualQueryStatus('查询失败，请检查车辆 ID 或后端接口');
-        } finally {
-            setIsManualQuerying(false);
-        }
-    }, [isManualQuerying, manualCarId]);
-
-    const manualPositionLookup = view === 'roadMap' && (
-        <ManualPositionLookup
-            carId={manualCarId}
-            onCarIdChange={setManualCarId}
-            onQuery={() => void handleManualQuery()}
-            isQuerying={isManualQuerying}
-            status={manualQueryStatus}
-        />
-    );
-
     const roadStrategyTabs = view === 'roadMap' && (
         <RoadGroupTabs
             activeStrategy={roadGroupStrategy}
             onStrategyChange={(strategy) => {
+                console.log('[strategy change] from', roadGroupStrategy, 'to', strategy);
+                roadGroupRingsRef.current.set(strategy, createRoadGroupRing());
+                roadGroupSummariesByStrategyRef.current.set(strategy, new Map());
+                roadGroupRouteIdsByStrategyRef.current.set(strategy, new Map());
                 setRoadGroupStrategy(strategy);
                 setCurrentRoadGroup(null);
                 activeRoutesRef.current.clear();
                 routeOrdersRef.current = [];
                 setRouteOrders([]);
                 roadMapRef.current?.clearRoads();
-
-                pendingGroupCacheRef.current.clear();
                 pendingNextGroupIdRef.current = null;
             }}
         />
@@ -1241,7 +1354,6 @@ function DashboardPage() {
                     {roadStrategyTabs}
                     {viewButtons}
                     {dispatchControls}
-                    {/*{manualPositionLookup}*/}
                 </div>
             }
             rightPanel={null}
