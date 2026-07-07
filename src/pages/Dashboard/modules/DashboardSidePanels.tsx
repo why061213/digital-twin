@@ -2,8 +2,9 @@ import Panel from '@/components/Layout/Panel';
 import EChart from '@/components/Charts/EChart';
 import type { EChartsOption } from 'echarts';
 import type { RouteOrder } from '../hooks/useDashboardRealtime';
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+
 
 type WarehouseFocusState = {
     cityName: string;
@@ -14,6 +15,7 @@ type RoadGroupPanelState = {
     groupId: string | null;
     groupIndex?: number;
     groupCount?: number;
+    vehicleCount?: number;
     groupKey?: string;
     groupScenario?: string;
     scenarioReason?: string;
@@ -25,6 +27,7 @@ type DashboardSidePanelsProps = {
     mode: 'hidden' | 'warehouse_focus' | 'road_group_focus';
     warehouseFocus: WarehouseFocusState | null;
     roadGroup: RoadGroupPanelState | null;
+    isRoadGroupFading: boolean;
 };
 
 function numberValue(value: unknown, fallback: number) {
@@ -194,11 +197,10 @@ function buildOrderSummaries(routes: RouteOrder[], fallbackOrderIds: string[] = 
         const id = String((route as any).orderId || route.lineId);
         const existing = orderMap.get(id);
         const totalTons = Number((route as any).orderTotalTons) || 0;
-        const vehicleCount = Number((route as any).orderVehicleCount) || 0;
         if (existing) {
             existing.totalTons = Math.max(existing.totalTons, totalTons);
-            existing.dispatchedVehicles = Math.max(existing.dispatchedVehicles, vehicleCount);
             existing.routeCount += 1;
+            existing.dispatchedVehicles = existing.routeCount; // 已派 = 当前实际路线数
             return;
         }
 
@@ -206,8 +208,8 @@ function buildOrderSummaries(routes: RouteOrder[], fallbackOrderIds: string[] = 
             id,
             name: String((route as any).orderName || (id.startsWith('BULK-') ? '大宗运输订单' : '运输任务')),
             totalTons,
-            dispatchedVehicles: vehicleCount,
             routeCount: 1,
+            dispatchedVehicles: 1, // 初始 1 辆
         });
     });
 
@@ -226,12 +228,22 @@ function buildOrderSummaries(routes: RouteOrder[], fallbackOrderIds: string[] = 
     return Array.from(orderMap.values());
 }
 
+function routeIdentity(route: RouteOrder) {
+    const pathKey = String((route as any).pathKey ?? '').trim();
+    if (pathKey) return pathKey;
+    return `${route.from ?? '未知起点'}→${route.to ?? '未知终点'}`;
+}
+
+function uniqueRouteCount(routes: RouteOrder[]) {
+    return new Set(routes.map(routeIdentity)).size;
+}
+
 function AutoScrollList({
-    enabled,
-    resetKey,
-    speedPxPerSecond = 36,
-    children,
-}: {
+                            enabled,
+                            resetKey,
+                            speedPxPerSecond = 36,
+                            children,
+                        }: {
     enabled: boolean;
     resetKey: string;
     speedPxPerSecond?: number;
@@ -242,7 +254,6 @@ function AutoScrollList({
     useEffect(() => {
         const container = scrollRef.current;
         if (!container) return;
-
         container.scrollTop = 0;
         if (!enabled) return;
 
@@ -253,7 +264,6 @@ function AutoScrollList({
             const elapsedMs = Math.min(currentTime - previousTime, 64);
             previousTime = currentTime;
 
-            // 使用真实 scrollTop 推动列表自动滚动，滚动条由 no-scrollbar 隐藏。
             const loopHeight = container.scrollHeight / 2;
             if (loopHeight > container.clientHeight) {
                 container.scrollTop += (elapsedMs * speedPxPerSecond) / 1000;
@@ -261,7 +271,6 @@ function AutoScrollList({
                     container.scrollTop -= loopHeight;
                 }
             }
-
             animationFrame = window.requestAnimationFrame(tick);
         };
 
@@ -330,22 +339,62 @@ function WarehouseRightPanels({ focus }: { focus: WarehouseFocusState }) {
     );
 }
 
+function useRoadGroupPanelTransition(
+    roadGroup: RoadGroupPanelState | null,
+    isRoadGroupFading: boolean
+) {
+    const [displayRoadGroup, setDisplayRoadGroup] = useState<RoadGroupPanelState | null>(roadGroup);
+    const [transitionKey, setTransitionKey] = useState(0);
+    const pendingRoadGroupRef = useRef<RoadGroupPanelState | null | undefined>(undefined);
+    const displayGroupId = displayRoadGroup?.groupId ?? null;
+    const nextGroupId = roadGroup?.groupId ?? null;
+
+    useLayoutEffect(() => {
+        if (isRoadGroupFading && nextGroupId !== displayGroupId) {
+            pendingRoadGroupRef.current = roadGroup;
+            return;
+        }
+
+        const pendingRoadGroup = pendingRoadGroupRef.current;
+        if (!isRoadGroupFading && pendingRoadGroup !== undefined) {
+            pendingRoadGroupRef.current = undefined;
+            setDisplayRoadGroup(pendingRoadGroup);
+            setTransitionKey((key) => key + 1);
+            return;
+        }
+
+        setDisplayRoadGroup(roadGroup);
+        if (nextGroupId !== displayGroupId) {
+            setTransitionKey((key) => key + 1);
+        }
+    }, [displayGroupId, isRoadGroupFading, nextGroupId, roadGroup]);
+
+    return {
+        displayRoadGroup,
+        transitionKey,
+        isHoldingPreviousRoadGroup: isRoadGroupFading && nextGroupId !== displayGroupId,
+    };
+}
+
 function RoadGroupLeftPanels({ roadGroup }: { roadGroup: RoadGroupPanelState }) {
     const routes = roadGroup.routes;
+    const routeCount = uniqueRouteCount(routes);
+    const vehicleCount = roadGroup.vehicleCount ?? routes.length;
     const running = routes.filter((route) => route.status.includes('运输') || route.status === 'running').length;
     const finished = routes.filter((route) => route.status.includes('完成') || route.status === 'finished').length;
     const avgSpeed = routes.length
         ? routes.reduce((sum, route) => sum + (Number((route as any).speedKmh) || 0), 0) / routes.length
         : 0;
     const orderSummaries = buildOrderSummaries(routes, roadGroup.orderIds ?? []);
-    const shouldAutoScrollOrders = orderSummaries.length > 4;
+    const shouldAutoScrollOrders = orderSummaries.length >= 4;
 
     return (
         <>
             <Panel title="运输聚合详情" className="h-[44%] min-h-[300px]">
                 <div className="space-y-2">
                     <StatRow label="当前组" value={roadGroup.groupIndex !== undefined ? `第 ${roadGroup.groupIndex + 1} 组` : roadGroup.groupId ?? '-'} />
-                    <StatRow label="组内线路" value={roadGroup.groupCount ?? routes.length} unit="条" tone="text-cyan-200" />
+                    <StatRow label="组内线路" value={roadGroup.groupCount ?? routeCount} unit="条" tone="text-cyan-200" />
+                    <StatRow label="调度车辆" value={vehicleCount} unit="辆" tone="text-sky-200" />
                     <StatRow label="运输中" value={running} unit="辆" tone="text-emerald-200" />
                     <StatRow label="已完成" value={finished} unit="辆" />
                     <StatRow label="平均时速" value={Math.round(avgSpeed)} unit="km/h" tone="text-amber-200" />
@@ -354,14 +403,11 @@ function RoadGroupLeftPanels({ roadGroup }: { roadGroup: RoadGroupPanelState }) 
 
             <Panel title="组内订单" className="h-[56%] min-h-[320px]">
                 <div className="flex h-full flex-col gap-3">
-                    <div className="rounded border border-cyan-300/15 bg-cyan-300/5 px-3 py-3 text-xs leading-5 text-cyan-100">
-                        <div className="mb-1 text-[11px] text-slate-400">分组场景</div>
-                        <div>{roadGroup.scenarioReason || roadGroup.groupKey || '当前运输分组'}</div>
-                    </div>
+                    {/* 已移除分组场景调试信息 */}
                     <div className="min-h-0 flex-1">
                         <AutoScrollList
                             enabled={shouldAutoScrollOrders}
-                            resetKey={`${roadGroup.groupId ?? 'road-group'}-orders-${orderSummaries.length}`}
+                            resetKey={`${roadGroup.groupId ?? 'road-group'}-orders`}
                         >
                             {orderSummaries.map((order, index) => (
                                 <div key={`${order.id}-${index}`} className="rounded border border-white/5 bg-white/[0.025] px-3 py-2 text-xs">
@@ -375,7 +421,7 @@ function RoadGroupLeftPanels({ roadGroup }: { roadGroup: RoadGroupPanelState }) 
                                     <div className="mt-2 grid grid-cols-2 gap-1 text-[10px] text-slate-400">
                                         <span>总量 {order.totalTons > 0 ? `${order.totalTons} 吨` : '--'}</span>
                                         <span className="text-right">
-                                            已派 {order.dispatchedVehicles > 0 ? order.dispatchedVehicles : order.routeCount} 辆
+                                            已派 {order.dispatchedVehicles} 辆
                                         </span>
                                     </div>
                                 </div>
@@ -390,14 +436,21 @@ function RoadGroupLeftPanels({ roadGroup }: { roadGroup: RoadGroupPanelState }) 
 
 function RoadGroupRightPanels({ roadGroup }: { roadGroup: RoadGroupPanelState }) {
     const routes = roadGroup.routes;
-    const sortedRoutes = [...routes].sort((left, right) => {
-        const leftFinished = left.status.includes('完成') || left.status === 'finished';
-        const rightFinished = right.status.includes('完成') || right.status === 'finished';
-        if (leftFinished === rightFinished) return 0;
-        return leftFinished ? -1 : 1;
+
+    const finishedRoutes = routes.filter(
+        (r) => r.status === '已完成' || r.status === 'finished'
+    );
+    const unfinishedRoutes = routes.filter(
+        (r) => !(r.status === '已完成' || r.status === 'finished')
+    );
+
+    const sortedUnfinished = [...unfinishedRoutes].sort((a, b) => {
+        const aProgress = routeProgress(a);
+        const bProgress = routeProgress(b);
+        return bProgress - aProgress;
     });
-    const visibleRoutes = sortedRoutes.slice(0, 40);
-    const shouldAutoScroll = visibleRoutes.length > 6;
+    const visibleUnfinished = sortedUnfinished.slice(0, 40);
+    const shouldAutoScroll = visibleUnfinished.length > 5; // 让 AutoScrollList 内部判断溢出再滚动
 
     const renderRouteCard = (route: RouteOrder, keySuffix = '') => {
         const progress = routeProgress(route);
@@ -405,7 +458,9 @@ function RoadGroupRightPanels({ roadGroup }: { roadGroup: RoadGroupPanelState })
             <div key={`${route.lineId}${keySuffix}`} className="rounded border border-white/5 bg-white/[0.025] px-2 py-2 text-xs">
                 <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-cyan-200">{route.plate}</span>
-                    <span className="rounded border border-emerald-300/20 px-1.5 py-0.5 text-[10px] text-emerald-200">{route.status}</span>
+                    <span className="rounded border border-emerald-300/20 px-1.5 py-0.5 text-[10px] text-emerald-200">
+                        {route.status}
+                    </span>
                 </div>
                 <div className="mt-1 truncate text-slate-400" title={`${route.from} → ${route.to}`}>
                     {route.from} → {route.to}
@@ -433,30 +488,73 @@ function RoadGroupRightPanels({ roadGroup }: { roadGroup: RoadGroupPanelState })
         );
     };
 
+    const recentFinished = finishedRoutes.slice(-4); // 最新 4 条
+
     return (
-        <>
-            <Panel title="组内车辆" className="h-full min-h-0">
-                {/* 车辆数量较多时自动滚动；no-scrollbar 隐藏滚动条但保留滚轮/触控滚动能力。 */}
-                <AutoScrollList
-                    enabled={shouldAutoScroll}
-                    resetKey={`${roadGroup.groupId ?? 'road-group'}-vehicles-${visibleRoutes.length}`}
-                >
-                    {visibleRoutes.map((route) => renderRouteCard(route))}
-                </AutoScrollList>
-            </Panel>
-        </>
+        <Panel title="组内车辆" className="h-full min-h-0">
+            {/* 关键：在 Panel 内部建立 flex 列容器，撑满内容区高度 */}
+            <div className="h-full flex flex-col">
+                {/* 上方：运输中车辆（自动滚动） */}
+                <div className="flex-1 min-h-0">
+                    <AutoScrollList
+                        enabled={shouldAutoScroll}
+                        resetKey={`${roadGroup.groupId ?? 'road-group'}-vehicles`}
+                    >
+                        {visibleUnfinished.map((route) => renderRouteCard(route))}
+                    </AutoScrollList>
+                </div>
+
+                {/* 下方：已完成车辆（固定高度，始终显示） */}
+                <div className="shrink-0 border-t border-cyan-400/20 bg-cyan-400/5 px-2 py-2 overflow-hidden">
+                    {recentFinished.length > 0 ? (
+                        <>
+                            <div className="text-xs text-cyan-300 font-semibold mb-1">已完成车辆</div>
+                            {recentFinished.map((route) => (
+                                <div
+                                    key={route.lineId}
+                                    className="flex items-center justify-between gap-2 rounded border border-emerald-300/10 bg-emerald-300/5 px-2 py-1 text-xs"
+                                >
+                                    <span className="truncate text-cyan-200 font-medium">{route.plate}</span>
+                                    <span className="truncate text-slate-400 text-[11px]"
+                                          title={`${route.from} → ${route.to}`}>
+                                        {route.from} → {route.to}
+                                    </span>
+                                    <span className="shrink-0 text-emerald-300 flex items-center gap-1 text-[11px]">
+                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                                  d="M5 13l4 4L19 7"/>
+                                        </svg>
+                                        完成
+                                    </span>
+                                </div>
+                            ))}
+                        </>
+                    ) : (
+                        <div className="text-xs text-slate-500 mt-2 text-center">暂无完成车辆</div>
+                    )}
+                </div>
+            </div>
+        </Panel>
     );
 }
 
-function DashboardSidePanels({ mode, warehouseFocus, roadGroup }: DashboardSidePanelsProps) {
+function DashboardSidePanels({mode, warehouseFocus, roadGroup, isRoadGroupFading }: DashboardSidePanelsProps) {
     const visible = mode !== 'hidden';
     const isWarehouseMode = mode === 'warehouse_focus';
+    const {
+        displayRoadGroup,
+        transitionKey,
+        isHoldingPreviousRoadGroup,
+    } = useRoadGroupPanelTransition(roadGroup, isRoadGroupFading);
     const leftWidthClass = isWarehouseMode
         ? 'w-[18%] min-w-[220px] max-w-[300px]'
         : 'w-[22%] min-w-[280px]';
     const rightWidthClass = isWarehouseMode
         ? 'w-[20%] min-w-[240px] max-w-[320px]'
         : 'w-[25%] min-w-[320px]';
+    const roadPanelTransitionClass = isHoldingPreviousRoadGroup
+        ? 'translate-y-1 opacity-60'
+        : 'translate-y-0 opacity-100';
 
     return (
         <div
@@ -466,11 +564,27 @@ function DashboardSidePanels({ mode, warehouseFocus, roadGroup }: DashboardSideP
         >
             <div className={`pointer-events-auto flex ${leftWidthClass} flex-col gap-3 transition-transform duration-500 ${visible ? 'translate-x-0' : '-translate-x-4'}`}>
                 {mode === 'warehouse_focus' && warehouseFocus && <WarehouseLeftPanels focus={warehouseFocus} />}
-                {mode === 'road_group_focus' && roadGroup && <RoadGroupLeftPanels roadGroup={roadGroup} />}
+                {mode === 'road_group_focus' && displayRoadGroup && (
+                    <div
+                        className={`flex min-h-0 flex-1 flex-col gap-3 transition-all duration-500 ease-out ${roadPanelTransitionClass}`}
+                    >
+                        <div key={`road-left-${transitionKey}`} className="flex min-h-0 flex-1 flex-col gap-3">
+                            <RoadGroupLeftPanels roadGroup={displayRoadGroup} />
+                        </div>
+                    </div>
+                )}
             </div>
             <div className={`pointer-events-auto flex ${rightWidthClass} flex-col gap-3 transition-transform duration-500 ${visible ? 'translate-x-0' : 'translate-x-4'}`}>
                 {mode === 'warehouse_focus' && warehouseFocus && <WarehouseRightPanels focus={warehouseFocus} />}
-                {mode === 'road_group_focus' && roadGroup && <RoadGroupRightPanels roadGroup={roadGroup} />}
+                {mode === 'road_group_focus' && displayRoadGroup && (
+                    <div
+                        className={`flex min-h-0 flex-1 flex-col transition-all duration-500 ease-out ${roadPanelTransitionClass}`}
+                    >
+                        <div key={`road-right-${transitionKey}`} className="flex min-h-0 flex-1 flex-col">
+                            <RoadGroupRightPanels roadGroup={displayRoadGroup} />
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

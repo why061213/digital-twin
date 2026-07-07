@@ -64,4 +64,4 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle, ChinaMap3DProps>(({ onVisualRead
 });
 
 export default ChinaMap3D;
-export type { ChinaMap3DHandle };
+export type { ChinaMap3DHandle, WarehouseTourOptions } from './types';

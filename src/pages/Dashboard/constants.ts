@@ -1,5 +1,6 @@
-﻿import { RoadConstant } from '@/config/roadConstant';
+﻿
 import type { RoadGroupStrategy } from './types';
+import type { AppConfig } from './hooks/useAppConfig';
 
 const DEFAULT_POSITION_QUERY_INTERVAL_MS = 60_000;
 const DEFAULT_REAL_POSITION_QUERY_INTERVAL_MS = 1_800_000;
@@ -18,7 +19,6 @@ function readPositiveEnv(key: string, fallback: number) {
     const value = Number(raw);
     return Number.isFinite(value) && value > 0 ? value : fallback;
 }
-
 const SIMULATION_PROFILE = String(import.meta.env.VITE_TRUCK_SIMULATION_PROFILE || 'test').toLowerCase();
 export const POSITION_QUERY_INTERVAL_MS = SIMULATION_PROFILE === 'real'
     ? readPositiveEnv('VITE_TRUCK_POSITION_QUERY_INTERVAL_REAL_MS', DEFAULT_REAL_POSITION_QUERY_INTERVAL_MS)
@@ -34,9 +34,11 @@ export const ROAD_GROUP_TRANSITION_MS = readPositiveEnv('VITE_ROAD_GROUP_TRANSIT
 export const ROAD_GROUP_SWAP_DELAY_MS = Math.max(120, Math.round(ROAD_GROUP_TRANSITION_MS * 0.45));
 export const MAX_ROADS_PER_GROUP = 24; // 画布运输上限
 
-export function roadGroupDisplayMs(routeCount: number) {
+export function roadGroupDisplayMs(routeCount: number, config?: Pick<AppConfig, 'roadGroupDisplayBaseMs' | 'roadGroupDisplayAddMs'>) {
     const safeRouteCount = Math.max(0, routeCount);
-    const displayMs = Math.max(1_000, RoadConstant.displayBase + safeRouteCount * RoadConstant.displayAdd);
+    const baseMs = config?.roadGroupDisplayBaseMs ?? 8_000;
+    const addMs = config?.roadGroupDisplayAddMs ?? 200;
+    const displayMs = Math.max(1_000, baseMs + safeRouteCount * addMs);
     return Math.min(ROAD_GROUP_DISPLAY_MAX_MS, displayMs);
 }
 

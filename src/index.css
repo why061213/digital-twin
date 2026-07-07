@@ -110,13 +110,7 @@ code {
   background: var(--code-bg);
 }
 
-.no-scrollbar {
-  scrollbar-width: none;
-}
 
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
 
 .dashboard-auto-scroll {
   mask-image: linear-gradient(to bottom, transparent, #000 8%, #000 92%, transparent);

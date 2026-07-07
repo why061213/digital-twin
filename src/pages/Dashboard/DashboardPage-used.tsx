@@ -53,11 +53,37 @@ import {
     waitFrame,
     waitMs,
 } from './utils';
+import {useAppConfig} from "@/pages/Dashboard/hooks/useAppConfig.ts";
 
 const ROAD_PATH_BUFFER_QUIET_MS = 650;
 const ROAD_PATH_BUFFER_MAX_WAIT_MS = 1600;
 
 function DashboardPage() {
+    // 自动轮播控制
+    const chinaMapTourStartedSessionRef = useRef(0);
+    const chinaMapLoopTargetRef = useRef(1);
+    const autoCarouselStartedRef = useRef(false);
+    const noOrderFallbackTimerRef = useRef<number | null>(null);
+    const roadGroupsRef = useRef<RoadGroupSummary[]>([]);
+    const autoCarouselEnabledRef = useRef(true);
+    const roadGroupCycleCountRef = useRef(0);
+    const targetCyclesRef = useRef(2);
+    const chinaMapDurationMsRef = useRef(30000);
+    const chinaMapTimerRef = useRef<number | null>(null);
+    const isChinaMapAutoPhaseRef = useRef(false);
+    const startChinaMapAutoPhaseRef = useRef<() => void>(() => {});
+    const viewRef = useRef<ViewMode>('warehouse');
+    const {config: appConfig} = useAppConfig();
+
+    useEffect(() => {
+        if (!appConfig) return;
+
+        autoCarouselEnabledRef.current = appConfig.autoCarouselEnabled ?? true;
+        targetCyclesRef.current = Math.max(1, appConfig.autoCarouselRoadGroupCycles ?? 2);
+        chinaMapLoopTargetRef.current = Math.max(1, appConfig.autoCarouselChinaMapLoops ?? 1);
+        chinaMapDurationMsRef.current = Math.max(1000, appConfig.autoCarouselChinaMapDurationMs ?? 30000);
+    }, [appConfig]);
+
     const roadGroupKeepCurrentRefreshRef = useRef(false);
     const roadGroupKeepCurrentEmptyRef = useRef(false);
     const staleRoadGroupFallbackIdRef = useRef<string | null>(null);
@@ -112,8 +138,24 @@ function DashboardPage() {
     const roadGroupTransitionRunRef = useRef(0);
 
     useEffect(() => {
+        roadGroupsRef.current = roadGroups;
+    }, [roadGroups]);
+
+    const updateTargetCycles = useCallback((groupCount: number) => {
+        // 组越少循环次数越多，范围 1～5
+        const dynamic = Math.max(1, Math.min(5, 6 - groupCount));
+        targetCyclesRef.current = dynamic;
+        console.log('[autoCarousel] 动态目标循环次数更新为', dynamic, '组数量', groupCount);
+    }, []);
+
+
+    useEffect(() => {
         routeOrdersRef.current = routeOrders;
     }, [routeOrders]);
+
+    useEffect(() => {
+        viewRef.current = view;
+    }, [view]);
 
     const currentRoadGroupRing = useCallback(
         () => ensureRoadGroupRing(roadGroupRingsRef.current, roadGroupStrategy),
@@ -278,6 +320,51 @@ function DashboardPage() {
         setIsRoadMapVisualReady(false);
         setIsRoadMapDataReady(false);
     }, []);
+
+    const resetRoadMapPlayback = useCallback((reason: string) => {
+        console.log('[resetRoadMapPlayback]', reason);
+        if (roadGroupAdvanceTimerRef.current !== null) {
+            window.clearTimeout(roadGroupAdvanceTimerRef.current);
+            roadGroupAdvanceTimerRef.current = null;
+        }
+        if (roadPathRefreshTimerRef.current !== null) {
+            window.clearTimeout(roadPathRefreshTimerRef.current);
+            roadPathRefreshTimerRef.current = null;
+        }
+        if (roadPathBufferTimerRef.current !== null) {
+            window.clearTimeout(roadPathBufferTimerRef.current);
+            roadPathBufferTimerRef.current = null;
+        }
+
+        roadPathBroadcastBufferRef.current.clear();
+        roadPathBufferStartedAtRef.current = 0;
+        pendingRoadGroupRefreshIdRef.current = undefined;
+        queuedRoadGroupRefreshPendingRef.current = false;
+        queuedRoadGroupRefreshIdRef.current = undefined;
+        pendingNextGroupIdRef.current = null;
+        staleRoadGroupFallbackIdRef.current = null;
+        roadGroupKeepCurrentRefreshRef.current = false;
+        roadGroupKeepCurrentEmptyRef.current = false;
+
+        activeRoutesRef.current.clear();
+        positionRequestsRef.current.clear();
+        routeGroupIdRef.current.clear();
+        completedRouteIdsRef.current.clear();
+        routeOrdersRef.current = [];
+        activeRoadGroupIdRef.current = null;
+
+        roadGroupRingsRef.current.set(roadGroupStrategy, createRoadGroupRing());
+        roadGroupSummariesByStrategyRef.current.set(roadGroupStrategy, new Map());
+        roadGroupRouteIdsByStrategyRef.current.set(roadGroupStrategy, new Map());
+
+        roadMapRef.current?.clearRoads();
+        setRouteOrders([]);
+        setRoadGroups([]);
+        setActiveRoadGroupId(null);
+        setIsRoadGroupFading(false);
+        setIsLoadingRoadGroup(false);
+        setRoadGroupAdvanceTick((tick) => tick + 1);
+    }, [roadGroupStrategy]);
 
     const handleCityRaise = useCallback((cityName: string) => {
         mapRef.current?.riseCity(cityName);
@@ -634,10 +721,7 @@ function DashboardPage() {
                 if (nextGroupId) {
                     await loadRoadGroup(nextGroupId);
                 } else {
-                    activeRoutesRef.current.clear();
-                    roadMapRef.current?.clearRoads();
-                    setRouteOrders([]);
-                    setCurrentRoadGroup(null);
+                    resetRoadMapPlayback('refresh found no available road groups');
                 }
             } catch (error) {
                 console.warn('Road groups refresh failed', error);
@@ -654,7 +738,7 @@ function DashboardPage() {
                 }
             }
         },
-        [fetchRoadGroups, loadRoadGroup, setCurrentRoadGroup]
+        [fetchRoadGroups, loadRoadGroup, resetRoadMapPlayback]
     );
 
     const scheduleRoadGroupRefresh = useCallback(
@@ -718,6 +802,68 @@ function DashboardPage() {
         [flushRoadPathBroadcastBuffer]
     );
 
+    const markRoadDisplayLoopComplete = useCallback((reason: string) => {
+        if (!autoCarouselEnabledRef.current) return false;
+
+        roadGroupCycleCountRef.current += 1;
+
+        console.log('[autoCarousel] completed road display loop', {
+            reason,
+            cycle: roadGroupCycleCountRef.current,
+            target: targetCyclesRef.current,
+        });
+
+        if (roadGroupCycleCountRef.current >= Math.max(1, targetCyclesRef.current)) {
+            console.log('[autoCarousel] road display loop target reached, enter ChinaMap phase', {
+                cycle: roadGroupCycleCountRef.current,
+                target: targetCyclesRef.current,
+            });
+
+            startChinaMapAutoPhaseRef.current();
+            return true;
+        }
+
+        return false;
+    }, []);
+
+    const handleRoadGroupCycleComplete = useCallback(async (reason: string) => {
+        if (autoCarouselEnabledRef.current) {
+            roadGroupCycleCountRef.current += 1;
+            console.log('[autoCarousel] completed road group cycle', {
+                reason,
+                cycle: roadGroupCycleCountRef.current,
+                target: targetCyclesRef.current,
+            });
+            if (roadGroupCycleCountRef.current >= Math.max(1, targetCyclesRef.current)) {
+                startChinaMapAutoPhaseRef.current();
+                return true;
+            }
+        }
+
+        try {
+            const groups = await fetchRoadGroups();
+            updateTargetCycles(groups.length); // 动态更新目标次数
+            const ring = currentRoadGroupRing();
+            normalizeRoadGroupRing(ring);
+            const nextGroupId = ring.head?.groupId ?? null;
+            if (nextGroupId) {
+                await loadRoadGroup(nextGroupId);
+                return true;
+            }
+        } catch (error) {
+            console.warn('自动轮播刷新分组失败', error);
+        }
+
+        if (autoCarouselEnabledRef.current) {
+            console.log('[autoCarousel] no available road groups, enter ChinaMap phase');
+            startChinaMapAutoPhaseRef.current();
+            return true;
+        }
+
+        resetRoadMapPlayback(`road group cycle complete: ${reason}`);
+        return true;
+    }, [currentRoadGroupRing, fetchRoadGroups, loadRoadGroup, normalizeRoadGroupRing, resetRoadMapPlayback, startChinaMapAutoPhaseRef, updateTargetCycles]);
+
     const advanceRoadGroup = useCallback(async () => {
         const ring = currentRoadGroupRing();
         normalizeRoadGroupRing(ring);
@@ -730,8 +876,18 @@ function DashboardPage() {
             nextCached: pendingNextGroupIdRef.current,
         });
 
-        if (!ring.head || roadGroupLoadingRef.current) {
-            console.log('[advanceRoadGroup] aborted (no head or loading)');
+        if (roadGroupLoadingRef.current) {
+            console.log('[advanceRoadGroup] aborted (loading)');
+            return;
+        }
+
+        if (!ring.head) {
+            const activeGroupId = activeRoadGroupIdRef.current;
+            if (activeGroupId && isRoadGroupComplete(activeGroupId)) {
+                await handleRoadGroupCycleComplete('active group complete and ring has no head');
+            } else {
+                console.log('[advanceRoadGroup] aborted (no head)');
+            }
             return;
         }
 
@@ -747,12 +903,26 @@ function DashboardPage() {
 
         // 原有链表遍历逻辑
         if (ring.nodes.size <= 1) {
-            console.log('[advanceRoadGroup] only one node, skipping');
+            const onlyGroupId = ring.head?.groupId ?? activeRoadGroupIdRef.current;
+
+            if (!onlyGroupId) {
+                console.log('[advanceRoadGroup] only one node branch but no group id');
+                return;
+            }
+
+            // 单组情况下，每次展示时间结束，就算完成一轮 Road 展示循环。
+            if (markRoadDisplayLoopComplete('single road group display loop')) {
+                return;
+            }
+
+            // 没达到切 ChinaMap 的目标轮数，就刷新/继续显示这个唯一组。
+            await loadRoadGroup(onlyGroupId);
             return;
         }
 
         let candidate = ring.current?.next ?? ring.head;
         const maxAttempts = Math.max(1, ring.nodes.size);
+
         console.log('[advanceRoadGroup] starting traverse, maxAttempts:', maxAttempts, 'startCandidate:', candidate?.groupId);
 
         for (let attempt = 0; candidate && attempt < maxAttempts; attempt++) {
@@ -763,6 +933,18 @@ function DashboardPage() {
 
             const groupId = candidate.groupId;
             const nextCandidate = candidate.next ?? ring.head;
+            const isWrappingToHead =
+                autoCarouselEnabledRef.current &&
+                attempt === 0 &&
+                ring.current !== null &&
+                candidate === ring.head &&
+                ring.nodes.size > 1;
+
+            if (isWrappingToHead) {
+                if (markRoadDisplayLoopComplete('wrapped from tail to head')) {
+                    return;
+                }
+            }
 
             console.log(`[advanceRoadGroup] attempt ${attempt}: checking group ${groupId}, isComplete: ${isRoadGroupComplete(groupId)}`);
 
@@ -783,7 +965,8 @@ function DashboardPage() {
             candidate = nextCandidate;
         }
         console.log('[advanceRoadGroup] traversal ended without loading any group');
-    }, [currentRoadGroupRing, isRoadGroupComplete, loadRoadGroup, normalizeRoadGroupRing, removeRoadGroupFromRing]);
+        await handleRoadGroupCycleComplete('road group traverse found no live routes');
+    }, [currentRoadGroupRing, handleRoadGroupCycleComplete, isRoadGroupComplete, loadRoadGroup, normalizeRoadGroupRing, removeRoadGroupFromRing, markRoadDisplayLoopComplete]);
 
 
     const finishRoute = useCallback((lineId: string) => {
@@ -793,7 +976,14 @@ function DashboardPage() {
         setRouteOrders((prev) =>
             prev.map((item) => (item.lineId === lineId ? {...item, status: '已完成'} : item))
         );
-    }, []);
+        const activeGroupId = activeRoadGroupIdRef.current;
+        const activeGroupRouteIds = activeGroupId
+            ? currentRoadGroupRouteIds().get(activeGroupId)
+            : null;
+        if (activeGroupRouteIds && Array.from(activeGroupRouteIds).every((id) => completedRouteIdsRef.current.has(id))) {
+            setRoadGroupAdvanceTick((tick) => tick + 1);
+        }
+    }, [currentRoadGroupRouteIds]);
 
     const handleRouteRaise = useCallback((_order: RouteOrder) => {
         // 城市飞线事件由 ChinaMap3D 处理；道路级地图只加载后端分组后的路线。
@@ -859,8 +1049,15 @@ function DashboardPage() {
 
     const requestViewChange = useCallback((nextView: ViewMode) => {
         setWarehouseFocus(null);
+        const currentView = viewRef.current;
+
+        if (!isChinaMapAutoPhaseRef.current && chinaMapTimerRef.current !== null) {
+            window.clearTimeout(chinaMapTimerRef.current);
+            chinaMapTimerRef.current = null;
+        }
+
         if (nextView === 'chinaMap') {
-            if (view === 'chinaMap' || isPreparingChinaMap || isRevealingChinaMap) return;
+            if (currentView === 'chinaMap' || isPreparingChinaMap || isRevealingChinaMap) return;
             cancelRoadMapTransition();
             chinaMapPrepareRunRef.current += 1;
             setIsPreparingChinaMap(true);
@@ -872,7 +1069,7 @@ function DashboardPage() {
         }
 
         if (nextView === 'roadMap') {
-            if (view === 'roadMap' || isPreparingRoadMap || isRevealingRoadMap) return;
+            if (currentView === 'roadMap' || isPreparingRoadMap || isRevealingRoadMap) return;
             cancelChinaMapTransition();
             roadMapPrepareRunRef.current += 1;
             skipNextRoadMapRefreshRef.current = false;
@@ -894,8 +1091,27 @@ function DashboardPage() {
         isPreparingRoadMap,
         isRevealingChinaMap,
         isRevealingRoadMap,
-        view,
     ]);
+
+
+
+    useEffect(() => {
+        startChinaMapAutoPhaseRef.current = () => {
+            if (!autoCarouselEnabledRef.current) return;
+            if (viewRef.current !== 'roadMap') return;
+
+            console.log('[autoCarousel] switch to ChinaMap, target loops:', chinaMapLoopTargetRef.current);
+
+            isChinaMapAutoPhaseRef.current = true;
+
+            if (chinaMapTimerRef.current !== null) {
+                window.clearTimeout(chinaMapTimerRef.current);
+                chinaMapTimerRef.current = null;
+            }
+
+            requestViewChange('chinaMap');
+        };
+    }, [requestViewChange]);
 
     const requestDispatch = useCallback(async () => {
         if (isDispatching) return;
@@ -973,8 +1189,9 @@ function DashboardPage() {
         void cityNames;
         void mode;
     }, []);
+
     const handleWarehouseFocus = useCallback((cityName: string, panels: WarehouseFocusPanel[], style?: WarehouseFocusStyle) => {
-        mapRef.current?.showCityPanels(cityName, panels, style);
+        mapRef.current?.cacheCityPanels(cityName, panels, style);
     }, []);
 
     const waitForChinaMapReady = useCallback(async () => {
@@ -1050,17 +1267,13 @@ function DashboardPage() {
             if (chinaMapPrepareRunRef.current !== prepareRunId) return;
 
             // 先在隐藏状态下启动巡游，避开 Three 首帧/巡游起步阶段可能出现的黑底。
-            window.requestAnimationFrame(() => {
-                mapRef.current?.startWarehouseTour();
-            });
             setIsChinaMapDataReady(true);
         } catch (error) {
-            console.warn('Warehouse snapshot request failed', error);
-            if (chinaMapPrepareRunRef.current === prepareRunId) {
-                setIsPreparingChinaMap(false);
-                setIsRevealingChinaMap(false);
-                setIsChinaMapDataReady(false);
-            }
+            console.warn('Warehouse snapshot request failed，使用空 ChinaMap 兜底显示', error);
+
+            await waitForChinaMapReady();
+            if (chinaMapPrepareRunRef.current !== prepareRunId) return;
+            setIsChinaMapDataReady(true);
         }
     }, [handleWarehouseUpdate, waitForChinaMapReady]);
 
@@ -1090,15 +1303,64 @@ function DashboardPage() {
         const ring = currentRoadGroupRing();
         normalizeRoadGroupRing(ring);
         if (ring.nodes.size <= 1) {
-            console.log('[roadGroupAdvanceTimer] skipped, ring size:', ring.nodes.size, 'roadGroups:', roadGroups.length);
-            return;
+            const onlyGroupId = ring.head?.groupId ?? activeRoadGroupIdRef.current;
+            if (!onlyGroupId || !isRoadGroupComplete(onlyGroupId)) {
+                console.log('[roadGroupAdvanceTimer] skipped, ring size:', ring.nodes.size, 'roadGroups:', roadGroups.length);
+                return;
+            }
+
+            console.log('[roadGroupAdvanceTimer] scheduled cleanup for completed terminal group', {
+                ringSize: ring.nodes.size,
+                active: activeRoadGroupIdRef.current,
+                onlyGroupId,
+                next: ring.head?.next?.groupId,
+            });
+            roadGroupAdvanceTimerRef.current = window.setTimeout(() => {
+                roadGroupAdvanceTimerRef.current = null;
+                void fetchRoadGroups()
+                    .catch((error) => console.warn('Road groups refresh before cleanup failed', error))
+                    .finally(() => {
+                        void advanceRoadGroup();
+                    });
+            }, 0);
+            return () => {
+                if (roadGroupAdvanceTimerRef.current !== null) {
+                    window.clearTimeout(roadGroupAdvanceTimerRef.current);
+                    roadGroupAdvanceTimerRef.current = null;
+                }
+            };
+        }
+
+        const currentGroupId = activeRoadGroupIdRef.current;
+        if (currentGroupId && isRoadGroupComplete(currentGroupId)) {
+            console.log('[roadGroupAdvanceTimer] current group complete, advancing immediately', {
+                ringSize: ring.nodes.size,
+                active: currentGroupId,
+                next: ring.current?.next?.groupId,
+            });
+            roadGroupAdvanceTimerRef.current = window.setTimeout(() => {
+                roadGroupAdvanceTimerRef.current = null;
+                void fetchRoadGroups()
+                    .catch((error) => console.warn('Road groups refresh before immediate advance failed', error))
+                    .finally(() => {
+                        void advanceRoadGroup().finally(() => {
+                            setRoadGroupAdvanceTick((tick) => tick + 1);
+                        });
+                    });
+            }, 0);
+            return () => {
+                if (roadGroupAdvanceTimerRef.current !== null) {
+                    window.clearTimeout(roadGroupAdvanceTimerRef.current);
+                    roadGroupAdvanceTimerRef.current = null;
+                }
+            };
         }
 
         const currentGroup = activeRoadGroupIdRef.current
             ? currentRoadGroupSummaries().get(activeRoadGroupIdRef.current)
             : null;
         const routeCount = currentGroup?.count ?? routeOrdersRef.current.length;
-        const delay = roadGroupDisplayMs(routeCount);
+        const delay = roadGroupDisplayMs(routeCount, appConfig);
         console.log('[roadGroupAdvanceTimer] scheduled', {
             delay,
             ringSize: ring.nodes.size,
@@ -1127,7 +1389,7 @@ function DashboardPage() {
                 roadGroupAdvanceTimerRef.current = null;
             }
         };
-    }, [activeRoadGroupId, advanceRoadGroup, currentRoadGroupRing, currentRoadGroupSummaries, fetchRoadGroups, normalizeRoadGroupRing, roadGroupAdvanceTick, roadGroups.length, view]);
+    }, [activeRoadGroupId, advanceRoadGroup, appConfig, currentRoadGroupRing, currentRoadGroupSummaries, fetchRoadGroups, isRoadGroupComplete, normalizeRoadGroupRing, roadGroupAdvanceTick, roadGroups.length, view]);
 
 
     useEffect(() => {
@@ -1157,6 +1419,50 @@ function DashboardPage() {
     }, [isChinaMapDataReady, isChinaMapVisualReady, isPreparingChinaMap, isRevealingChinaMap]);
 
     useEffect(() => {
+        if (view !== 'chinaMap') return;
+        if (!autoCarouselEnabledRef.current) return;
+        if (!isChinaMapAutoPhaseRef.current) return;
+
+        if (chinaMapTourStartedSessionRef.current === chinaMapSession) return;
+        chinaMapTourStartedSessionRef.current = chinaMapSession;
+
+        console.log('[autoCarousel] ChinaMap 已显示，开始内部巡航', {
+            session: chinaMapSession,
+            targetLoops: chinaMapLoopTargetRef.current,
+        });
+
+        mapRef.current?.startWarehouseTour({
+            maxLoops: chinaMapLoopTargetRef.current,
+
+            onLoopComplete: (loop) => {
+                console.log('[autoCarousel] ChinaMap loop complete', {
+                    loop,
+                    target: chinaMapLoopTargetRef.current,
+                    currentView: viewRef.current,
+                });
+            },
+
+            onComplete: () => {
+                if (!autoCarouselEnabledRef.current) return;
+                if (!isChinaMapAutoPhaseRef.current) return;
+
+                if (viewRef.current !== 'chinaMap') {
+                    console.log('[autoCarousel] ChinaMap onComplete ignored because current view is not chinaMap', {
+                        currentView: viewRef.current,
+                    });
+                    return;
+                }
+
+                console.log('[autoCarousel] ChinaMap loops completed, switch back to RoadMap');
+
+                isChinaMapAutoPhaseRef.current = false;
+                roadGroupCycleCountRef.current = 0;
+                requestViewChange('roadMap');
+            },
+        });
+    }, [view, chinaMapSession, requestViewChange]);
+
+    useEffect(() => {
         if (!isPreparingRoadMap || !isRoadMapVisualReady || !isRoadMapDataReady || isRevealingRoadMap) return;
         const prepareRunId = roadMapPrepareRunRef.current;
 
@@ -1181,6 +1487,10 @@ function DashboardPage() {
                 window.clearTimeout(roadMapRevealTimerRef.current);
                 roadMapRevealTimerRef.current = null;
             }
+            if (chinaMapTimerRef.current !== null) {
+                window.clearTimeout(chinaMapTimerRef.current);
+                chinaMapTimerRef.current = null;
+            }
             if (roadPathRefreshTimerRef.current !== null) {
                 window.clearTimeout(roadPathRefreshTimerRef.current);
                 roadPathRefreshTimerRef.current = null;
@@ -1188,6 +1498,9 @@ function DashboardPage() {
             if (roadPathBufferTimerRef.current !== null) {
                 window.clearTimeout(roadPathBufferTimerRef.current);
                 roadPathBufferTimerRef.current = null;
+            }
+            if (noOrderFallbackTimerRef.current !== null) {
+                window.clearTimeout(noOrderFallbackTimerRef.current);
             }
             roadPathBroadcastBufferRef.current.clear();
             roadPathBufferStartedAtRef.current = 0;
@@ -1329,6 +1642,7 @@ function DashboardPage() {
             groupId: activeRoadGroup.groupId,
             groupIndex: activeRoadGroup.index,
             groupCount: activeRoadGroup.count,
+            vehicleCount: activeRoadGroup.vehicleCount,
             groupKey: activeRoadGroup.groupKey,
             groupScenario: activeRoadGroup.groupScenario,
             scenarioReason: activeRoadGroup.scenarioReason,
@@ -1336,6 +1650,89 @@ function DashboardPage() {
             routes: routeOrders,
         }
         : null;
+
+
+    useEffect(() => {
+        if (roadGroups.length > 0 && noOrderFallbackTimerRef.current !== null) {
+            console.log('[autoCarousel] 订单到达，取消无订单回退');
+            window.clearTimeout(noOrderFallbackTimerRef.current);
+            noOrderFallbackTimerRef.current = null;
+        }
+    }, [roadGroups]);
+
+    useEffect(() => {
+        if (roadGroups.length > 0) {
+            updateTargetCycles(roadGroups.length);
+        }
+    }, [roadGroups.length, updateTargetCycles]);
+
+    useEffect(() => {
+        if (!appConfig || autoCarouselStartedRef.current) return;
+        if (!appConfig.autoCarouselEnabled || view !== 'warehouse') return;
+
+        autoCarouselStartedRef.current = true;
+
+        console.log('[autoCarousel] 自动启动：切换到道路地图，并设置无订单回退');
+        requestViewChange('roadMap');
+
+        // 如果你想自动造订单，就保留这一行；
+        // 如果你想测试“无订单 30 秒回 ChinaMap”，先注释掉这一行。
+        // void requestBulkDispatch();
+    }, [appConfig, view, requestBulkDispatch, requestViewChange]);
+
+    useEffect(() => {
+        if (!appConfig?.autoCarouselEnabled) return;
+
+        // 只在道路地图页面处理“无订单回退”
+        if (view !== 'roadMap') {
+            if (noOrderFallbackTimerRef.current !== null) {
+                window.clearTimeout(noOrderFallbackTimerRef.current);
+                noOrderFallbackTimerRef.current = null;
+            }
+            return;
+        }
+
+        // 有订单了就取消回退
+        if (roadGroups.length > 0) {
+            if (noOrderFallbackTimerRef.current !== null) {
+                console.log('[autoCarousel] 订单到达，取消无订单回退');
+                window.clearTimeout(noOrderFallbackTimerRef.current);
+                noOrderFallbackTimerRef.current = null;
+            }
+            return;
+        }
+
+        // 已经有计时器就不要重复创建
+        if (noOrderFallbackTimerRef.current !== null) return;
+
+        console.log('[autoCarousel] roadMap 无订单，启动 30 秒回退计时器');
+
+        noOrderFallbackTimerRef.current = window.setTimeout(() => {
+            const stillInRoadMap = viewRef.current === 'roadMap';
+            const noRoadGroups = roadGroupsRef.current.length === 0;
+
+            console.log('[autoCarousel] 无订单回退检查', {
+                stillInRoadMap,
+                noRoadGroups,
+                roadGroupsLength: roadGroupsRef.current.length,
+                currentView: viewRef.current,
+            });
+
+            if (stillInRoadMap && noRoadGroups) {
+                console.log('[autoCarousel] 30 秒无订单，切换回 ChinaMap');
+                startChinaMapAutoPhaseRef.current()
+            }
+
+            noOrderFallbackTimerRef.current = null;
+        }, 30000);
+
+        return () => {
+            if (noOrderFallbackTimerRef.current !== null) {
+                window.clearTimeout(noOrderFallbackTimerRef.current);
+                noOrderFallbackTimerRef.current = null;
+            }
+        };
+    }, [appConfig?.autoCarouselEnabled, view, roadGroups.length, requestViewChange]);
 
     return (
         <MainLayout
@@ -1349,6 +1746,7 @@ function DashboardPage() {
                         mode={sidePanelMode}
                         warehouseFocus={warehouseFocus}
                         roadGroup={roadPanelState}
+                        isRoadGroupFading={isRoadGroupFading}
                     />
                     {roadGroupQueue}
                     {roadStrategyTabs}

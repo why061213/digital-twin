@@ -29,6 +29,7 @@ export type RoadGroupSummary = {
     groupId: string;
     index: number;
     count: number;
+    vehicleCount?: number;
     groupScenario?: string;
     displayTemplate?: string;
     scenarioReason?: string;

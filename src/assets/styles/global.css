@@ -44,6 +44,21 @@
         background: rgba(34, 211, 238, 0.3);
         border-radius: 2px;
     }
+    .no-scrollbar {
+        -ms-overflow-style: none !important;  /* IE/Edge */
+        scrollbar-width: none !important;     /* Firefox */
+    }
+    .no-scrollbar::-webkit-scrollbar {
+        width: 0 !important;
+        height: 0 !important;
+        display: none !important;
+    }
+    .no-scrollbar::-webkit-scrollbar-track {
+        background: transparent !important;
+    }
+    .no-scrollbar::-webkit-scrollbar-thumb {
+        background: transparent !important;
+    }
 }
 
 /* 数字翻牌器动画 */
