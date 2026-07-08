@@ -1526,13 +1526,22 @@ function DashboardPage() {
     }, [renderTruckPosition, syncRoadRoute, view]);
 
     useEffect(() => {
+        // 关键：只有 RoadMap 正在显示时，才更新车辆位置和 routeOrders。
+        // 否则 ChinaMap 聚焦时 DashboardPage 会被这个定时器高频刷新。
+        if (view !== 'roadMap') return;
+
         const timer = window.setInterval(() => {
             const now = performance.now();
             const progressUpdates = new Map<string, ReturnType<typeof routeProgressPatch>>();
+
             activeRoutesRef.current.forEach((route) => {
                 renderTruckPosition(route, now);
                 progressUpdates.set(route.lineId, routeProgressPatch(route, now));
-                const reachedPredictedEnd = route.pathLength > 0 && predictedDistance(route, now) >= route.pathLength - 0.0001;
+
+                const reachedPredictedEnd =
+                    route.pathLength > 0 &&
+                    predictedDistance(route, now) >= route.pathLength - 0.0001;
+
                 if (reachedPredictedEnd && !route.arrivalCheckRequested) {
                     route.arrivalCheckRequested = true;
                     route.nextCalibrationAt = now;
@@ -1544,16 +1553,21 @@ function DashboardPage() {
                     void requestTruckPosition(route.lineId);
                 }
             });
+
             if (progressUpdates.size > 0) {
                 setRouteOrders((prev) => {
                     let changed = false;
+
                     const next = prev.map((item) => {
                         const update = progressUpdates.get(item.lineId);
                         if (!update) return item;
+
                         changed = true;
-                        return {...item, ...update};
+                        return { ...item, ...update };
                     });
+
                     if (!changed) return prev;
+
                     routeOrdersRef.current = next;
                     return next;
                 });
@@ -1561,7 +1575,7 @@ function DashboardPage() {
         }, POSITION_RENDER_TICK_MS);
 
         return () => window.clearInterval(timer);
-    }, [renderTruckPosition, requestTruckPosition]);
+    }, [renderTruckPosition, requestTruckPosition, view]);
 
     const renderCenterPanel = () => (
         <DashboardCenterPanel
