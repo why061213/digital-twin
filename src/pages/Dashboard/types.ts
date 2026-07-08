@@ -1,4 +1,4 @@
-﻿import type { RoadPathMessage, RouteOrder as RealtimeRouteOrder } from './hooks/useDashboardRealtime';
+import type { RoadPathMessage, RouteOrder as RealtimeRouteOrder } from './hooks/useDashboardRealtime';
 
 export type ViewMode = 'warehouse' | 'chinaMap' | 'roadMap';
 export type LonLat = [number, number];
@@ -29,6 +29,7 @@ export type RoadGroupSummary = {
     groupId: string;
     index: number;
     count: number;
+    vehicleCount?: number;
     groupScenario?: string;
     displayTemplate?: string;
     scenarioReason?: string;

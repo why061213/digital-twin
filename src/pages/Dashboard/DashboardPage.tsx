@@ -1,1 +1,295 @@
-export { default } from './DashboardPage-used';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import MainLayout from '@/components/Layout/MainLayout';
+import Header from '@/components/Layout/Header';
+import type { ChinaMap3DHandle } from './modules/ChinaMap3D';
+import type { RoadMap3DHandle } from './modules/RoadMap3D';
+import DashboardSidePanels from './modules/DashboardSidePanels';
+import type { RoadGroupPanelState } from './modules/DashboardSidePanels';
+import { useDashboardRealtime } from './hooks/useDashboardRealtime';
+import { useDashboardViewTransition } from './hooks/useDashboardViewTransition';
+import { useRoadGroupsController } from './hooks/useRoadGroupsController';
+import { useTruckPositionController } from './hooks/useTruckPositionController';
+import { useWarehouseController } from './hooks/useWarehouseController';
+import type { RouteOrder } from './hooks/useDashboardRealtime';
+import { DispatchButtons } from './components/DispatchButtons';
+import { DashboardCenterPanel } from './components/DashboardCenterPanel';
+import { RoadGroupQueue } from './components/RoadGroupQueue';
+import { RoadGroupTabs } from './components/RoadGroupTabs';
+import { ViewButtons } from './components/ViewButtons';
+import {
+    dispatchBulkRoutes,
+    dispatchRoute,
+} from './services/roadApi';
+
+function DashboardPage() {
+    const [isDispatching, setIsDispatching] = useState(false);
+    const mapRef = useRef<ChinaMap3DHandle>(null);
+    const roadMapRef = useRef<RoadMap3DHandle>(null);
+    const {
+        warehouseFocus,
+        clearWarehouseFocus,
+        handleCityRaise,
+        handleCityFall,
+        handleWarehouseUpdate,
+        handleWarehouseTourStateChange,
+        handleCameraControl,
+        handleWarehouseFocus,
+        requestWarehouseSnapshot,
+    } = useWarehouseController({
+        mapRef,
+    });
+    const {
+        view,
+        requestViewChange,
+        chinaMapSession,
+        isPreparingChinaMap,
+        isRevealingChinaMap,
+        roadMapSession,
+        isPreparingRoadMap,
+        isRevealingRoadMap,
+        isRoadMapVisualReady,
+        chinaMapPrepareRunRef,
+        roadMapPrepareRunRef,
+        skipNextRoadMapRefreshRef,
+        handleChinaMapVisualReady,
+        handleRoadMapVisualReady,
+        markChinaMapDataReady,
+        markRoadMapDataReady,
+        failChinaMapPrepare,
+        failRoadMapPrepare,
+    } = useDashboardViewTransition({
+        onBeforeViewChange: clearWarehouseFocus,
+    });
+    const {
+        routeOrders,
+        setRouteOrders,
+        activeRoutesRef,
+        routeOrdersRef,
+        completedRouteIdsRef,
+        createActiveRoute,
+        showRoutes,
+        prefetchRoutePositions,
+        finishRoute,
+        handleTruckPosition,
+        syncRoadRoute,
+        renderTruckPosition,
+    } = useTruckPositionController({
+        roadMapRef,
+        view,
+    });
+    const {
+        roadGroups,
+        activeRoadGroupId,
+        activeRoadGroupIdRef,
+        roadGroupStrategy,
+        isLoadingRoadGroup,
+        isRoadGroupFading,
+        loadRoadGroup,
+        refreshRoadGroups,
+        handleRoadPath,
+        resetRoadGroupStrategy,
+    } = useRoadGroupsController({
+        roadMapRef,
+        view,
+        activeRoutesRef,
+        routeOrdersRef,
+        completedRouteIdsRef,
+        skipNextRoadMapRefreshRef,
+        createActiveRoute,
+        showRoutes,
+        prefetchRoutePositions,
+        syncRoadRoute,
+        renderTruckPosition,
+        setRouteOrders,
+    });
+    const handleRouteRaise = useCallback((_order: RouteOrder) => {
+        // 城市飞线事件由 ChinaMap3D 处理；道路级地图只加载后端分组后的路线。
+    }, []);
+
+    const requestDispatch = useCallback(async () => {
+        if (isDispatching) return;
+        setIsDispatching(true);
+        requestViewChange('roadMap');
+        try {
+            const route = await dispatchRoute();
+            await refreshRoadGroups(activeRoadGroupIdRef.current ?? route.groupId);
+        } catch (error) {
+            console.warn('Route dispatch failed', error);
+        } finally {
+            setIsDispatching(false);
+        }
+    }, [isDispatching, refreshRoadGroups, requestViewChange]);
+
+    const requestBulkDispatch = useCallback(async () => {
+        if (isDispatching) return;
+        setIsDispatching(true);
+        try {
+            await dispatchBulkRoutes(24);
+            // 大宗订单只是向后端追加一批路线；只有当前已经在道路地图时才刷新显示，不主动切换视图。
+            if (view === 'roadMap') {
+            }
+        } catch (error) {
+            console.warn('Bulk route dispatch failed', error);
+        } finally {
+            setIsDispatching(false);
+        }
+    }, [isDispatching]);
+
+
+    const requestRoadMapSnapshot = useCallback(async (prepareRunId: number) => {
+        try {
+            await refreshRoadGroups(activeRoadGroupIdRef.current ?? undefined);
+            if (roadMapPrepareRunRef.current !== prepareRunId) return;
+            markRoadMapDataReady();
+        } catch (error) {
+            console.warn('Road map prepare failed', error);
+            if (roadMapPrepareRunRef.current === prepareRunId) {
+                failRoadMapPrepare();
+            }
+        }
+    }, [failRoadMapPrepare, markRoadMapDataReady, refreshRoadGroups]);
+
+    useDashboardRealtime({
+        onCityRaise: handleCityRaise,
+        onCityFall: handleCityFall,
+        onRouteRaise: handleRouteRaise,
+        onRouteFall: finishRoute,
+        onRoadPath: handleRoadPath,
+        onTruckPosition: handleTruckPosition,
+        onWarehouseUpdate: handleWarehouseUpdate,
+        onWarehouseFocus: handleWarehouseFocus,
+        onCameraControl: handleCameraControl,
+    });
+
+    useEffect(() => {
+        if (!isPreparingChinaMap) return;
+        if (chinaMapSession <= 0) return;
+
+        const prepareRunId = chinaMapPrepareRunRef.current;
+        void requestWarehouseSnapshot({
+            isCurrentPrepareRun: () => chinaMapPrepareRunRef.current === prepareRunId,
+            onDataReady: markChinaMapDataReady,
+            onPrepareFailed: failChinaMapPrepare,
+        });
+    }, [
+        chinaMapPrepareRunRef,
+        chinaMapSession,
+        failChinaMapPrepare,
+        isPreparingChinaMap,
+        markChinaMapDataReady,
+        requestWarehouseSnapshot,
+    ]);
+
+    useEffect(() => {
+        if (!isPreparingRoadMap || !isRoadMapVisualReady || roadMapSession <= 0) return;
+        void requestRoadMapSnapshot(roadMapPrepareRunRef.current);
+    }, [isPreparingRoadMap, isRoadMapVisualReady, requestRoadMapSnapshot, roadMapSession]);
+
+    const renderCenterPanel = () => (
+        <DashboardCenterPanel
+            view={view}
+            isPreparingChinaMap={isPreparingChinaMap}
+            isRevealingChinaMap={isRevealingChinaMap}
+            isPreparingRoadMap={isPreparingRoadMap}
+            isRevealingRoadMap={isRevealingRoadMap}
+            isRoadGroupFading={isRoadGroupFading}
+            chinaMapSession={chinaMapSession}
+            roadMapSession={roadMapSession}
+            mapRef={mapRef}
+            roadMapRef={roadMapRef}
+            onChinaMapVisualReady={handleChinaMapVisualReady}
+            onRoadMapVisualReady={handleRoadMapVisualReady}
+            onWarehouseTourStateChange={handleWarehouseTourStateChange}
+        />
+    );
+
+    const viewButtons = (
+        <ViewButtons
+            view={view}
+            isPreparingChinaMap={isPreparingChinaMap}
+            isRevealingChinaMap={isRevealingChinaMap}
+            isPreparingRoadMap={isPreparingRoadMap}
+            isRevealingRoadMap={isRevealingRoadMap}
+            onRequestViewChange={requestViewChange}
+        />
+    );
+
+    const roadGroupQueue = view === 'roadMap' && roadGroups.length > 0 && (
+        <RoadGroupQueue
+            groups={roadGroups}
+            activeGroupId={activeRoadGroupId}
+            isLoading={isLoadingRoadGroup}
+            onSelectGroup={(groupId) => void loadRoadGroup(groupId)}
+        />
+    );
+
+    const dispatchControls = view === 'roadMap' && (
+        <DispatchButtons
+            isDispatching={isDispatching}
+            onDispatch={requestDispatch}
+            onBulkDispatch={requestBulkDispatch}
+        />
+    );
+    const roadStrategyTabs = view === 'roadMap' && (
+        <RoadGroupTabs
+            activeStrategy={roadGroupStrategy}
+            onStrategyChange={resetRoadGroupStrategy}
+        />
+    );
+
+    const activeRoadGroup = activeRoadGroupId
+        ? roadGroups.find((group) => group.groupId === activeRoadGroupId) ?? null
+        : null;
+    const shouldShowRoadPanel = view === 'roadMap' && Boolean(activeRoadGroup);
+    const sidePanelMode: 'hidden' | 'warehouse_focus' | 'road_group_focus' =
+        view === 'chinaMap' && warehouseFocus
+            ? 'warehouse_focus'
+            : shouldShowRoadPanel
+                ? 'road_group_focus'
+                : 'hidden';
+    const roadPanelState: RoadGroupPanelState | null = activeRoadGroup
+        ? {
+            groupId: activeRoadGroup.groupId,
+            groupIndex: activeRoadGroup.index,
+            groupCount: activeRoadGroup.count,
+            vehicleCount: activeRoadGroup.vehicleCount,
+            groupKey: activeRoadGroup.groupKey,
+            groupScenario: activeRoadGroup.groupScenario,
+            scenarioReason: activeRoadGroup.scenarioReason,
+            orderIds: activeRoadGroup.orderIds,
+            routes: routeOrders,
+        }
+        : null;
+
+    return (
+        <MainLayout
+            header={<Header/>}
+            // leftPanel={<InventoryStats />}
+            leftPanel={null}
+            centerPanel={
+                <div className="relative h-full w-full">
+                    {renderCenterPanel()}
+                    <DashboardSidePanels
+                        mode={sidePanelMode}
+                        warehouseFocus={warehouseFocus}
+                        roadGroup={roadPanelState}
+                        isRoadGroupFading={isRoadGroupFading}
+                    />
+                    {roadGroupQueue}
+                    {roadStrategyTabs}
+                    {viewButtons}
+                    {dispatchControls}
+                </div>
+            }
+            rightPanel={null}
+            // rightPanel={
+            //     <>
+            //         <VehicleSchedule routeOrders={routeOrders} />
+            //         <TrafficMonitor />
+            //     </>
+            // }
+        />
+    );
+}
+
+export default DashboardPage;
