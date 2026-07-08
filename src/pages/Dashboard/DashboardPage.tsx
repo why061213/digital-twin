@@ -3,6 +3,7 @@ import MainLayout from '@/components/Layout/MainLayout';
 import Header from '@/components/Layout/Header';
 import type { ChinaMap3DHandle } from './modules/ChinaMap3D';
 import type { RoadMap3DHandle } from './modules/RoadMap3D';
+import type { TownRoadMap3DHandle } from './modules/TownRoadMap3D';
 import DashboardSidePanels from './modules/DashboardSidePanels';
 import type { RoadGroupPanelState } from './modules/DashboardSidePanels';
 import { useDashboardRealtime } from './hooks/useDashboardRealtime';
@@ -10,6 +11,7 @@ import { useDashboardViewTransition } from './hooks/useDashboardViewTransition';
 import { useRoadGroupsController } from './hooks/useRoadGroupsController';
 import { useTruckPositionController } from './hooks/useTruckPositionController';
 import { useWarehouseController } from './hooks/useWarehouseController';
+import { useTownRoadController } from './hooks/useTownRoadController';
 import type { RouteOrder } from './hooks/useDashboardRealtime';
 import { DispatchButtons } from './components/DispatchButtons';
 import { DashboardCenterPanel } from './components/DashboardCenterPanel';
@@ -20,11 +22,13 @@ import {
     dispatchBulkRoutes,
     dispatchRoute,
 } from './services/roadApi';
+import type { ViewMode } from './types';
 
 function DashboardPage() {
     const [isDispatching, setIsDispatching] = useState(false);
     const mapRef = useRef<ChinaMap3DHandle>(null);
     const roadMapRef = useRef<RoadMap3DHandle>(null);
+    const townRoadMapRef = useRef<TownRoadMap3DHandle>(null);
     const {
         warehouseFocus,
         clearWarehouseFocus,
@@ -38,6 +42,12 @@ function DashboardPage() {
     } = useWarehouseController({
         mapRef,
     });
+    const handleViewCommitted = useCallback((committedView: ViewMode) => {
+        if (committedView !== 'chinaMap') {
+            clearWarehouseFocus();
+        }
+    }, [clearWarehouseFocus]);
+
     const {
         view,
         requestViewChange,
@@ -58,7 +68,7 @@ function DashboardPage() {
         failChinaMapPrepare,
         failRoadMapPrepare,
     } = useDashboardViewTransition({
-        onBeforeViewChange: clearWarehouseFocus,
+        onViewCommitted: handleViewCommitted,
     });
     const {
         routeOrders,
@@ -102,6 +112,21 @@ function DashboardPage() {
         renderTruckPosition,
         setRouteOrders,
     });
+    const {
+        townTasks,
+        townSummary,
+        handleTownRoadRenderCommand,
+    } = useTownRoadController({
+        view,
+        townRoadMapRef,
+    });
+
+
+    const handleTownRoadRender = useCallback((command: Parameters<typeof handleTownRoadRenderCommand>[0]) => {
+        handleTownRoadRenderCommand(command);
+        requestViewChange('townRoadMap');
+    }, [handleTownRoadRenderCommand, requestViewChange]);
+
     const handleRouteRaise = useCallback((_order: RouteOrder) => {
         // 城市飞线事件由 ChinaMap3D 处理；道路级地图只加载后端分组后的路线。
     }, []);
@@ -159,6 +184,7 @@ function DashboardPage() {
         onWarehouseUpdate: handleWarehouseUpdate,
         onWarehouseFocus: handleWarehouseFocus,
         onCameraControl: handleCameraControl,
+        onTownRoadRender: handleTownRoadRender,
     });
 
     useEffect(() => {
@@ -197,8 +223,10 @@ function DashboardPage() {
             roadMapSession={roadMapSession}
             mapRef={mapRef}
             roadMapRef={roadMapRef}
+            townRoadMapRef={townRoadMapRef}
             onChinaMapVisualReady={handleChinaMapVisualReady}
             onRoadMapVisualReady={handleRoadMapVisualReady}
+            onTownRoadMapVisualReady={() => undefined}
             onWarehouseTourStateChange={handleWarehouseTourStateChange}
         />
     );
@@ -230,6 +258,43 @@ function DashboardPage() {
             onBulkDispatch={requestBulkDispatch}
         />
     );
+    const townRoadSummary = view === 'townRoadMap' && (
+        <div className="pointer-events-auto absolute right-5 top-24 z-50 w-[310px] rounded-lg border border-cyan-300/20 bg-slate-950/72 px-4 py-3 text-xs text-slate-300 shadow-2xl shadow-cyan-950/25 backdrop-blur-md">
+            <div className="mb-2 flex items-start justify-between gap-3 border-b border-white/10 pb-2">
+                <div>
+                    <div className="text-sm font-semibold text-cyan-100">{townSummary.title}</div>
+                    <div className="mt-0.5 text-[11px] text-slate-400">{townSummary.description}</div>
+                </div>
+                <span className="rounded border border-cyan-300/20 bg-cyan-400/10 px-2 py-0.5 text-[10px] text-cyan-200">{townSummary.renderCount} 块 / {townSummary.taskCount} 线</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="rounded border border-white/5 bg-white/[0.035] px-2 py-2">
+                    <div className="text-cyan-100">{townSummary.sourceCount}</div>
+                    <div className="mt-0.5 text-[10px] text-slate-500">起点</div>
+                </div>
+                <div className="rounded border border-white/5 bg-white/[0.035] px-2 py-2">
+                    <div className="text-amber-100">{townSummary.destinationCount}</div>
+                    <div className="mt-0.5 text-[10px] text-slate-500">目的地</div>
+                </div>
+                <div className="rounded border border-white/5 bg-white/[0.035] px-2 py-2">
+                    <div className="text-emerald-100">{townSummary.transporting}</div>
+                    <div className="mt-0.5 text-[10px] text-slate-500">运输中</div>
+                </div>
+            </div>
+            <div className="mt-3 max-h-64 space-y-1.5 overflow-y-auto pr-1 no-scrollbar">
+                {townTasks.map((task) => (
+                    <div key={task.lineId} className="rounded border border-white/5 bg-white/[0.03] px-2 py-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-cyan-100">{task.vehicle.plate}</span>
+                            <span className="shrink-0 text-[10px] text-slate-400">{task.status}</span>
+                        </div>
+                        <div className="mt-0.5 truncate text-[10px] text-slate-500">{task.from.name} → {task.to.name}</div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+
     const roadStrategyTabs = view === 'roadMap' && (
         <RoadGroupTabs
             activeStrategy={roadGroupStrategy}
@@ -252,10 +317,10 @@ function DashboardPage() {
             groupId: activeRoadGroup.groupId,
             groupIndex: activeRoadGroup.index,
             groupCount: activeRoadGroup.count,
-            vehicleCount: activeRoadGroup.vehicleCount,
             groupKey: activeRoadGroup.groupKey,
             groupScenario: activeRoadGroup.groupScenario,
             scenarioReason: activeRoadGroup.scenarioReason,
+            vehicleCount: activeRoadGroup.vehicleCount,
             orderIds: activeRoadGroup.orderIds,
             routes: routeOrders,
         }
@@ -279,6 +344,7 @@ function DashboardPage() {
                     {roadStrategyTabs}
                     {viewButtons}
                     {dispatchControls}
+                    {townRoadSummary}
                 </div>
             }
             rightPanel={null}

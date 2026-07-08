@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { TownRoadRenderCommand } from '../modules/TownRoadMap3D';
 
 type CityRaiseMessage = {
     type: 'city_raise';
@@ -71,6 +72,7 @@ type DashboardMessage =
     | CityFallMessage
     | RoadPathMessage
     | TruckPositionMessage
+    | TownRoadRenderCommand
     | { type?: string; [key: string]: unknown };
 
 export type RouteOrder = {
@@ -95,12 +97,15 @@ type UseDashboardRealtimeOptions = {
     onWarehouseUpdate?: (cityName: string, action: string, displayData: Record<string, any>) => void;
     onWarehouseFocus?: (cityName: string, panels: WarehouseFocusPanel[], style?: WarehouseFocusStyle) => void;
     onCameraControl?: (cityNames: string[], mode: 'overview' | 'focus') => void;
+
+    // TownRoadMap 后端渲染命令复用同一条 /ws/realtime，避免另开一条 WebSocket。
+    onTownRoadRender?: (command: TownRoadRenderCommand) => void;
 };
 
 const WS_TOKEN = String(import.meta.env.VITE_WS_TOKEN || 'jushen-screen-token');
-const HEADQUARTERS = '\u4f5b\u5c71';
-const CARGO_NAMES = ['\u94dd\u952d', '\u94dc\u6750', '\u94a2\u6750', '\u5316\u5de5\u539f\u6599', '\u5176\u4ed6'];
-const PLATE_PREFIXES = ['\u7ca4A', '\u7ca4B', '\u6e58E', '\u8d63C', '\u82cfE', '\u6d59A'];
+const HEADQUARTERS = '佛山';
+const CARGO_NAMES = ['铝锭', '铜材', '钢材', '化工原料', '其他'];
+const PLATE_PREFIXES = ['粤A', '粤B', '湘E', '赣C', '苏E', '浙A'];
 const CITY_RISE_DELAY = 500;
 const CITY_RISE_DURATION = 1200;
 const FLY_LINE_DELAY = CITY_RISE_DELAY + CITY_RISE_DURATION + 120;
@@ -122,7 +127,7 @@ function buildRealtimeUrl() {
 }
 
 function normalizeCityName(cityName: string) {
-    return cityName.endsWith('\u5e02') ? cityName.slice(0, -1) : cityName;
+    return cityName.endsWith('市') ? cityName.slice(0, -1) : cityName;
 }
 
 function hashText(text: string) {
@@ -137,10 +142,19 @@ function createRouteOrder(line: CityRaiseMessage): RouteOrder {
         to: line.to,
         fromCoords: line.fromCoords,
         toCoords: line.toCoords,
-        plate: `${PLATE_PREFIXES[hash % PLATE_PREFIXES.length]}\u00b7${line.lineId.slice(0, 6).toUpperCase()}`,
+        plate: `${PLATE_PREFIXES[hash % PLATE_PREFIXES.length]}·${line.lineId.slice(0, 6).toUpperCase()}`,
         cargo: CARGO_NAMES[hash % CARGO_NAMES.length],
-        status: '\u8fd0\u8f93\u4e2d',
+        status: '运输中',
     };
+}
+
+function isTownRoadRenderCommand(message: DashboardMessage): message is TownRoadRenderCommand {
+    if (message?.type !== 'town_road_render') return false;
+    const payload = message as any;
+    return Array.isArray(payload.renderProvinces)
+        || Array.isArray(payload.orders)
+        || Array.isArray(payload.renderAdcodes)
+        || Array.isArray(payload.tasks);
 }
 
 export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
@@ -150,6 +164,7 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
     const cityFallTimersRef = useRef<Map<string, number>>(new Map());
     const reconnectTimerRef = useRef<number | null>(null);
     const heartbeatTimerRef = useRef<number | null>(null);
+    const connectTimerRef = useRef<number | null>(null);
     const reconnectAttemptRef = useRef(0);
     const lastMessageAtRef = useRef(0);
 
@@ -158,7 +173,6 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
     useEffect(() => {
         let socket: WebSocket | null = null;
         let disposed = false;
-
 
         const riseTrackedCity = (cityName: string) => {
             const normalized = normalizeCityName(cityName);
@@ -169,19 +183,24 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
         const fallTrackedCity = (cityName: string) => {
             const normalized = normalizeCityName(cityName);
             if (normalized === HEADQUARTERS) return;
-
             const nextCount = (activeCityCountRef.current.get(normalized) ?? 1) - 1;
             if (nextCount > 0) {
                 activeCityCountRef.current.set(normalized, nextCount);
                 return;
             }
-
             activeCityCountRef.current.delete(normalized);
             optionsRef.current.onCityFall(normalized);
         };
 
         const handleMessage = (message: DashboardMessage) => {
+            if (message.type === 'ping') return;
+            if (isTownRoadRenderCommand(message)) {
+                optionsRef.current.onTownRoadRender?.(message);
+                return;
+            }
+
             console.log('📩 收到 WebSocket 消息:', message);
+
             if (message.type === 'city_raise') {
                 const line = message as CityRaiseMessage;
                 const oldTimer = cityFallTimersRef.current.get(line.lineId);
@@ -189,7 +208,12 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
                     window.clearTimeout(oldTimer);
                     cityFallTimersRef.current.delete(line.lineId);
                 }
-                activeLinesRef.current.set(line.lineId, { from: line.from, to: line.to, startedAt: performance.now() });
+
+                activeLinesRef.current.set(line.lineId, {
+                    from: line.from,
+                    to: line.to,
+                    startedAt: performance.now(),
+                });
                 optionsRef.current.onRouteRaise(createRouteOrder(line));
                 riseTrackedCity(line.from);
                 riseTrackedCity(line.to);
@@ -203,7 +227,6 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
 
                 activeLinesRef.current.delete(line.lineId);
                 optionsRef.current.onRouteFall?.(line.lineId);
-
                 const elapsed = performance.now() - activeLine.startedAt;
                 const remaining = Math.max(0, ROUTE_MIN_LIFETIME - elapsed);
                 const releaseCities = () => {
@@ -228,23 +251,25 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
 
             if (message.type === 'truck_position') {
                 optionsRef.current.onTruckPosition?.(message as TruckPositionMessage);
+                return;
             }
 
             if (message.type === 'warehouse_update' && optionsRef.current.onWarehouseUpdate) {
                 const { cityName, action, displayData } = message as any;
                 console.log('🏭 仓库更新:', cityName, action, displayData);
-                optionsRef.current.onWarehouseUpdate(cityName, action, displayData ??{});
+                optionsRef.current.onWarehouseUpdate(cityName, action, displayData ?? {});
                 return;
             }
+
             if (message.type === 'warehouse_focus' && optionsRef.current.onWarehouseFocus) {
                 const { cityName, panels, style } = message as any;
                 optionsRef.current.onWarehouseFocus(cityName, panels ?? [], style);
                 return;
             }
+
             if (message.type === 'camera_control' && optionsRef.current.onCameraControl) {
                 const { cityNames, mode } = message as any;
                 optionsRef.current.onCameraControl(cityNames, mode);
-                return;
             }
         };
 
@@ -271,15 +296,12 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
             lastMessageAtRef.current = Date.now();
             heartbeatTimerRef.current = window.setInterval(() => {
                 if (currentSocket.readyState !== WebSocket.OPEN) return;
-
                 const silentMs = Date.now() - lastMessageAtRef.current;
                 if (silentMs > HEARTBEAT_STALE_MS) {
                     console.warn(`WebSocket heartbeat timeout after ${silentMs}ms, reconnecting`);
                     currentSocket.close(4000, 'heartbeat timeout');
                     return;
                 }
-
-                // 应用层心跳：浏览器不能主动发 websocket ping 帧，所以用 JSON ping/pong 保活和探活。
                 currentSocket.send(JSON.stringify({ type: 'ping', clientTime: Date.now() }));
             }, HEARTBEAT_INTERVAL_MS);
         };
@@ -287,7 +309,6 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
         const connect = () => {
             if (disposed) return;
             if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
-
             socket = new WebSocket(buildRealtimeUrl());
 
             socket.onopen = () => {
@@ -308,6 +329,7 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
             };
 
             socket.onerror = (event) => {
+                if (disposed) return;
                 console.warn('WebSocket error', event);
             };
 
@@ -324,10 +346,19 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
             };
         };
 
-        connect();
+        // 延迟到下一轮事件循环再连接，避免 React StrictMode 初次 mount/unmount
+        // 立刻关闭 CONNECTING socket 造成“closed before established”的开发期噪音。
+        connectTimerRef.current = window.setTimeout(() => {
+            connectTimerRef.current = null;
+            connect();
+        }, 0);
 
         return () => {
             disposed = true;
+            if (connectTimerRef.current !== null) {
+                window.clearTimeout(connectTimerRef.current);
+                connectTimerRef.current = null;
+            }
             if (reconnectTimerRef.current !== null) {
                 window.clearTimeout(reconnectTimerRef.current);
                 reconnectTimerRef.current = null;

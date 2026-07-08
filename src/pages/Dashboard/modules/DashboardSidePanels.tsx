@@ -4,6 +4,7 @@ import type { EChartsOption } from 'echarts';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { RouteOrder } from '../hooks/useDashboardRealtime';
+import '@/assets/styles/dashboard-panels.css';
 
 export type WarehouseFocusState = {
     cityName: string;
@@ -255,11 +256,13 @@ function AutoScrollList({
     enabled,
     resetKey,
     speedPxPerSecond = 36,
+    className = '',
     children,
 }: {
     enabled: boolean;
     resetKey: string;
     speedPxPerSecond?: number;
+    className?: string;
     children: ReactNode;
 }) {
     const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -267,6 +270,7 @@ function AutoScrollList({
     useEffect(() => {
         const container = scrollRef.current;
         if (!container) return;
+
         container.scrollTop = 0;
         if (!enabled) return;
 
@@ -276,9 +280,9 @@ function AutoScrollList({
         const tick = (currentTime: number) => {
             const elapsedMs = Math.min(currentTime - previousTime, 64);
             previousTime = currentTime;
-            const loopHeight = container.scrollHeight / 2;
 
-            if (loopHeight > container.clientHeight) {
+            const loopHeight = container.scrollHeight / 2;
+            if (loopHeight > container.clientHeight + 4) {
                 container.scrollTop += (elapsedMs * speedPxPerSecond) / 1000;
                 if (container.scrollTop >= loopHeight) {
                     container.scrollTop -= loopHeight;
@@ -293,9 +297,9 @@ function AutoScrollList({
     }, [enabled, resetKey, speedPxPerSecond]);
 
     return (
-        <div ref={scrollRef} className="no-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
-            {children}
-            {enabled && <div aria-hidden="true">{children}</div>}
+        <div ref={scrollRef} className={`dashboard-scroll-container dashboard-panel-fade-mask h-full min-h-0 overflow-y-auto pr-1 ${className}`}>
+            <div className="space-y-2">{children}</div>
+            {enabled && <div aria-hidden="true" className="space-y-2 pt-2">{children}</div>}
         </div>
     );
 }
@@ -399,7 +403,7 @@ function RoadGroupLeftPanels({ roadGroup }: { roadGroup: RoadGroupPanelState }) 
 
     return (
         <>
-            <Panel title="运输分组概览" className="h-[38%] min-h-[250px]">
+            <Panel title="运输分组概览" className="h-[30%] min-h-[180px] max-h-[220px] shrink-0 overflow-hidden">
                 <div className="grid h-full grid-cols-2 gap-2">
                     <StatRow label="线路数量" value={routeCount} unit="条" tone="text-cyan-200" />
                     <StatRow label="车辆数量" value={vehicleCount} unit="辆" tone="text-emerald-200" />
@@ -410,10 +414,10 @@ function RoadGroupLeftPanels({ roadGroup }: { roadGroup: RoadGroupPanelState }) 
                 </div>
             </Panel>
 
-            <Panel title="订单队列" className="h-[62%] min-h-[340px]">
+            <Panel title="订单队列" className="min-h-0 flex-1 overflow-hidden">
                 <AutoScrollList
                     enabled={shouldAutoScrollOrders}
-                    resetKey={`${roadGroup.groupId ?? 'none'}-${orderSummaries.length}`}
+                    resetKey={`${roadGroup.groupId ?? 'none'}-orders`}
                     speedPxPerSecond={30}
                 >
                     <div className="space-y-2">
@@ -450,23 +454,24 @@ function RoadGroupLeftPanels({ roadGroup }: { roadGroup: RoadGroupPanelState }) 
 
 function RoadGroupRightPanels({ roadGroup }: { roadGroup: RoadGroupPanelState }) {
     const routes = roadGroup.routes;
-    const finishedRoutes = routes.filter((route) => route.status === '已完成' || route.status === 'finished');
-    const unfinishedRoutes = routes.filter((route) => !(route.status === '已完成' || route.status === 'finished'));
-    const sortedUnfinished = [...unfinishedRoutes].sort((a, b) => routeProgress(b) - routeProgress(a));
-    const visibleUnfinished = sortedUnfinished.slice(0, 40);
+    const isFinishedRoute = (route: RouteOrder) => route.status.includes('完成') || route.status === 'finished';
+    const finishedRoutes = routes.filter(isFinishedRoute);
+    const unfinishedRoutes = routes.filter((route) => !isFinishedRoute(route));
+    const visibleUnfinished = unfinishedRoutes.slice(0, 40);
+    const recentFinished = finishedRoutes.slice(-4).reverse();
     const shouldAutoScroll = visibleUnfinished.length > 5;
-    const recentFinished = finishedRoutes.slice(-4);
+    const finishedLayerHeight = recentFinished.length > 0 ? 128 : 74;
 
     const renderRouteCard = (route: RouteOrder, keySuffix = '') => {
         const progress = routeProgress(route);
         return (
             <div
                 key={`${route.lineId}${keySuffix}`}
-                className="rounded border border-white/5 bg-white/[0.035] px-3 py-2 text-xs"
+                className="rounded-md border border-cyan-300/10 bg-slate-950/62 px-3 py-2 text-xs shadow-[0_10px_24px_rgba(8,47,73,0.18)]"
             >
                 <div className="flex items-center justify-between gap-2">
                     <span className="truncate font-semibold text-cyan-100" title={route.plate}>{route.plate}</span>
-                    <span className="rounded border border-emerald-300/20 bg-emerald-400/10 px-1.5 py-0.5 text-[10px] text-emerald-200">
+                    <span className="shrink-0 rounded border border-emerald-300/20 bg-emerald-400/10 px-1.5 py-0.5 text-[10px] text-emerald-200">
                         {route.status}
                     </span>
                 </div>
@@ -474,11 +479,11 @@ function RoadGroupRightPanels({ roadGroup }: { roadGroup: RoadGroupPanelState })
                     {route.from} → {route.to}
                 </div>
                 <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
-                    <div className="h-full rounded-full bg-cyan-300/80" style={{ width: `${progress}%` }} />
+                    <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-300" style={{ width: `${progress}%` }} />
                 </div>
-                <div className="mt-1.5 flex justify-between text-[10px] text-slate-500">
+                <div className="mt-1.5 flex justify-between gap-2 text-[10px] text-slate-500">
                     <span>{routeDistanceText(route, progress)}</span>
-                    <span>
+                    <span className="shrink-0">
                         {routeEtaText(route, progress)} · {Number.isFinite(Number((route as any).speedKmh))
                             ? `${Math.round(Number((route as any).speedKmh))} km/h`
                             : '-- km/h'}
@@ -489,42 +494,61 @@ function RoadGroupRightPanels({ roadGroup }: { roadGroup: RoadGroupPanelState })
     };
 
     return (
-        <Panel title="车辆运输状态" className="h-full min-h-[520px]">
-            <div className="flex h-full min-h-0 flex-col gap-3">
-                <div className="min-h-0 flex-1">
-                    <div className="mb-2 text-[11px] text-slate-400">运输中车辆</div>
-                    <AutoScrollList
-                        enabled={shouldAutoScroll}
-                        resetKey={`${roadGroup.groupId ?? 'none'}-${visibleUnfinished.length}`}
-                    >
-                        <div className="space-y-2">
-                            {visibleUnfinished.map((route) => renderRouteCard(route))}
-                        </div>
-                    </AutoScrollList>
+        <Panel title="车辆运输状态" className="h-full min-h-0 overflow-hidden">
+            <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
+                <div className="mb-2 flex shrink-0 items-center justify-between text-[11px] text-slate-400">
+                    <span>运输中 {visibleUnfinished.length} 辆</span>
+                    <span>已完成 {finishedRoutes.length} 辆</span>
                 </div>
 
-                <div className="shrink-0 rounded border border-white/5 bg-white/[0.025] p-2">
-                    <div className="mb-1.5 text-[11px] text-slate-400">已完成车辆</div>
-                    {recentFinished.length > 0 ? (
-                        <div className="space-y-1.5">
-                            {recentFinished.map((route) => (
-                                <div
-                                    key={`finished-${route.lineId}`}
-                                    className="grid grid-cols-[4.5rem_1fr_2.5rem] gap-2 rounded bg-slate-900/45 px-2 py-1.5 text-[10px] text-slate-300"
-                                >
-                                    <span className="truncate text-cyan-200" title={route.plate}>{route.plate}</span>
-                                    <span className="truncate" title={`${route.from} → ${route.to}`}>
-                                        {route.from} → {route.to}
-                                    </span>
-                                    <span className="text-right text-emerald-300">完成</span>
-                                </div>
-                            ))}
-                        </div>
+                <div
+                    className="relative min-h-0 flex-1 overflow-hidden"
+                    style={{ paddingBottom: finishedLayerHeight + 12 }}
+                >
+                    {visibleUnfinished.length > 0 ? (
+                        <AutoScrollList
+                            enabled={shouldAutoScroll}
+                            resetKey={`${roadGroup.groupId ?? 'none'}-vehicles`}
+                            speedPxPerSecond={32}
+                        >
+                            {visibleUnfinished.map((route) => renderRouteCard(route))}
+                        </AutoScrollList>
                     ) : (
-                        <div className="rounded bg-slate-900/45 px-2 py-2 text-center text-[11px] text-slate-500">
-                            暂无完成车辆
+                        <div className="flex h-full items-center justify-center rounded-md border border-white/5 bg-white/[0.025] text-xs text-slate-500">
+                            暂无运输中车辆
                         </div>
                     )}
+                </div>
+
+                <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-50">
+                    <div className="h-8 bg-gradient-to-t from-slate-950/95 to-transparent" />
+                    <div className="pointer-events-auto max-h-[128px] overflow-hidden rounded-lg border border-emerald-300/20 bg-slate-950/96 p-2 shadow-2xl shadow-slate-950/70 backdrop-blur-md">
+                        <div className="mb-1.5 flex items-center justify-between text-[11px] text-emerald-200">
+                            <span>已完成车辆</span>
+                            <span>{recentFinished.length} / {finishedRoutes.length}</span>
+                        </div>
+
+                        {recentFinished.length > 0 ? (
+                            <div className="space-y-1.5">
+                                {recentFinished.map((route) => (
+                                    <div
+                                        key={`finished-${route.lineId}`}
+                                        className="grid grid-cols-[4.5rem_1fr_2.5rem] gap-2 rounded border border-white/5 bg-emerald-400/[0.055] px-2 py-1.5 text-[10px] text-slate-300"
+                                    >
+                                        <span className="truncate text-emerald-100" title={route.plate}>{route.plate}</span>
+                                        <span className="truncate" title={`${route.from} → ${route.to}`}>
+                                            {route.from} → {route.to}
+                                        </span>
+                                        <span className="text-right text-emerald-300">完成</span>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="rounded border border-white/5 bg-white/[0.025] px-2 py-2 text-center text-[10px] text-slate-500">
+                                暂无完成车辆
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         </Panel>
@@ -545,18 +569,19 @@ function DashboardSidePanels({
         isHoldingPreviousRoadGroup,
     } = useRoadGroupPanelTransition(roadGroup, isRoadGroupFading);
 
-    const leftWidthClass = isWarehouseMode ? 'w-[18%] min-w-[220px] max-w-[300px]' : 'w-[22%] min-w-[280px]';
-    const rightWidthClass = isWarehouseMode ? 'w-[20%] min-w-[240px] max-w-[320px]' : 'w-[25%] min-w-[320px]';
+    const leftWidthClass = isWarehouseMode ? 'w-[18%] min-w-[220px] max-w-[300px]' : 'w-[20%] min-w-[260px] max-w-[340px]';
+    const rightWidthClass = isWarehouseMode ? 'w-[20%] min-w-[240px] max-w-[320px]' : 'w-[23%] min-w-[300px] max-w-[380px]';
+    const verticalClass = isWarehouseMode ? 'top-4 bottom-4' : 'top-20 bottom-10';
     const roadPanelTransitionClass = isHoldingPreviousRoadGroup ? 'translate-y-1 opacity-60' : 'translate-y-0 opacity-100';
 
     return (
         <>
             <div
-                className={`pointer-events-none absolute bottom-4 left-3 top-4 z-30 ${leftWidthClass} transition-opacity duration-300 ${
+                className={`pointer-events-none absolute left-3 ${verticalClass} z-30 overflow-hidden ${leftWidthClass} transition-opacity duration-300 ${
                     visible ? 'opacity-100' : 'opacity-0'
                 }`}
             >
-                <div className="pointer-events-auto flex h-full flex-col gap-3">
+                <div className="pointer-events-auto flex h-full min-h-0 flex-col gap-3 overflow-hidden">
                     {mode === 'warehouse_focus' && warehouseFocus && <WarehouseLeftPanels focus={warehouseFocus} />}
                     {mode === 'road_group_focus' && displayRoadGroup && (
                         <div key={`left-${transitionKey}`} className={`flex h-full flex-col gap-3 transition-all duration-500 ${roadPanelTransitionClass}`}>
@@ -567,14 +592,14 @@ function DashboardSidePanels({
             </div>
 
             <div
-                className={`pointer-events-none absolute bottom-4 right-3 top-4 z-30 ${rightWidthClass} transition-opacity duration-300 ${
+                className={`pointer-events-none absolute right-3 ${verticalClass} z-30 overflow-hidden ${rightWidthClass} transition-opacity duration-300 ${
                     visible ? 'opacity-100' : 'opacity-0'
                 }`}
             >
-                <div className="pointer-events-auto flex h-full flex-col gap-3">
+                <div className="pointer-events-auto flex h-full min-h-0 flex-col gap-3 overflow-hidden">
                     {mode === 'warehouse_focus' && warehouseFocus && <WarehouseRightPanels focus={warehouseFocus} />}
                     {mode === 'road_group_focus' && displayRoadGroup && (
-                        <div key={`right-${transitionKey}`} className={`h-full transition-all duration-500 ${roadPanelTransitionClass}`}>
+                        <div key={`right-${transitionKey}`} className={`h-full min-h-0 overflow-hidden transition-all duration-500 ${roadPanelTransitionClass}`}>
                             <RoadGroupRightPanels roadGroup={displayRoadGroup} />
                         </div>
                     )}

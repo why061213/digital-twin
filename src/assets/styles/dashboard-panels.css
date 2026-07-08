@@ -1,0 +1,16 @@
+.dashboard-scroll-container {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    overscroll-behavior: contain;
+}
+
+.dashboard-scroll-container::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+}
+
+.dashboard-panel-fade-mask {
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 18px), transparent 100%);
+}

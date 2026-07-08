@@ -3,11 +3,11 @@ import { MAP_VIEW_RELEASE_DELAY_MS } from '../constants';
 import type { ViewMode } from '../types';
 
 type UseDashboardViewTransitionParams = {
-    onBeforeViewChange?: () => void;
+    onViewCommitted?: (view: ViewMode) => void;
 };
 
 export function useDashboardViewTransition({
-    onBeforeViewChange,
+    onViewCommitted,
 }: UseDashboardViewTransitionParams = {}) {
     const [view, setView] = useState<ViewMode>('warehouse');
     const [chinaMapSession, setChinaMapSession] = useState(0);
@@ -53,8 +53,6 @@ export function useDashboardViewTransition({
     }, []);
 
     const requestViewChange = useCallback((nextView: ViewMode) => {
-        onBeforeViewChange?.();
-
         if (nextView === 'chinaMap') {
             if (view === 'chinaMap' || isPreparingChinaMap || isRevealingChinaMap) return;
             cancelRoadMapTransition();
@@ -83,6 +81,7 @@ export function useDashboardViewTransition({
         cancelChinaMapTransition();
         cancelRoadMapTransition();
         setView(nextView);
+        onViewCommitted?.(nextView);
     }, [
         cancelChinaMapTransition,
         cancelRoadMapTransition,
@@ -90,7 +89,7 @@ export function useDashboardViewTransition({
         isPreparingRoadMap,
         isRevealingChinaMap,
         isRevealingRoadMap,
-        onBeforeViewChange,
+        onViewCommitted,
         view,
     ]);
 
@@ -131,12 +130,13 @@ export function useDashboardViewTransition({
         chinaMapRevealTimerRef.current = window.setTimeout(() => {
             if (chinaMapPrepareRunRef.current !== prepareRunId) return;
             setView('chinaMap');
+            onViewCommitted?.('chinaMap');
             setIsPreparingChinaMap(false);
             setIsRevealingChinaMap(false);
             setIsChinaMapDataReady(false);
             chinaMapRevealTimerRef.current = null;
         }, MAP_VIEW_RELEASE_DELAY_MS);
-    }, [isChinaMapDataReady, isChinaMapVisualReady, isPreparingChinaMap, isRevealingChinaMap]);
+    }, [isChinaMapDataReady, isChinaMapVisualReady, isPreparingChinaMap, isRevealingChinaMap, onViewCommitted]);
 
     useEffect(() => {
         if (!isPreparingRoadMap || !isRoadMapVisualReady || !isRoadMapDataReady || isRevealingRoadMap) return;
@@ -146,12 +146,13 @@ export function useDashboardViewTransition({
         roadMapRevealTimerRef.current = window.setTimeout(() => {
             if (roadMapPrepareRunRef.current !== prepareRunId) return;
             setView('roadMap');
+            onViewCommitted?.('roadMap');
             setIsPreparingRoadMap(false);
             setIsRevealingRoadMap(false);
             setIsRoadMapDataReady(false);
             roadMapRevealTimerRef.current = null;
         }, MAP_VIEW_RELEASE_DELAY_MS);
-    }, [isPreparingRoadMap, isRevealingRoadMap, isRoadMapDataReady, isRoadMapVisualReady]);
+    }, [isPreparingRoadMap, isRevealingRoadMap, isRoadMapDataReady, isRoadMapVisualReady, onViewCommitted]);
 
     useEffect(() => {
         return () => {

@@ -1,9 +1,11 @@
-﻿import type { RefObject } from 'react';
+import type { RefObject } from 'react';
 import Warehouse3D from '../modules/Warehouse3D';
 import ChinaMap3D from '../modules/ChinaMap3D';
 import type { ChinaMap3DHandle } from '../modules/ChinaMap3D';
 import RoadMap3D from '../modules/RoadMap3D';
 import type { RoadMap3DHandle } from '../modules/RoadMap3D';
+import TownRoadMap3D from '../modules/TownRoadMap3D';
+import type { TownRoadMap3DHandle } from '../modules/TownRoadMap3D';
 import type { ViewMode } from '../types';
 import { MAP_VIEW_TRANSITION_MS, ROAD_GROUP_TRANSITION_MS } from '../constants';
 
@@ -18,8 +20,10 @@ type DashboardCenterPanelProps = {
     roadMapSession: number;
     mapRef: RefObject<ChinaMap3DHandle | null>;
     roadMapRef: RefObject<RoadMap3DHandle | null>;
+    townRoadMapRef?: RefObject<TownRoadMap3DHandle | null>;
     onChinaMapVisualReady: () => void;
     onRoadMapVisualReady: () => void;
+    onTownRoadMapVisualReady?: () => void;
     onWarehouseTourStateChange: (state: {
         mode: 'overview' | 'focus';
         cityName?: string;
@@ -38,13 +42,16 @@ export function DashboardCenterPanel({
     roadMapSession,
     mapRef,
     roadMapRef,
+    townRoadMapRef,
     onChinaMapVisualReady,
     onRoadMapVisualReady,
+    onTownRoadMapVisualReady,
     onWarehouseTourStateChange,
 }: DashboardCenterPanelProps) {
     const showChinaMapLayer = view === 'chinaMap' || isPreparingChinaMap || isRevealingChinaMap;
     const isChinaMapLeaving = view === 'chinaMap' && isRevealingRoadMap;
     const isChinaMapVisible = (view === 'chinaMap' && !isChinaMapLeaving) || isRevealingChinaMap;
+
     const showRoadMapLayer = view === 'roadMap' || isPreparingRoadMap || isRevealingRoadMap;
     const isRoadMapLeaving = view === 'roadMap' && isRevealingChinaMap;
     const isRoadGroupTransition = view === 'roadMap' && !isPreparingRoadMap && !isRevealingRoadMap;
@@ -58,6 +65,13 @@ export function DashboardCenterPanel({
                     <Warehouse3D key="warehouse" />
                 </div>
             )}
+
+            {view === 'townRoadMap' && townRoadMapRef && (
+                <div className="absolute inset-0 z-10">
+                    <TownRoadMap3D ref={townRoadMapRef} onVisualReady={onTownRoadMapVisualReady} />
+                </div>
+            )}
+
             {showRoadMapLayer && (
                 <div
                     className={`absolute inset-0 transition-opacity ${
@@ -75,6 +89,7 @@ export function DashboardCenterPanel({
                     />
                 </div>
             )}
+
             {showChinaMapLayer && (
                 <div
                     className={`absolute inset-0 transition-opacity ${
