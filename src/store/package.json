@@ -1,0 +1,46 @@
+{
+  // 订单唯一标识。如果他们没有真实订单号，也必须给一个稳定的唯一 ID
+  "orderId": string | null,
+
+  // 每条运输线 / 车辆任务的唯一 ID，强烈要求必须有
+  "lineId": string,
+
+
+  // 起点
+  "from": {
+    "name"?: string,             // 例如：广东省佛山市南海区
+    "province"?: string,        // 广东省
+    "city"?: string,            // 佛山市
+    "district"?: string,        // 南海区
+    "adcode"?: string,          // 例如 440605
+    //name,adcode和三段区分至少有一个
+    "coords": [number, number] // [lng, lat]
+  },
+
+//   目的地
+  "to": {
+    "name": string,
+    "province"?: string,
+    "city"?: string,
+    "district"?: string,
+    "adcode"?: string,
+  },
+
+  // 车辆信息
+  "vehicle": {
+    "plate": string,// 货物信息
+    "carId": string //车牌号或者车辆id
+    "cargoWeight"?: number,
+    "cargoUnit"?: string
+  };
+
+  // 状态
+  status: '待装载' | '装载中' | '运输中' | '已完成' | '已取消' | string;
+
+  // 时间
+  updatedAt: string;
+  // 删除 / 取消标记，增量更新时非常重要
+  deleted?: boolean,
+  //是否有进行修改路线信息
+  "upToDate": boolean,
+}
