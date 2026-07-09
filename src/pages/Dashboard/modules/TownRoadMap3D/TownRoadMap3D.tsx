@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createLocalProjection, collectRenderProvinceAdcodes, collectTaskCoords, commandOrders, commandRenderProvinces, featureCoords, isLonLat, loadGeoJsonByRenderCommand } from './geo';
 import { MAP_LIFT, MARKER_LIFT, ROUTE_LIFT, TOWN_ROUTE_CURVE_HEIGHT } from './constants';
-import type { LonLat, TownBoundaryLayers, TownRoadMap3DHandle, TownRoadRenderCommand, TownTransportTask } from './types';
+import type { LonLat, TownAnimationStage, TownBoundaryLayers, TownRoadMap3DHandle, TownRoadRenderCommand, TownTransportTask } from './types';
 
 type TownRoadMap3DProps = {
     onVisualReady?: () => void;
@@ -35,6 +35,12 @@ const BOUNDARY_STYLES: Record<BoundaryLevel, BoundaryStyle> = {
     // 县界：最细、最暗，主要由每个区县块自己的 EdgesGeometry 表达。
     district: { color: 0x93c5fd, opacity: 0.14, lift: MAP_LIFT + 0.58, lineWidth: 1, renderOrder: 12 },
 };
+
+function commandMapKey(command: TownRoadRenderCommand) {
+    const renderLevel = command.renderLevel ?? 'province-district';
+    const provinces = commandRenderProvinces(command).slice().sort().join('|');
+    return `${renderLevel}:${provinces}`;
+}
 
 function extractFeatureRings(feature: any): LonLat[][] {
     const geometry = feature?.geometry;
@@ -147,6 +153,9 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
     const controlsRef = useRef<OrbitControls | null>(null);
     const mapGroupRef = useRef<THREE.Group | null>(null);
     const routesGroupRef = useRef<THREE.Group | null>(null);
+    const projectionRef = useRef<ReturnType<typeof createLocalProjection> | null>(null);
+    const renderedMapKeyRef = useRef<string | null>(null);
+    const renderedMapPointsRef = useRef<THREE.Vector3[]>([]);
     const renderFrameRef = useRef(0);
     const renderRunRef = useRef(0);
     const raycasterRef = useRef(new THREE.Raycaster());
@@ -154,13 +163,20 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
     const interactiveObjectsRef = useRef<THREE.Object3D[]>([]);
     const [hoverInfo, setHoverInfo] = useState<TownHoverInfo | null>(null);
 
-    const clearRenderedData = useCallback(() => {
+    const clearMapData = useCallback(() => {
         const scene = sceneRef.current;
         if (mapGroupRef.current) {
             scene?.remove(mapGroupRef.current);
             disposeObject3D(mapGroupRef.current);
             mapGroupRef.current = null;
         }
+        renderedMapKeyRef.current = null;
+        renderedMapPointsRef.current = [];
+        projectionRef.current = null;
+    }, []);
+
+    const clearRouteData = useCallback(() => {
+        const scene = sceneRef.current;
         if (routesGroupRef.current) {
             scene?.remove(routesGroupRef.current);
             disposeObject3D(routesGroupRef.current);
@@ -169,6 +185,11 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
         interactiveObjectsRef.current = [];
         setHoverInfo(null);
     }, []);
+
+    const clearRenderedData = useCallback(() => {
+        clearRouteData();
+        clearMapData();
+    }, [clearMapData, clearRouteData]);
 
     const focusPoints = useCallback((points: THREE.Vector3[]) => {
         const camera = cameraRef.current;
@@ -376,23 +397,40 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
             const validTasks = commandOrders(command).filter((task) => !task.deleted);
             const taskCoords = collectTaskCoords(validTasks);
             const targetProvinces = commandRenderProvinces(command);
-            const geoJson = targetProvinces.length > 0
-                ? await loadGeoJsonByRenderCommand(command)
-                : { type: 'FeatureCollection', features: [], boundaryFeatures: {} };
-            if (renderRunRef.current !== runId) return;
+            const nextMapKey = commandMapKey(command);
 
-            const boundaryFeatureList = Object.values(geoJson.boundaryFeatures ?? {}).flat();
-            const featurePoints = [...(geoJson.features ?? []), ...boundaryFeatureList].flatMap(featureCoords);
-            const projection = createLocalProjection([...taskCoords, ...featurePoints]);
-            clearRenderedData();
+            let projection = projectionRef.current;
+            let renderedMapPoints = renderedMapPointsRef.current;
+            const shouldReloadMap = renderedMapKeyRef.current !== nextMapKey || !projection;
 
-            let renderedMapPoints: THREE.Vector3[] = [];
-            if (geoJson.features?.length) {
-                const renderedMap = renderMapFeatures(geoJson.features, projection, geoJson.boundaryFeatures);
-                mapGroupRef.current = renderedMap.group;
-                renderedMapPoints = renderedMap.points;
-                scene.add(renderedMap.group);
+            if (shouldReloadMap) {
+                const geoJson = targetProvinces.length > 0
+                    ? await loadGeoJsonByRenderCommand(command)
+                    : { type: 'FeatureCollection', features: [], boundaryFeatures: {} };
+                if (renderRunRef.current !== runId) return;
+
+                const boundaryFeatureList = Object.values(geoJson.boundaryFeatures ?? {}).flat();
+                const featurePoints = [...(geoJson.features ?? []), ...boundaryFeatureList].flatMap(featureCoords);
+                projection = createLocalProjection([...taskCoords, ...featurePoints]);
+                clearRenderedData();
+
+                renderedMapPoints = [];
+                if (geoJson.features?.length) {
+                    const renderedMap = renderMapFeatures(geoJson.features, projection, geoJson.boundaryFeatures);
+                    mapGroupRef.current = renderedMap.group;
+                    renderedMapPoints = renderedMap.points;
+                    scene.add(renderedMap.group);
+                }
+
+                projectionRef.current = projection;
+                renderedMapKeyRef.current = nextMapKey;
+                renderedMapPointsRef.current = renderedMapPoints;
+            } else {
+                // 省份范围没变时，只重画路线/车辆，不重新请求 GeoJSON，也不重建省市县 3D 区块。
+                clearRouteData();
             }
+
+            if (!projection) return;
 
             const renderedRoutes = renderRoutes(validTasks, projection);
             routesGroupRef.current = renderedRoutes.group;
@@ -408,7 +446,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                     : renderedMapPoints;
             focusPoints(focusSource);
         })();
-    }, [clearRenderedData, focusPoints, mapPositionFactory, renderMapFeatures, renderRoutes]);
+    }, [clearRenderedData, clearRouteData, focusPoints, mapPositionFactory, renderMapFeatures, renderRoutes]);
 
     const setTransportTasks = useCallback((tasks: TownTransportTask[]) => {
         const validTasks = tasks.filter((task) => !task.deleted);
@@ -437,12 +475,19 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
         ]);
     }, [setTransportTasks]);
 
+    const startAnimationStage = useCallback((stage: TownAnimationStage) => {
+        // 预留入口：后面具体动画可以在这里根据 stage.kind 调 camera、路线高亮、边高亮。
+        // 当前阶段先只暴露入口，不改变地图状态，避免影响已调好的渲染链路。
+        console.debug('[TownRoadMap3D] animation stage ready', stage.kind, stage.id, stage.payload);
+    }, []);
+
     useImperativeHandle(ref, () => ({
         setRoute,
         setTransportTasks,
         setRenderCommand: renderCommand,
+        startAnimationStage,
         clearRoutes: clearRenderedData,
-    }), [clearRenderedData, renderCommand, setRoute, setTransportTasks]);
+    }), [clearRenderedData, renderCommand, setRoute, setTransportTasks, startAnimationStage]);
 
     useEffect(() => {
         const container = containerRef.current;

@@ -3,6 +3,7 @@ import { BASE_URL } from './constants';
 import type { LonLat, TownGeoFeatureCollection, TownRoadRenderCommand, TownTransportTask } from './types';
 
 const geoJsonCache = new Map<string, Promise<any>>();
+export const projection = geoMercator().center([104.5, 35]).scale(80).translate([0, 0]);
 
 /**
  * 旧 ChinaMap/RoadMap 中需要特殊处理的省级 adcode：
@@ -85,10 +86,6 @@ function isCityAdcode(adcode: string) {
 
 function isMunicipalityProvince(adcode: string) {
     return MUNICIPALITY_ADCODES.has(provinceAdcode(adcode));
-}
-
-function isSpecialRegionProvince(adcode: string) {
-    return SPECIAL_REGION_ADCODES.has(provinceAdcode(adcode));
 }
 
 function hasKnownNoStableChildren(feature: any) {
@@ -404,6 +401,27 @@ export async function loadGeoJsonByAdcodes(adcodes: string[]): Promise<TownGeoFe
             district: dedupeFeatures(features),
         },
     };
+}
+
+export async function loadCitiesByAdcodes(adcodes: Array<string | number>): Promise<TownGeoFeatureCollection> {
+    return loadGeoJsonByAdcodes(adcodes.map(String));
+}
+
+export function findNearestCity<T extends { lng: number; lat: number }>(coords: LonLat, cities: T[]): T {
+    if (cities.length === 0) {
+        throw new Error('findNearestCity requires at least one city');
+    }
+
+    let nearest = cities[0];
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    cities.forEach((city) => {
+        const distance = Math.hypot(coords[0] - city.lng, coords[1] - city.lat);
+        if (distance < nearestDistance) {
+            nearest = city;
+            nearestDistance = distance;
+        }
+    });
+    return nearest;
 }
 
 export async function loadGeoJsonByRenderCommand(command: TownRoadRenderCommand): Promise<TownGeoFeatureCollection> {

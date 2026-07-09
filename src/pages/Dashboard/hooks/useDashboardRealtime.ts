@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { TownRoadRenderCommand } from '../modules/TownRoadMap3D';
+import type { TownRoadRenderCommand, TownRoadRenderIncoming } from '../modules/TownRoadMap3D';
 
 type CityRaiseMessage = {
     type: 'city_raise';
@@ -99,7 +99,7 @@ type UseDashboardRealtimeOptions = {
     onCameraControl?: (cityNames: string[], mode: 'overview' | 'focus') => void;
 
     // TownRoadMap 后端渲染命令复用同一条 /ws/realtime，避免另开一条 WebSocket。
-    onTownRoadRender?: (command: TownRoadRenderCommand) => void;
+    onTownRoadRender?: (payload: TownRoadRenderIncoming) => void;
 };
 
 const WS_TOKEN = String(import.meta.env.VITE_WS_TOKEN || 'jushen-screen-token');
@@ -148,13 +148,33 @@ function createRouteOrder(line: CityRaiseMessage): RouteOrder {
     };
 }
 
-function isTownRoadRenderCommand(message: DashboardMessage): message is TownRoadRenderCommand {
-    if (message?.type !== 'town_road_render') return false;
-    const payload = message as any;
+function isTownRoadRenderCommandPayload(payload: any): payload is TownRoadRenderCommand {
+    if (!payload || payload.type !== 'town_road_render') return false;
     return Array.isArray(payload.renderProvinces)
         || Array.isArray(payload.orders)
+        || Array.isArray(payload.routeGroups)
+        || Array.isArray(payload.provinceEdges)
         || Array.isArray(payload.renderAdcodes)
         || Array.isArray(payload.tasks);
+}
+
+function extractTownRoadRenderPayload(message: DashboardMessage): TownRoadRenderIncoming | null {
+    if (message?.type !== 'town_road_render') return null;
+    const payload = message as any;
+
+    // 新后端结构：外层是一次轮询/模拟结果，真正要渲染的是 commands[]。
+    // 这里保留 wrapper 本身，避免丢失 primaryCommandId / diff 等预处理信息。
+    if (Array.isArray(payload.commands)) {
+        const commands = payload.commands.filter(isTownRoadRenderCommandPayload);
+        return commands.length > 0 ? { ...payload, commands } : null;
+    }
+
+    // 兼容旧结构：后端直接广播单个 town_road_render 命令。
+    if (isTownRoadRenderCommandPayload(payload)) {
+        return payload;
+    }
+
+    return null;
 }
 
 export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
@@ -194,8 +214,9 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
 
         const handleMessage = (message: DashboardMessage) => {
             if (message.type === 'ping') return;
-            if (isTownRoadRenderCommand(message)) {
-                optionsRef.current.onTownRoadRender?.(message);
+            const townRoadPayload = extractTownRoadRenderPayload(message);
+            if (townRoadPayload) {
+                optionsRef.current.onTownRoadRender?.(townRoadPayload);
                 return;
             }
 

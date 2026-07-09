@@ -22,6 +22,7 @@ import {
     dispatchBulkRoutes,
     dispatchRoute,
 } from './services/roadApi';
+import { townLog } from './townRoadLogger';
 import type { ViewMode } from './types';
 
 function DashboardPage() {
@@ -115,6 +116,7 @@ function DashboardPage() {
     const {
         townTasks,
         townSummary,
+        loadTownRoadData,
         handleTownRoadRenderCommand,
     } = useTownRoadController({
         view,
@@ -210,6 +212,12 @@ function DashboardPage() {
         if (!isPreparingRoadMap || !isRoadMapVisualReady || roadMapSession <= 0) return;
         void requestRoadMapSnapshot(roadMapPrepareRunRef.current);
     }, [isPreparingRoadMap, isRoadMapVisualReady, requestRoadMapSnapshot, roadMapSession]);
+
+    useEffect(() => {
+        if (view !== 'townRoadMap') return;
+        townLog('info', 'view enter townRoadMap');
+        void loadTownRoadData('view-enter-townRoadMap');
+    }, [loadTownRoadData, view]);
 
     const renderCenterPanel = () => (
         <DashboardCenterPanel
