@@ -183,9 +183,7 @@ function getPreferredRenderableStage(queue: CircularAnimationQueue<TownAnimation
 }
 
 export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadControllerParams) {
-    const [townCommands, setTownCommands] = useState<TownRoadRenderCommand[]>([
-        normalizeCommand(mockTownProvinceRenderCommand),
-    ]);
+    const [townCommands, setTownCommands] = useState<TownRoadRenderCommand[]>([]);
     const [activeTownCommandIndex, setActiveTownCommandIndex] = useState(0);
     const [lastTownDiff, setLastTownDiff] = useState<TownRoadDiffSummary | null>(null);
     const sceneMapRef = useRef<Map<string, TownRoadRenderCommand>>(new Map());
@@ -208,6 +206,7 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         activeTownCommandIndexRef.current = activeTownCommandIndex;
     }, [activeTownCommandIndex]);
 
+    const hasTownCommands = townCommands.length > 0;
     const townCommand = townCommands[activeTownCommandIndex] ?? townCommands[0] ?? normalizeCommand(mockTownProvinceRenderCommand);
 
     const bumpAnimationQueue = useCallback(() => {
@@ -238,8 +237,9 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
     }, [bumpAnimationQueue]);
 
     useEffect(() => {
+        if (!hasTownCommands) return;
         syncAnimationQueueForCommand(townCommand);
-    }, [syncAnimationQueueForCommand, townCommand]);
+    }, [hasTownCommands, syncAnimationQueueForCommand, townCommand]);
 
     const currentRenderableStage = useMemo(() => {
         // 地图加载范围不按整个主 command，而按当前可渲染组别/路径阶段的 renderProvinces。
@@ -252,6 +252,10 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
 
     useEffect(() => {
         if (view !== 'townRoadMap') return;
+        if (!hasTownCommands) {
+            townLog('debug', 'map sync skipped: no town commands yet');
+            return;
+        }
         const renderProvinces = commandRenderProvinces(activeTownRenderCommand);
         const renderKey = renderProvinces.slice().sort().join('|');
         const stageId = currentRenderableStage?.id;
@@ -274,7 +278,7 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         }
 
         townRoadMapRef.current?.setRenderCommand(activeTownRenderCommand);
-    }, [activeTownRenderCommand, currentRenderableStage, townRoadMapRef, view]);
+    }, [activeTownRenderCommand, currentRenderableStage, hasTownCommands, townRoadMapRef, view]);
 
     const applyTownRoadEnvelope = useCallback((payload: TownRoadRenderIncoming, source = 'unknown') => {
         const packet = extractRenderPacket(payload);
@@ -306,9 +310,10 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         const preservedIndex = previousActiveKey
             ? merged.commands.findIndex((command) => getTownCommandKey(command) === previousActiveKey)
             : -1;
+        const shouldPreserveActiveScene = !packet.primaryCommandId && !source.startsWith('http:');
         const nextActiveIndex = packet.primaryCommandId
             ? primaryIndex
-            : preservedIndex >= 0
+            : shouldPreserveActiveScene && preservedIndex >= 0
                 ? preservedIndex
                 : primaryIndex;
         const primaryScene = merged.commands[nextActiveIndex] ?? merged.commands[primaryIndex] ?? merged.commands[0];

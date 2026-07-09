@@ -24,6 +24,10 @@ function unique(values: Array<string | null | undefined>) {
     return Array.from(new Set(values.filter((value): value is string => Boolean(value && value.trim()))));
 }
 
+function sortedUnique(values: Array<string | null | undefined>) {
+    return unique(values).map(String).sort();
+}
+
 function provinceFromDistrictAdcode(adcode?: string) {
     if (!adcode || !/^\d{6}$/.test(adcode)) return undefined;
     return `${adcode.slice(0, 2)}0000`;
@@ -37,16 +41,16 @@ function collectOrderRenderProvinces(order: TownTransportOrder) {
 }
 
 function collectGroupRenderProvinces(group: TownRouteGroup, orders: TownTransportOrder[]) {
-    const pathProvinces = unique((group.candidatePaths ?? []).flatMap((path) => path.provincePath ?? []));
+    const pathProvinces = sortedUnique((group.candidatePaths ?? []).flatMap((path) => path.provincePath ?? []));
     if (pathProvinces.length > 0) return pathProvinces;
 
     const groupOrderLineIds = new Set(collectGroupOrderLineIds(group));
-    const orderProvinces = unique(orders
+    const orderProvinces = sortedUnique(orders
         .filter((order) => groupOrderLineIds.has(order.lineId))
         .flatMap(collectOrderRenderProvinces));
     if (orderProvinces.length > 0) return orderProvinces;
 
-    return unique([group.fromProvinceKey, group.toProvinceKey]);
+    return sortedUnique([group.fromProvinceKey, group.toProvinceKey]);
 }
 
 function collectPathRenderProvinces(path: TownCandidatePath, fallbackRenderProvinces: string[]) {
@@ -63,7 +67,7 @@ function collectPathRenderProvinces(path: TownCandidatePath, fallbackRenderProvi
  */
 function collectGroupPlaybackRenderProvinces(group: TownRouteGroup, orders: TownTransportOrder[]) {
     const groupRenderProvinces = collectGroupRenderProvinces(group, orders);
-    const candidatePathProvinces = unique((group.candidatePaths ?? []).flatMap((path) => collectPathRenderProvinces(path, groupRenderProvinces)));
+    const candidatePathProvinces = sortedUnique((group.candidatePaths ?? []).flatMap((path) => collectPathRenderProvinces(path, groupRenderProvinces)));
     return candidatePathProvinces.length > 0 ? candidatePathProvinces : groupRenderProvinces;
 }
 
