@@ -481,13 +481,25 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
         console.debug('[TownRoadMap3D] animation stage ready', stage.kind, stage.id, stage.payload);
     }, []);
 
+    const playAnimationStage = useCallback((stage: TownAnimationStage) => {
+        console.info('[TownRoadMap3D] playAnimationStage placeholder', {
+            stageId: stage.id,
+            stageKind: stage.kind,
+            groupId: stage.payload.routeGroupId,
+            pathId: stage.payload.candidatePathId,
+            edgeKey: stage.payload.edgeKey,
+            renderProvinces: stage.payload.renderProvinces,
+        });
+    }, []);
+
     useImperativeHandle(ref, () => ({
         setRoute,
         setTransportTasks,
         setRenderCommand: renderCommand,
         startAnimationStage,
+        playAnimationStage,
         clearRoutes: clearRenderedData,
-    }), [clearRenderedData, renderCommand, setRoute, setTransportTasks, startAnimationStage]);
+    }), [clearRenderedData, playAnimationStage, renderCommand, setRoute, setTransportTasks, startAnimationStage]);
 
     useEffect(() => {
         const container = containerRef.current;

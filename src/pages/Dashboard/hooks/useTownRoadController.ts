@@ -41,12 +41,18 @@ type TownOrderMergeResult = {
     deleted: string[];
 };
 
+const DEFAULT_STAGE_DURATION_MS = 5000;
+
 function commandOrders(command: TownRoadRenderCommand): TownTransportTask[] {
     return command.orders?.length ? command.orders : (command.tasks ?? []);
 }
 
 function commandRenderProvinces(command: TownRoadRenderCommand): string[] {
     return command.renderProvinces?.length ? command.renderProvinces : (command.renderAdcodes ?? []);
+}
+
+function getRenderKey(provinces: string[]) {
+    return provinces.slice().sort().join('|');
 }
 
 function isDeletedTownOrder(order: TownTransportOrder) {
@@ -193,6 +199,9 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
     const loadingRef = useRef(false);
     const loadedOnceRef = useRef(false);
     const animationQueueRef = useRef(new CircularAnimationQueue<TownAnimationStage>());
+    const animationTimerRef = useRef<number | null>(null);
+    const animationRunningRef = useRef(false);
+    const currentStageStartedAtRef = useRef<number | null>(null);
     const lastQueueSceneKeyRef = useRef<string | null>(null);
     const townCommandsRef = useRef(townCommands);
     const activeTownCommandIndexRef = useRef(activeTownCommandIndex);
@@ -233,6 +242,11 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
             firstStage: nextStages[0]?.id,
             groupCount: command.routeGroups?.length ?? 0,
         });
+        const queueSnapshot = queue.toDebugSnapshot();
+        townLog('debug', 'animation queue snapshot', {
+            count: queueSnapshot.length,
+            stages: queueSnapshot,
+        });
         bumpAnimationQueue();
     }, [bumpAnimationQueue]);
 
@@ -250,35 +264,53 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         return buildTownStageRenderCommand(townCommand, currentRenderableStage);
     }, [currentRenderableStage, townCommand]);
 
+    const syncTownMapWithStage = useCallback((stage: TownAnimationStage, reason: string) => {
+        const renderProvinces = stage.payload.renderProvinces ?? [];
+        const renderKey = getRenderKey(renderProvinces);
+        const command = buildTownStageRenderCommand(townCommand, stage);
+
+        townLog('info', 'current animation stage', {
+            reason,
+            stageId: stage.id,
+            stageKind: stage.kind,
+            groupId: stage.payload.routeGroupId,
+            pathId: stage.payload.candidatePathId,
+            edgeKey: stage.payload.edgeKey,
+            renderProvinces,
+            status: stage.playbackStatus,
+        });
+
+        if (activeRenderKeyRef.current === renderKey) {
+            townLog('debug', 'map reload skipped: same render key', {
+                reason,
+                renderKey,
+                stageId: stage.id,
+                stageKind: stage.kind,
+            });
+            townRoadMapRef.current?.setRenderCommand(command);
+            return;
+        }
+
+        activeRenderKeyRef.current = renderKey;
+        townLog('info', 'map reload required', {
+            reason,
+            renderProvinces,
+            renderKey,
+            stageId: stage.id,
+            stageKind: stage.kind,
+        });
+        townRoadMapRef.current?.setRenderCommand(command);
+    }, [townCommand, townRoadMapRef]);
+
     useEffect(() => {
         if (view !== 'townRoadMap') return;
         if (!hasTownCommands) {
             townLog('debug', 'map sync skipped: no town commands yet');
             return;
         }
-        const renderProvinces = commandRenderProvinces(activeTownRenderCommand);
-        const renderKey = renderProvinces.slice().sort().join('|');
-        const stageId = currentRenderableStage?.id;
-        const stageKind = currentRenderableStage?.kind;
-
-        if (activeRenderKeyRef.current === renderKey) {
-            townLog('debug', 'map reload skipped: same render key', {
-                renderKey,
-                stageId,
-                stageKind,
-            });
-        } else {
-            activeRenderKeyRef.current = renderKey;
-            townLog('info', 'map reload required', {
-                renderProvinces,
-                renderKey,
-                stageId,
-                stageKind,
-            });
-        }
-
-        townRoadMapRef.current?.setRenderCommand(activeTownRenderCommand);
-    }, [activeTownRenderCommand, currentRenderableStage, hasTownCommands, townRoadMapRef, view]);
+        if (!currentRenderableStage) return;
+        syncTownMapWithStage(currentRenderableStage, 'view-sync');
+    }, [currentRenderableStage, hasTownCommands, syncTownMapWithStage, view]);
 
     const applyTownRoadEnvelope = useCallback((payload: TownRoadRenderIncoming, source = 'unknown') => {
         const packet = extractRenderPacket(payload);
@@ -422,9 +454,12 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         return removed;
     }, [bumpAnimationQueue]);
 
-    const startCurrentTownAnimationStage = useCallback(() => {
+    const startCurrentTownAnimationStage = useCallback((reason = 'manual') => {
         const current = animationQueueRef.current.current;
-        if (!current) return null;
+        if (!current) {
+            townLog('warn', 'start stage skipped: empty queue', { reason });
+            return null;
+        }
 
         const playing = animationQueueRef.current.update(
             current.id,
@@ -432,13 +467,32 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
             { skipLocked: false }
         );
         if (playing) {
+            currentStageStartedAtRef.current = performance.now();
+            townLog('info', 'stage start', {
+                reason,
+                stageId: playing.id,
+                stageKind: playing.kind,
+                groupId: playing.payload.routeGroupId,
+                pathId: playing.payload.candidatePathId,
+                edgeKey: playing.payload.edgeKey,
+                renderProvinces: playing.payload.renderProvinces,
+            });
+            if (playing.kind === 'order_batch_focus') {
+                townLog('info', 'order batch stage placeholder', {
+                    groupId: playing.payload.routeGroupId,
+                    orderLineIds: playing.payload.orderLineIds,
+                    renderProvinces: playing.payload.renderProvinces,
+                });
+            }
+            syncTownMapWithStage(playing, `stage-start:${reason}`);
             townRoadMapRef.current?.startAnimationStage?.(playing);
+            townRoadMapRef.current?.playAnimationStage?.(playing);
             bumpAnimationQueue();
         }
         return playing;
-    }, [bumpAnimationQueue, townRoadMapRef]);
+    }, [bumpAnimationQueue, syncTownMapWithStage, townRoadMapRef]);
 
-    const moveNextTownAnimationStage = useCallback(() => {
+    const moveNextTownAnimationStage = useCallback((reason = 'timer') => {
         const previous = animationQueueRef.current.current;
         if (previous) {
             animationQueueRef.current.update(
@@ -448,17 +502,83 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
             );
         }
         const next = animationQueueRef.current.moveNext();
-        if (next) {
-            animationQueueRef.current.update(
-                next.id,
-                (stage) => markStageStatus(stage, 'playing', true),
-                { skipLocked: false }
-            );
-            townRoadMapRef.current?.startAnimationStage?.(animationQueueRef.current.current ?? next);
+        if (!next) {
+            townLog('warn', 'move next skipped: no next stage', { reason });
+            return null;
         }
+
+        townLog('info', 'stage move next', {
+            reason,
+            from: previous?.id,
+            to: next.id,
+            nextKind: next.kind,
+            nextGroupId: next.payload.routeGroupId,
+            nextPathId: next.payload.candidatePathId,
+            nextEdgeKey: next.payload.edgeKey,
+        });
+
+        const playing = startCurrentTownAnimationStage(`move-next:${reason}`);
         bumpAnimationQueue();
-        return animationQueueRef.current.current;
-    }, [bumpAnimationQueue, townRoadMapRef]);
+        return playing;
+    }, [bumpAnimationQueue, startCurrentTownAnimationStage]);
+
+    const stopTownAnimationLoop = useCallback((reason = 'manual') => {
+        animationRunningRef.current = false;
+
+        if (animationTimerRef.current !== null) {
+            window.clearTimeout(animationTimerRef.current);
+            animationTimerRef.current = null;
+        }
+
+        townLog('info', 'animation loop stopped', { reason });
+    }, []);
+
+    const scheduleNextAnimationTick = useCallback(() => {
+        if (!animationRunningRef.current) return;
+
+        animationTimerRef.current = window.setTimeout(() => {
+            moveNextTownAnimationStage('loop-tick');
+            scheduleNextAnimationTick();
+        }, DEFAULT_STAGE_DURATION_MS);
+    }, [moveNextTownAnimationStage]);
+
+    const startTownAnimationLoop = useCallback((reason = 'manual') => {
+        if (animationRunningRef.current) {
+            townLog('debug', 'animation loop already running', { reason });
+            return;
+        }
+
+        if (animationQueueRef.current.size === 0) {
+            townLog('warn', 'animation loop start skipped: empty queue', { reason });
+            return;
+        }
+
+        animationRunningRef.current = true;
+        townLog('info', 'animation loop started', {
+            reason,
+            queueSize: animationQueueRef.current.size,
+            currentStage: animationQueueRef.current.current?.id,
+        });
+
+        startCurrentTownAnimationStage(`loop-start:${reason}`);
+        scheduleNextAnimationTick();
+    }, [scheduleNextAnimationTick, startCurrentTownAnimationStage]);
+
+    useEffect(() => {
+        if (view !== 'townRoadMap') {
+            stopTownAnimationLoop('leave-townRoadMap');
+            return;
+        }
+
+        if (!hasTownCommands || animationQueueRef.current.size === 0) return;
+        startTownAnimationLoop('queue-ready');
+    }, [animationQueueRevision, hasTownCommands, startTownAnimationLoop, stopTownAnimationLoop, view]);
+
+    useEffect(() => {
+        return () => {
+            stopTownAnimationLoop('controller-unmount');
+        };
+    }, [stopTownAnimationLoop]);
 
     const townTasks = useMemo<TownTransportTask[]>(() => commandOrders(activeTownRenderCommand), [activeTownRenderCommand]);
 
@@ -568,5 +688,7 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         removeTownAnimationStage,
         startCurrentTownAnimationStage,
         moveNextTownAnimationStage,
+        startTownAnimationLoop,
+        stopTownAnimationLoop,
     };
 }

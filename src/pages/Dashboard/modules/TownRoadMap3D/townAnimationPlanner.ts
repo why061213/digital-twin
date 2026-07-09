@@ -41,7 +41,7 @@ function collectOrderRenderProvinces(order: TownTransportOrder) {
 }
 
 function collectGroupRenderProvinces(group: TownRouteGroup, orders: TownTransportOrder[]) {
-    const pathProvinces = sortedUnique((group.candidatePaths ?? []).flatMap((path) => path.provincePath ?? []));
+    const pathProvinces = getGroupRenderProvinces(group);
     if (pathProvinces.length > 0) return pathProvinces;
 
     const groupOrderLineIds = new Set(collectGroupOrderLineIds(group));
@@ -51,6 +51,10 @@ function collectGroupRenderProvinces(group: TownRouteGroup, orders: TownTranspor
     if (orderProvinces.length > 0) return orderProvinces;
 
     return sortedUnique([group.fromProvinceKey, group.toProvinceKey]);
+}
+
+export function getGroupRenderProvinces(group: TownRouteGroup): string[] {
+    return sortedUnique((group.candidatePaths ?? []).flatMap((path) => path.provincePath ?? []));
 }
 
 function collectPathRenderProvinces(path: TownCandidatePath, fallbackRenderProvinces: string[]) {

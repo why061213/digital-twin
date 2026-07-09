@@ -21,6 +21,20 @@ export type CircularQueueSnapshot<T extends { id: string; locked?: boolean }> = 
     items: T[];
 };
 
+export type TownAnimationQueueDebugItem = {
+    index: number;
+    id: string;
+    kind?: string;
+    sceneKey?: string;
+    groupId?: string;
+    pathId?: string;
+    edgeKey?: string;
+    status?: string;
+    renderProvinces?: string[];
+    prevId?: string;
+    nextId?: string;
+};
+
 function applyPatch<T extends { id: string; locked?: boolean }>(item: T, patch: CircularQueuePatch<T>): T | null {
     if (typeof patch === 'function') {
         const result = patch(item);
@@ -277,6 +291,37 @@ export class CircularAnimationQueue<T extends { id: string; locked?: boolean }> 
             currentId: this.currentNode?.item.id ?? null,
             items: this.toArray(startAtCurrent),
         };
+    }
+
+    toDebugSnapshot(): TownAnimationQueueDebugItem[] {
+        const result: TownAnimationQueueDebugItem[] = [];
+        const start = this.headNode;
+        if (!start) return result;
+
+        let node = start;
+        let index = 0;
+        do {
+            const stage = node.item as any;
+            const payload = stage.payload ?? {};
+            result.push({
+                index,
+                id: stage.id,
+                kind: stage.kind ?? stage.type,
+                sceneKey: stage.sceneKey,
+                groupId: stage.groupId ?? payload.routeGroupId,
+                pathId: stage.pathId ?? payload.candidatePathId,
+                edgeKey: stage.edgeKey ?? payload.edgeKey,
+                status: stage.status ?? stage.playbackStatus,
+                renderProvinces: payload.renderProvinces,
+                prevId: node.previous?.item?.id,
+                nextId: node.next?.item?.id,
+            });
+
+            node = node.next;
+            index += 1;
+        } while (node !== start);
+
+        return result;
     }
 
     private assertNewId(id: string) {

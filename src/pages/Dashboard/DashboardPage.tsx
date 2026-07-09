@@ -117,6 +117,7 @@ function DashboardPage() {
         townTasks,
         townSummary,
         loadTownRoadData,
+        stopTownAnimationLoop,
         handleTownRoadRenderCommand,
     } = useTownRoadController({
         view,
@@ -214,10 +215,13 @@ function DashboardPage() {
     }, [isPreparingRoadMap, isRoadMapVisualReady, requestRoadMapSnapshot, roadMapSession]);
 
     useEffect(() => {
-        if (view !== 'townRoadMap') return;
+        if (view !== 'townRoadMap') {
+            stopTownAnimationLoop('leave-townRoadMap');
+            return;
+        }
         townLog('info', 'view enter townRoadMap');
         void loadTownRoadData('view-enter-townRoadMap');
-    }, [loadTownRoadData, view]);
+    }, [loadTownRoadData, stopTownAnimationLoop, view]);
 
     const renderCenterPanel = () => (
         <DashboardCenterPanel
