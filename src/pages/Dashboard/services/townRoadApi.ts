@@ -2,8 +2,8 @@ import { API_BASE_URL } from '../constants';
 import type { TownRoadRenderEnvelope } from '../modules/TownRoadMap3D/types';
 
 export async function fetchTownRoadRenderEnvelope(signal?: AbortSignal): Promise<TownRoadRenderEnvelope> {
-    const url = `${API_BASE_URL}/road/town/provinces/raw`;
-    console.info('[TownRoad] request backend raw envelope', { url });
+    const url = `${API_BASE_URL}/road/town/latest`;
+    console.info('[TownRoad] request backend latest envelope', { url });
 
     const response = await fetch(url, {
         method: 'GET',
@@ -11,11 +11,11 @@ export async function fetchTownRoadRenderEnvelope(signal?: AbortSignal): Promise
     });
 
     if (!response.ok) {
-        throw new Error(`TownRoad raw request failed: ${response.status}`);
+        throw new Error(`TownRoad latest request failed: ${response.status}`);
     }
 
     const data = await response.json() as TownRoadRenderEnvelope;
-    console.info('[TownRoad] backend raw envelope received', {
+    console.info('[TownRoad] backend latest envelope received', {
         ok: data?.ok,
         type: data?.type,
         rawCount: data?.rawCount,
