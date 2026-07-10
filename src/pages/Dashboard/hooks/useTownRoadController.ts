@@ -188,6 +188,13 @@ function getPreferredRenderableStage(queue: CircularAnimationQueue<TownAnimation
     return getPreferredRenderableStageFromStages(buildTownAnimationStages(command));
 }
 
+function buildAnimationStageRenderCommand(command: TownRoadRenderCommand, stage: TownAnimationStage | null | undefined) {
+    return {
+        ...buildTownStageRenderCommand(command, stage),
+        renderLevel: 'province-city' as const,
+    };
+}
+
 export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadControllerParams) {
     const [townCommands, setTownCommands] = useState<TownRoadRenderCommand[]>([]);
     const [activeTownCommandIndex, setActiveTownCommandIndex] = useState(0);
@@ -284,13 +291,15 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
     }, [animationQueueRevision, townCommand]);
 
     const activeTownRenderCommand = useMemo(() => {
-        return buildTownStageRenderCommand(townCommand, currentRenderableStage);
+        return buildAnimationStageRenderCommand(townCommand, currentRenderableStage);
     }, [currentRenderableStage, townCommand]);
 
     const syncTownMapWithStage = useCallback((stage: TownAnimationStage, reason: string) => {
         const renderProvinces = stage.payload.renderProvinces ?? [];
         const renderKey = getRenderKey(renderProvinces);
-        const command = buildTownStageRenderCommand(townCommand, stage);
+        const command = buildAnimationStageRenderCommand(townCommand, stage);
+        const commandRenderProvinces = command.renderProvinces ?? [];
+        const commandRenderKey = `${command.renderLevel}:${commandRenderProvinces.slice().sort().join('|')}`;
 
         townLog('info', 'current animation stage', {
             reason,
@@ -301,6 +310,15 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
             edgeKey: stage.payload.edgeKey,
             renderProvinces,
             status: stage.playbackStatus,
+        });
+
+        townLog('info', 'stage render command built', {
+            stageId: stage.id,
+            stageKind: stage.kind,
+            renderLevel: command.renderLevel,
+            renderProvinces: commandRenderProvinces,
+            renderKey: commandRenderKey,
+            orderCount: command.orders?.length ?? command.tasks?.length ?? 0,
         });
 
         if (activeRenderKeyRef.current === renderKey) {
