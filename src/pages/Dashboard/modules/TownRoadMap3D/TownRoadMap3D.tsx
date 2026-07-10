@@ -71,42 +71,36 @@ function createBoundaryOverlay(
     const group = new THREE.Group();
     const style = BOUNDARY_STYLES[level];
     const source = features ?? [];
-    const tubeRadius = level === 'province' ? 0.16 : 0.08;
-    const tubeSegments = level === 'province' ? 10 : 8;
 
     source.forEach((feature) => {
         const rings = extractFeatureRings(feature);
         rings.forEach((ring) => {
-            const points3D: THREE.Vector3[] = [];
+            const points: THREE.Vector3[] = [];
             ring.forEach((coord) => {
                 const projected = projection(coord);
                 if (!projected) return;
-                points3D.push(new THREE.Vector3(-projected[0], style.lift, -projected[1]));
+                points.push(new THREE.Vector3(-projected[0], style.lift, -projected[1]));
             });
 
-            if (points3D.length < 2) return;
-            // 确保环闭合
-            const first = points3D[0];
-            const last = points3D[points3D.length - 1];
+            if (points.length < 2) return;
+            const first = points[0];
+            const last = points[points.length - 1];
             if (first.distanceToSquared(last) > 0.000001) {
-                points3D.push(first.clone());
+                points.push(first.clone());
             }
 
-            const curve = new THREE.CatmullRomCurve3(points3D, true);
-            const tubeGeom = new THREE.TubeGeometry(curve, points3D.length * 2, tubeRadius, tubeSegments, true);
-            const tubeMesh = new THREE.Mesh(
-                tubeGeom,
-                new THREE.MeshBasicMaterial({
-                    color: style.color,
-                    transparent: true,
-                    opacity: style.opacity,
-                    depthTest: true,
-                    depthWrite: true,
-                })
-            );
-            tubeMesh.renderOrder = style.renderOrder;
-            tubeMesh.userData = { objectType: level === 'province' ? '省界' : level === 'city' ? '市界' : '县界' };
-            group.add(tubeMesh);
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineBasicMaterial({
+                color: style.color,
+                transparent: true,
+                opacity: style.opacity,
+                depthTest: false,
+                depthWrite: false,
+            });
+            const line = new THREE.Line(geometry, material);
+            line.renderOrder = style.renderOrder;
+            line.userData = { objectType: level === 'province' ? '省界' : level === 'city' ? '市界' : '县界' };
+            group.add(line);
         });
     });
 
@@ -230,26 +224,85 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
     }, []);
 
     const renderMapFeatures = useCallback((
-        _features: any[],
+        features: any[],
         projection: ReturnType<typeof createLocalProjection>,
         boundaryFeatures?: TownBoundaryLayers
     ) => {
         const group = new THREE.Group();
+        const allPoints: THREE.Vector3[] = [];
 
-        // 只从行政边界收集坐标点用于相机定位，不创建区县填充块。
-        const boundaryFeatureList = [
-            ...(boundaryFeatures?.province ?? []),
-            ...(boundaryFeatures?.city ?? []),
-        ];
-        const allPoints: THREE.Vector3[] = boundaryFeatureList.flatMap(featureCoords)
-            .map((coord) => {
-                const projected = projection(coord);
-                if (!projected) return null;
-                return new THREE.Vector3(-projected[0], MAP_LIFT, -projected[1]);
-            })
-            .filter((p): p is THREE.Vector3 => p !== null);
+        // 区县级区块：轻量平面填充 + 淡色细线边界
+        features.forEach((feature) => {
+            const geometry = feature.geometry;
+            if (!geometry) return;
 
-        // 行政边界分级管状线：省界粗管（amber）浮在上面，市界细管（cyan）在中间
+            const cityGroup = new THREE.Group();
+            const rings: LonLat[][] = [];
+            if (geometry.type === 'Polygon') {
+                rings.push(...(geometry.coordinates ?? []));
+            } else if (geometry.type === 'MultiPolygon') {
+                geometry.coordinates?.forEach((polygon: LonLat[][]) => rings.push(...polygon));
+            }
+
+            rings.forEach((ring) => {
+                if (!Array.isArray(ring) || ring.length < 3) return;
+                const shape = new THREE.Shape();
+                const ringPoints: THREE.Vector3[] = [];
+                ring.forEach((coord, index) => {
+                    const projected = projection(coord);
+                    if (!projected) return;
+                    const x = -projected[0];
+                    const y = -projected[1];
+                    if (index === 0) shape.moveTo(x, y);
+                    else shape.lineTo(x, y);
+                    const pt = new THREE.Vector3(x, MAP_LIFT, y);
+                    allPoints.push(pt);
+                    ringPoints.push(new THREE.Vector3(x, MAP_LIFT + 0.03, y));
+                });
+
+                // 轻量平面实体填充
+                const geom = new THREE.ShapeGeometry(shape);
+                const mesh = new THREE.Mesh(
+                    geom,
+                    new THREE.MeshBasicMaterial({
+                        color: 0x1a3550,
+                        transparent: true,
+                        opacity: 0.78,
+                        side: THREE.DoubleSide,
+                        depthWrite: false,
+                    })
+                );
+                mesh.renderOrder = 8;
+                cityGroup.add(mesh);
+
+                // 区县边界细线（微高于填充块，避免 z-fighting）
+                if (ringPoints.length >= 2) {
+                    const first = ringPoints[0];
+                    const last = ringPoints[ringPoints.length - 1];
+                    if (first.distanceToSquared(last) > 0.000001) {
+                        ringPoints.push(first.clone());
+                    }
+                    const lineGeom = new THREE.BufferGeometry().setFromPoints(ringPoints);
+                    const line = new THREE.Line(
+                        lineGeom,
+                        new THREE.LineBasicMaterial({
+                            color: 0x3b5e8c,
+                            transparent: true,
+                            opacity: 0.26,
+                            depthTest: false,
+                            depthWrite: false,
+                        })
+                    );
+                    line.renderOrder = 10;
+                    cityGroup.add(line);
+                }
+            });
+
+            cityGroup.rotation.x = Math.PI / 2;
+            group.add(cityGroup);
+        });
+
+        // 行政边界分级覆盖层：省界 + 市界浮在上面
         const overlayGroup = new THREE.Group();
         overlayGroup.add(createBoundaryOverlay(boundaryFeatures?.city, projection, 'city'));
         overlayGroup.add(createBoundaryOverlay(boundaryFeatures?.province, projection, 'province'));
