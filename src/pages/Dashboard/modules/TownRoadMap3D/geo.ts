@@ -425,9 +425,9 @@ export function findNearestCity<T extends { lng: number; lat: number }>(coords: 
 }
 
 export async function loadGeoJsonByRenderCommand(command: TownRoadRenderCommand): Promise<TownGeoFeatureCollection> {
-    // 正式协议只要求后端给 renderProvinces；默认执行省 -> 市下钻。
+    // 正式协议只要求后端给 renderProvinces；默认执行省 -> 市 -> 区县下钻。
     // renderLevel / renderAdcodes 仅用于兼容旧 mock 命令。
-    const renderLevel = command.renderLevel ?? 'province-city';
+    const renderLevel = command.renderLevel ?? 'province-district';
     const provinceCodes = commandRenderProvinces(command);
     const normalized = provinceCodes;
 

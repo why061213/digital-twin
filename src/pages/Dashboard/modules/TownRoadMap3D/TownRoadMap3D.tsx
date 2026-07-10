@@ -37,7 +37,7 @@ const BOUNDARY_STYLES: Record<BoundaryLevel, BoundaryStyle> = {
 };
 
 function commandMapKey(command: TownRoadRenderCommand) {
-    const renderLevel = command.renderLevel ?? 'province-city';
+    const renderLevel = command.renderLevel ?? 'province-district';
     const provinces = commandRenderProvinces(command).slice().sort().join('|');
     return `${renderLevel}:${provinces}`;
 }

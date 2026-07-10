@@ -191,7 +191,7 @@ function getPreferredRenderableStage(queue: CircularAnimationQueue<TownAnimation
 function buildAnimationStageRenderCommand(command: TownRoadRenderCommand, stage: TownAnimationStage | null | undefined) {
     return {
         ...buildTownStageRenderCommand(command, stage),
-        renderLevel: 'province-city' as const,
+        renderLevel: 'province-district' as const,
     };
 }
 
@@ -611,12 +611,8 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         });
 
         startCurrentTownAnimationStage(`loop-start:${reason}`);
-        /**
-         * 调试阶段先不要 scheduleNextAnimationTick。
-         * 等首帧地图稳定显示后再恢复。
-         */
-        // scheduleNextAnimationTick();
-    }, [startCurrentTownAnimationStage]);
+        scheduleNextAnimationTick();
+    }, [scheduleNextAnimationTick, startCurrentTownAnimationStage]);
 
     useEffect(() => {
         if (view !== 'townRoadMap') {
