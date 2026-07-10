@@ -453,6 +453,16 @@ export async function loadGeoJsonByRenderCommand(command: TownRoadRenderCommand)
             loadProvinceShellFeatures(provinceCodes),
             loadProvinceCityFeatures(provinceCodes),
         ]);
+        // 诊断：打印 features 的 adcode 级别
+        const sampleAdcodes = cityFeatures.slice(0, 10).map((f: any) => ({
+            adcode: featureAdcode(f),
+            name: f?.properties?.name,
+            isCity: isCityAdcode(featureAdcode(f) ?? ''),
+        }));
+        console.info('[TownRoadMap3D] province-city features sample', {
+            total: cityFeatures.length,
+            sampleAdcodes,
+        });
         return {
             type: 'FeatureCollection',
             features: dedupeFeatures(cityFeatures),
