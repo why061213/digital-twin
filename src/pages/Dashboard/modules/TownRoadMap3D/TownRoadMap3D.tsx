@@ -392,6 +392,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
         if (!scene) return;
         const runId = renderRunRef.current + 1;
         renderRunRef.current = runId;
+        const isStale = () => renderRunRef.current !== runId;
 
         void (async () => {
             const validTasks = commandOrders(command).filter((task) => !task.deleted);
@@ -407,37 +408,40 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                 const geoJson = targetProvinces.length > 0
                     ? await loadGeoJsonByRenderCommand(command)
                     : { type: 'FeatureCollection', features: [], boundaryFeatures: {} };
-                if (renderRunRef.current !== runId) return;
+                if (isStale()) return;
 
                 const boundaryFeatureList = Object.values(geoJson.boundaryFeatures ?? {}).flat();
                 const featurePoints = [...(geoJson.features ?? []), ...boundaryFeatureList].flatMap(featureCoords);
                 projection = createLocalProjection([...taskCoords, ...featurePoints]);
-                if (renderRunRef.current !== runId) return;
+                if (isStale()) return;
                 clearRenderedData();
+                if (isStale()) return;
 
                 renderedMapPoints = [];
                 if (geoJson.features?.length) {
                     const renderedMap = renderMapFeatures(geoJson.features, projection, geoJson.boundaryFeatures);
-                    if (renderRunRef.current !== runId) return;
+                    if (isStale()) return;
                     mapGroupRef.current = renderedMap.group;
                     renderedMapPoints = renderedMap.points;
                     scene.add(renderedMap.group);
                 }
 
-                if (renderRunRef.current !== runId) return;
+                if (isStale()) return;
                 projectionRef.current = projection;
                 renderedMapKeyRef.current = nextMapKey;
                 renderedMapPointsRef.current = renderedMapPoints;
             } else {
                 // 省份范围没变时，只重画路线/车辆，不重新请求 GeoJSON，也不重建省市县 3D 区块。
-                if (renderRunRef.current !== runId) return;
+                if (isStale()) return;
                 clearRouteData();
+                if (isStale()) return;
             }
 
+            if (isStale()) return;
             if (!projection) return;
 
             const renderedRoutes = renderRoutes(validTasks, projection);
-            if (renderRunRef.current !== runId) return;
+            if (isStale()) return;
             routesGroupRef.current = renderedRoutes.group;
             scene.add(renderedRoutes.group);
 
@@ -449,7 +453,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                 : taskFocusPoints.length > 0
                     ? taskFocusPoints
                     : renderedMapPoints;
-            if (renderRunRef.current !== runId) return;
+            if (isStale()) return;
             focusPoints(focusSource);
         })();
     }, [clearRenderedData, clearRouteData, focusPoints, mapPositionFactory, renderMapFeatures, renderRoutes]);

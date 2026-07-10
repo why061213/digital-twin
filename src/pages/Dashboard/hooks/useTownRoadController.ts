@@ -198,11 +198,13 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
     const activeRenderKeyRef = useRef<string | null>(null);
     const loadingRef = useRef(false);
     const loadedOnceRef = useRef(false);
+    const suppressTownWsUntilRef = useRef(0);
     const animationQueueRef = useRef(new CircularAnimationQueue<TownAnimationStage>());
     const animationTimerRef = useRef<number | null>(null);
     const animationRunningRef = useRef(false);
     const currentStageStartedAtRef = useRef<number | null>(null);
     const lastQueueSceneKeyRef = useRef<string | null>(null);
+    const queueReadySceneKeyRef = useRef<string | null>(null);
     const townCommandsRef = useRef(townCommands);
     const activeTownCommandIndexRef = useRef(activeTownCommandIndex);
     const [animationQueueRevision, setAnimationQueueRevision] = useState(0);
@@ -226,20 +228,35 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         const nextStages = buildTownAnimationStages(command);
         const nextSceneKey = getTownCommandKey(command);
         const queue = animationQueueRef.current;
+        const isSceneChanged = lastQueueSceneKeyRef.current !== nextSceneKey;
 
-        if (lastQueueSceneKeyRef.current !== nextSceneKey) {
+        if (isSceneChanged) {
             queue.replaceAll(nextStages, { keepCurrent: false });
             lastQueueSceneKeyRef.current = nextSceneKey;
+
+            const preferredStage = getPreferredRenderableStageFromStages(nextStages);
+            if (preferredStage) {
+                queue.setCurrent(preferredStage.id);
+            }
+
+            activeRenderKeyRef.current = null;
+
+            townLog('info', 'animation queue replaced for new scene', {
+                sceneKey: nextSceneKey,
+                currentStage: queue.current?.id,
+            });
         } else {
             // 同一个主场景的新完整快照：只同步差异，不强制打断 current。
             // locked/playing 节点默认不被覆盖，保证当前动画连续。
             queue.sync(nextStages, { skipLocked: true, removeMissing: true });
+
+            townLog('info', 'animation queue synced for same scene', {
+                sceneKey: nextSceneKey,
+                currentStage: queue.current?.id,
+            });
         }
 
-        const preferredStage = getPreferredRenderableStageFromStages(nextStages);
-        if (preferredStage) {
-            queue.setCurrent(preferredStage.id);
-        }
+        queueReadySceneKeyRef.current = nextSceneKey;
 
         townLog('info', 'animation queue rebuilt', {
             sceneKey: nextSceneKey,
@@ -249,7 +266,7 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
             groupCount: command.routeGroups?.length ?? 0,
         });
         const queueSnapshot = queue.toDebugSnapshot();
-        townLog('debug', 'animation queue snapshot', {
+        townLog('info', 'animation queue snapshot', {
             count: queueSnapshot.length,
             stages: queueSnapshot,
         });
@@ -372,6 +389,16 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
     }, []);
 
     const handleTownRoadRenderCommand = useCallback((payload: TownRoadRenderIncoming) => {
+        const now = performance.now();
+
+        if (now < suppressTownWsUntilRef.current) {
+            townLog('warn', 'town websocket payload ignored during http latest load', {
+                now,
+                suppressUntil: suppressTownWsUntilRef.current,
+            });
+            return;
+        }
+
         applyTownRoadEnvelope(payload, 'websocket');
     }, [applyTownRoadEnvelope]);
 
@@ -383,9 +410,14 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
 
         loadingRef.current = true;
         const startedAt = performance.now();
+        suppressTownWsUntilRef.current = startedAt + 1500;
         const controller = new AbortController();
 
-        townLog('info', 'load start', { reason, loadedOnce: loadedOnceRef.current });
+        townLog('info', 'load start', {
+            reason,
+            loadedOnce: loadedOnceRef.current,
+            suppressWsUntil: suppressTownWsUntilRef.current,
+        });
 
         try {
             const envelope = await fetchTownRoadRenderEnvelope(controller.signal);
@@ -519,6 +551,10 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
     }, [bumpAnimationQueue, startCurrentTownAnimationStage]);
 
     const stopTownAnimationLoop = useCallback((reason = 'manual') => {
+        if (!animationRunningRef.current && animationTimerRef.current === null) {
+            return;
+        }
+
         animationRunningRef.current = false;
 
         if (animationTimerRef.current !== null) {
@@ -567,8 +603,9 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         }
 
         if (!hasTownCommands || animationQueueRef.current.size === 0) return;
+        if (!queueReadySceneKeyRef.current) return;
         startTownAnimationLoop('queue-ready');
-    }, [animationQueueRevision, hasTownCommands, startTownAnimationLoop, stopTownAnimationLoop, view]);
+    }, [hasTownCommands, startTownAnimationLoop, stopTownAnimationLoop, view]);
 
     useEffect(() => {
         return () => {
