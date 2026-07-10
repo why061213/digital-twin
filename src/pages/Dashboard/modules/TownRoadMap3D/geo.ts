@@ -453,6 +453,14 @@ export async function loadGeoJsonByRenderCommand(command: TownRoadRenderCommand)
             loadProvinceShellFeatures(provinceCodes),
             loadProvinceCityFeatures(provinceCodes),
         ]);
+        // 区县边界数据：对每个城市加载其子区县，只用于画线不创建实体填充
+        const districtFeatures: any[] = [];
+        await Promise.all(
+            cityFeatures.map(async (cityFeature: any) => {
+                const children = await loadCityDistrictFeatures(cityFeature);
+                districtFeatures.push(...children);
+            })
+        );
         // 诊断：打印 features 的 adcode 级别
         const sampleAdcodes = cityFeatures.slice(0, 10).map((f: any) => ({
             adcode: featureAdcode(f),
@@ -461,6 +469,7 @@ export async function loadGeoJsonByRenderCommand(command: TownRoadRenderCommand)
         }));
         console.info('[TownRoadMap3D] province-city features sample', {
             total: cityFeatures.length,
+            districtTotal: districtFeatures.length,
             sampleAdcodes,
         });
         return {
@@ -469,6 +478,7 @@ export async function loadGeoJsonByRenderCommand(command: TownRoadRenderCommand)
             boundaryFeatures: {
                 province: dedupeFeatures(provinceFeatures),
                 city: dedupeFeatures(cityFeatures),
+                district: dedupeFeatures(districtFeatures),
             },
         };
     }

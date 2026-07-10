@@ -33,7 +33,7 @@ const BOUNDARY_STYLES: Record<BoundaryLevel, BoundaryStyle> = {
     // 市界：次高、偏 cyan，负责在省内分出地市层级。
     city: { color: 0x22d3ee, opacity: 0.54, lift: MAP_LIFT + 0.76, lineWidth: 2, renderOrder: 24 },
     // 县界：最细、最暗，主要由每个区县块自己的 EdgesGeometry 表达。
-    district: { color: 0x93c5fd, opacity: 0.14, lift: MAP_LIFT + 0.58, lineWidth: 1, renderOrder: 12 },
+    district: { color: 0x93c5fd, opacity: 0.35, lift: MAP_LIFT + 0.58, lineWidth: 1, renderOrder: 12 },
 };
 
 function commandMapKey(command: TownRoadRenderCommand) {
@@ -247,7 +247,6 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
             rings.forEach((ring) => {
                 if (!Array.isArray(ring) || ring.length < 3) return;
                 const shape = new THREE.Shape();
-                const ringPoints: THREE.Vector3[] = [];
                 ring.forEach((coord, index) => {
                     const projected = projection(coord);
                     if (!projected) return;
@@ -256,11 +255,9 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                     if (index === 0) shape.moveTo(x, y);
                     else shape.lineTo(x, y);
                     allPoints.push(new THREE.Vector3(x, MAP_LIFT, y));
-                    // 区县边界线在 XY 平面微偏 Z，cityGroup 旋转后变成水平面上的微高度
-                    ringPoints.push(new THREE.Vector3(x, y, 0.15));
                 });
 
-                // 轻量平面实体填充
+                // 轻量平面实体填充（城市级块）
                 const geom = new THREE.ShapeGeometry(shape);
                 const mesh = new THREE.Mesh(
                     geom,
@@ -275,26 +272,6 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                 mesh.renderOrder = 8;
                 cityGroup.add(mesh);
 
-                // 区县边界细线（微高于填充块，避免 z-fighting）
-                if (ringPoints.length >= 2) {
-                    const first = ringPoints[0];
-                    const last = ringPoints[ringPoints.length - 1];
-                    if (first.distanceToSquared(last) > 0.000001) {
-                        ringPoints.push(first.clone());
-                    }
-                    const lineGeom = new THREE.BufferGeometry().setFromPoints(ringPoints);
-                    const line = new THREE.Line(
-                        lineGeom,
-                        new THREE.LineBasicMaterial({
-                            color: 0x60a5fa,
-                            transparent: true,
-                            opacity: 0.45,
-                            depthTest: false,
-                            depthWrite: false,
-                        })
-                    );
-                    line.renderOrder = 10;
-                    cityGroup.add(line);
                 }
             });
 
@@ -302,8 +279,9 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
             group.add(cityGroup);
         });
 
-        // 行政边界分级覆盖层：省界 + 市界浮在上面
+        // 行政边界分级覆盖层：省界 + 市界 + 区县界浮在上面
         const overlayGroup = new THREE.Group();
+        overlayGroup.add(createBoundaryOverlay(boundaryFeatures?.district, projection, 'district'));
         overlayGroup.add(createBoundaryOverlay(boundaryFeatures?.city, projection, 'city'));
         overlayGroup.add(createBoundaryOverlay(boundaryFeatures?.province, projection, 'province'));
         group.add(overlayGroup);
