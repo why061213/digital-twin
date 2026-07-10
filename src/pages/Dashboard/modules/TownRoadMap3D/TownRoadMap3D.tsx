@@ -286,9 +286,9 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                     const line = new THREE.Line(
                         lineGeom,
                         new THREE.LineBasicMaterial({
-                            color: 0x3b5e8c,
+                            color: 0x60a5fa,
                             transparent: true,
-                            opacity: 0.26,
+                            opacity: 0.45,
                             depthTest: false,
                             depthWrite: false,
                         })
