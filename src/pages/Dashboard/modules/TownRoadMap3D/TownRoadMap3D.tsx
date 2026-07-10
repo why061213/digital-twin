@@ -37,7 +37,7 @@ const BOUNDARY_STYLES: Record<BoundaryLevel, BoundaryStyle> = {
 };
 
 function commandMapKey(command: TownRoadRenderCommand) {
-    const renderLevel = command.renderLevel ?? 'province-district';
+    const renderLevel = command.renderLevel ?? 'province-city';
     const provinces = commandRenderProvinces(command).slice().sort().join('|');
     return `${renderLevel}:${provinces}`;
 }
@@ -147,6 +147,7 @@ function screenPosition(point: THREE.Vector3, camera: THREE.Camera, container: H
 
 const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onVisualReady }, ref) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    const onVisualReadyRef = useRef(onVisualReady);
     const sceneRef = useRef<THREE.Scene | null>(null);
     const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
     const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -160,11 +161,14 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
     const renderRunRef = useRef(0);
     const inFlightMapKeyRef = useRef<string | null>(null);
     const pendingCommandForMapKeyRef = useRef<TownRoadRenderCommand | null>(null);
+    const pendingCommandBeforeSceneRef = useRef<TownRoadRenderCommand | null>(null);
     const renderCommandRef = useRef<((command: TownRoadRenderCommand) => void) | null>(null);
     const raycasterRef = useRef(new THREE.Raycaster());
     const pointerRef = useRef(new THREE.Vector2());
     const interactiveObjectsRef = useRef<THREE.Object3D[]>([]);
     const [hoverInfo, setHoverInfo] = useState<TownHoverInfo | null>(null);
+
+    onVisualReadyRef.current = onVisualReady;
 
     const clearMapData = useCallback(() => {
         const scene = sceneRef.current;
@@ -392,8 +396,16 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
 
     const renderCommand = useCallback((command: TownRoadRenderCommand) => {
         const scene = sceneRef.current;
-        if (!scene) return;
         const nextMapKey = commandMapKey(command);
+
+        if (!scene) {
+            pendingCommandBeforeSceneRef.current = command;
+            console.info('[TownRoadMap3D] defer render command until scene ready', {
+                nextMapKey,
+                commandId: command.commandId,
+            });
+            return;
+        }
 
         if (inFlightMapKeyRef.current === nextMapKey) {
             pendingCommandForMapKeyRef.current = command;
@@ -426,7 +438,8 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                         : { type: 'FeatureCollection', features: [], boundaryFeatures: {} };
                     if (isStale()) return;
 
-                    const boundaryFeatureList = Object.values(geoJson.boundaryFeatures ?? {}).flat();
+                    const boundaryFeatures: TownBoundaryLayers = geoJson.boundaryFeatures ?? {};
+                    const boundaryFeatureList = Object.values(boundaryFeatures).flat();
                     const featurePoints = [...(geoJson.features ?? []), ...boundaryFeatureList].flatMap(featureCoords);
                     projection = createLocalProjection([...taskCoords, ...featurePoints]);
                     if (isStale()) return;
@@ -435,7 +448,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
 
                     renderedMapPoints = [];
                     if (geoJson.features?.length) {
-                        const renderedMap = renderMapFeatures(geoJson.features, projection, geoJson.boundaryFeatures);
+                        const renderedMap = renderMapFeatures(geoJson.features, projection, boundaryFeatures);
                         if (isStale()) return;
                         mapGroupRef.current = renderedMap.group;
                         renderedMapPoints = renderedMap.points;
@@ -446,6 +459,13 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                     projectionRef.current = projection;
                     renderedMapKeyRef.current = nextMapKey;
                     renderedMapPointsRef.current = renderedMapPoints;
+                    console.info('[TownRoadMap3D] map features rendered', {
+                        nextMapKey,
+                        featureCount: geoJson.features?.length ?? 0,
+                        boundaryProvinceCount: boundaryFeatures.province?.length ?? 0,
+                        boundaryCityCount: boundaryFeatures.city?.length ?? 0,
+                        mapChildren: mapGroupRef.current?.children.length ?? 0,
+                    });
                 } finally {
                     if (inFlightMapKeyRef.current === nextMapKey) {
                         inFlightMapKeyRef.current = null;
@@ -465,6 +485,11 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
             if (isStale()) return;
             routesGroupRef.current = renderedRoutes.group;
             scene.add(renderedRoutes.group);
+            console.info('[TownRoadMap3D] route features rendered', {
+                nextMapKey,
+                taskCount: validTasks.length,
+                routeChildren: renderedRoutes.group.children.length,
+            });
 
             const taskFocusPoints = taskCoords
                 .map((coord) => mapPositionFactory(projection)(coord, 0))
@@ -636,7 +661,19 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
             renderer.render(scene, camera);
         };
         animate();
-        requestAnimationFrame(() => onVisualReady?.());
+        requestAnimationFrame(() => {
+            onVisualReadyRef.current?.();
+
+            const pending = pendingCommandBeforeSceneRef.current;
+            if (pending) {
+                pendingCommandBeforeSceneRef.current = null;
+                console.info('[TownRoadMap3D] apply deferred render command after scene ready', {
+                    commandId: pending.commandId,
+                    mapKey: commandMapKey(pending),
+                });
+                renderCommandRef.current?.(pending);
+            }
+        });
 
         return () => {
             window.removeEventListener('resize', onResize);
@@ -656,7 +693,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
             rendererRef.current = null;
             controlsRef.current = null;
         };
-    }, [clearRenderedData, onVisualReady]);
+    }, [clearRenderedData]);
 
     return (
         <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>

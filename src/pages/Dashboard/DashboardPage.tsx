@@ -130,6 +130,8 @@ function DashboardPage() {
         requestViewChange('townRoadMap');
     }, [handleTownRoadRenderCommand, requestViewChange]);
 
+    const handleTownRoadMapVisualReady = useCallback(() => undefined, []);
+
     const handleRouteRaise = useCallback((_order: RouteOrder) => {
         // 城市飞线事件由 ChinaMap3D 处理；道路级地图只加载后端分组后的路线。
     }, []);
@@ -238,7 +240,7 @@ function DashboardPage() {
             townRoadMapRef={townRoadMapRef}
             onChinaMapVisualReady={handleChinaMapVisualReady}
             onRoadMapVisualReady={handleRoadMapVisualReady}
-            onTownRoadMapVisualReady={() => undefined}
+            onTownRoadMapVisualReady={handleTownRoadMapVisualReady}
             onWarehouseTourStateChange={handleWarehouseTourStateChange}
         />
     );
