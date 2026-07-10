@@ -41,7 +41,7 @@ type TownOrderMergeResult = {
     deleted: string[];
 };
 
-const DEFAULT_STAGE_DURATION_MS = 5000;
+const DEFAULT_STAGE_DURATION_MS = 12000;
 
 function commandOrders(command: TownRoadRenderCommand): TownTransportTask[] {
     return command.orders?.length ? command.orders : (command.tasks ?? []);

@@ -158,6 +158,9 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
     const renderedMapPointsRef = useRef<THREE.Vector3[]>([]);
     const renderFrameRef = useRef(0);
     const renderRunRef = useRef(0);
+    const inFlightMapKeyRef = useRef<string | null>(null);
+    const pendingCommandForMapKeyRef = useRef<TownRoadRenderCommand | null>(null);
+    const renderCommandRef = useRef<((command: TownRoadRenderCommand) => void) | null>(null);
     const raycasterRef = useRef(new THREE.Raycaster());
     const pointerRef = useRef(new THREE.Vector2());
     const interactiveObjectsRef = useRef<THREE.Object3D[]>([]);
@@ -390,6 +393,17 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
     const renderCommand = useCallback((command: TownRoadRenderCommand) => {
         const scene = sceneRef.current;
         if (!scene) return;
+        const nextMapKey = commandMapKey(command);
+
+        if (inFlightMapKeyRef.current === nextMapKey) {
+            pendingCommandForMapKeyRef.current = command;
+            console.info('[TownRoadMap3D] skip duplicate render while map loading', {
+                nextMapKey,
+                commandId: command.commandId,
+            });
+            return;
+        }
+
         const runId = renderRunRef.current + 1;
         renderRunRef.current = runId;
         const isStale = () => renderRunRef.current !== runId;
@@ -398,38 +412,45 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
             const validTasks = commandOrders(command).filter((task) => !task.deleted);
             const taskCoords = collectTaskCoords(validTasks);
             const targetProvinces = commandRenderProvinces(command);
-            const nextMapKey = commandMapKey(command);
 
             let projection = projectionRef.current;
             let renderedMapPoints = renderedMapPointsRef.current;
             const shouldReloadMap = renderedMapKeyRef.current !== nextMapKey || !projection;
 
             if (shouldReloadMap) {
-                const geoJson = targetProvinces.length > 0
-                    ? await loadGeoJsonByRenderCommand(command)
-                    : { type: 'FeatureCollection', features: [], boundaryFeatures: {} };
-                if (isStale()) return;
+                inFlightMapKeyRef.current = nextMapKey;
 
-                const boundaryFeatureList = Object.values(geoJson.boundaryFeatures ?? {}).flat();
-                const featurePoints = [...(geoJson.features ?? []), ...boundaryFeatureList].flatMap(featureCoords);
-                projection = createLocalProjection([...taskCoords, ...featurePoints]);
-                if (isStale()) return;
-                clearRenderedData();
-                if (isStale()) return;
-
-                renderedMapPoints = [];
-                if (geoJson.features?.length) {
-                    const renderedMap = renderMapFeatures(geoJson.features, projection, geoJson.boundaryFeatures);
+                try {
+                    const geoJson = targetProvinces.length > 0
+                        ? await loadGeoJsonByRenderCommand(command)
+                        : { type: 'FeatureCollection', features: [], boundaryFeatures: {} };
                     if (isStale()) return;
-                    mapGroupRef.current = renderedMap.group;
-                    renderedMapPoints = renderedMap.points;
-                    scene.add(renderedMap.group);
-                }
 
-                if (isStale()) return;
-                projectionRef.current = projection;
-                renderedMapKeyRef.current = nextMapKey;
-                renderedMapPointsRef.current = renderedMapPoints;
+                    const boundaryFeatureList = Object.values(geoJson.boundaryFeatures ?? {}).flat();
+                    const featurePoints = [...(geoJson.features ?? []), ...boundaryFeatureList].flatMap(featureCoords);
+                    projection = createLocalProjection([...taskCoords, ...featurePoints]);
+                    if (isStale()) return;
+                    clearRenderedData();
+                    if (isStale()) return;
+
+                    renderedMapPoints = [];
+                    if (geoJson.features?.length) {
+                        const renderedMap = renderMapFeatures(geoJson.features, projection, geoJson.boundaryFeatures);
+                        if (isStale()) return;
+                        mapGroupRef.current = renderedMap.group;
+                        renderedMapPoints = renderedMap.points;
+                        scene.add(renderedMap.group);
+                    }
+
+                    if (isStale()) return;
+                    projectionRef.current = projection;
+                    renderedMapKeyRef.current = nextMapKey;
+                    renderedMapPointsRef.current = renderedMapPoints;
+                } finally {
+                    if (inFlightMapKeyRef.current === nextMapKey) {
+                        inFlightMapKeyRef.current = null;
+                    }
+                }
             } else {
                 // 省份范围没变时，只重画路线/车辆，不重新请求 GeoJSON，也不重建省市县 3D 区块。
                 if (isStale()) return;
@@ -455,8 +476,22 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                     : renderedMapPoints;
             if (isStale()) return;
             focusPoints(focusSource);
+
+            const pending = pendingCommandForMapKeyRef.current;
+            if (pending && commandMapKey(pending) === nextMapKey && pending !== command) {
+                pendingCommandForMapKeyRef.current = null;
+                console.info('[TownRoadMap3D] apply pending command after map ready', {
+                    nextMapKey,
+                    pendingCommandId: pending.commandId,
+                });
+                renderCommandRef.current?.(pending);
+            }
         })();
     }, [clearRenderedData, clearRouteData, focusPoints, mapPositionFactory, renderMapFeatures, renderRoutes]);
+
+    useEffect(() => {
+        renderCommandRef.current = renderCommand;
+    }, [renderCommand]);
 
     const setTransportTasks = useCallback((tasks: TownTransportTask[]) => {
         const validTasks = tasks.filter((task) => !task.deleted);
@@ -530,6 +565,22 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
         rendererRef.current = renderer;
         container.appendChild(renderer.domElement);
 
+        const onContextLost = (event: Event) => {
+            event.preventDefault();
+            console.error('[TownRoadMap3D] WebGL context lost', {
+                renderedMapKey: renderedMapKeyRef.current,
+                inFlightMapKey: inFlightMapKeyRef.current,
+                renderRunId: renderRunRef.current,
+                mapChildren: mapGroupRef.current?.children.length,
+                routeChildren: routesGroupRef.current?.children.length,
+            });
+        };
+        const onContextRestored = () => {
+            console.warn('[TownRoadMap3D] WebGL context restored');
+        };
+        renderer.domElement.addEventListener('webglcontextlost', onContextLost);
+        renderer.domElement.addEventListener('webglcontextrestored', onContextRestored);
+
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.target.set(0, 0, 0);
@@ -589,6 +640,8 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
 
         return () => {
             window.removeEventListener('resize', onResize);
+            renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
+            renderer.domElement.removeEventListener('webglcontextrestored', onContextRestored);
             renderer.domElement.removeEventListener('pointermove', onPointerMove);
             renderer.domElement.removeEventListener('pointerleave', onPointerLeave);
             cancelAnimationFrame(renderFrameRef.current);
