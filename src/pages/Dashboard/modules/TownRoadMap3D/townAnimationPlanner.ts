@@ -99,6 +99,34 @@ function collectGroupOrderLineIds(group: TownRouteGroup) {
     ]));
 }
 
+function hasEveryPrimaryOrderAbsorbedByLargerGroup(group: TownRouteGroup, largerGroup: TownRouteGroup) {
+    const primaryLineIds = unique(group.primaryOrderLineIds ?? []);
+    if (primaryLineIds.length === 0) return false;
+
+    const largerAlongLineIds = new Set(largerGroup.alongOrderLineIds ?? []);
+    return primaryLineIds.every((lineId) => largerAlongLineIds.has(lineId));
+}
+
+function isLargerAbsorbingGroup(candidate: TownRouteGroup, target: TownRouteGroup) {
+    if (candidate.groupId === target.groupId) return false;
+    const candidateLineCount = collectGroupOrderLineIds(candidate).length;
+    const targetLineCount = collectGroupOrderLineIds(target).length;
+    if (candidateLineCount <= targetLineCount) return false;
+    return hasEveryPrimaryOrderAbsorbedByLargerGroup(target, candidate);
+}
+
+function getDisplayRouteGroups(command: TownRoadRenderCommand) {
+    const sourceGroups = command.displayRouteGroups?.length
+        ? command.displayRouteGroups
+        : command.routeGroups ?? [];
+    const displayEnabledGroups = sourceGroups.filter((group) => group.display !== false && !group.absorbed);
+
+    return displayEnabledGroups.filter((group) => {
+        const absorbedByLargerGroup = displayEnabledGroups.some((candidate) => isLargerAbsorbingGroup(candidate, group));
+        return !absorbedByLargerGroup;
+    });
+}
+
 function collectPathOrderLineIds(path: TownCandidatePath) {
     return Array.from(new Set([
         ...(path.primaryOrderLineIds ?? []),
@@ -124,7 +152,7 @@ export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAn
     const { sceneKey, version } = buildStageBase(command);
     const orders = normalizeOrders(command).filter((order) => !order.deleted && order.status !== '已取消');
     const orderByLineId = groupOrdersByLineId(orders);
-    const routeGroups = command.routeGroups ?? [];
+    const routeGroups = getDisplayRouteGroups(command);
     const provinceEdges = command.provinceEdges ?? [];
     const stages: TownAnimationStage[] = [];
     const usedIds = new Set<string>();
@@ -259,9 +287,10 @@ export function buildTownStageRenderCommand(command: TownRoadRenderCommand, stag
     const renderProvinces = stage.payload.renderProvinces?.length
         ? stage.payload.renderProvinces
         : normalizeRenderProvinces(command);
+    const displayRouteGroups = getDisplayRouteGroups(command);
     const routeGroups = stage.payload.routeGroupId
-        ? (command.routeGroups ?? []).filter((group) => group.groupId === stage.payload.routeGroupId)
-        : command.routeGroups ?? [];
+        ? displayRouteGroups.filter((group) => group.groupId === stage.payload.routeGroupId)
+        : displayRouteGroups;
     const edgeKeys = new Set([
         ...(stage.payload.edgeKeys ?? []),
         ...(stage.payload.edgeKey ? [stage.payload.edgeKey] : []),

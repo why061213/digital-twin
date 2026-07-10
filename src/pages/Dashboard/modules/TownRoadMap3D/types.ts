@@ -112,6 +112,11 @@ export type TownRouteGroup = {
     primaryOrderLineIds?: string[];
     alongOrderLineIds?: string[];
     candidatePaths?: TownCandidatePath[];
+    /** 后端明确指定该路线组是否参与动画播放；false 表示只保留给调试/统计。 */
+    display?: boolean;
+    absorbed?: boolean;
+    absorbedByGroupIds?: string[];
+    absorbedReason?: string;
 };
 
 export type TownProvinceEdge = {
@@ -154,6 +159,9 @@ export type TownRoadRenderCommand = {
 
     /** 后端已经筛选好的二级路线组，用于后续轮播/动画编排。 */
     routeGroups?: TownRouteGroup[];
+
+    /** 后端可选：已经完成“大路线吸收小路线”后的最终动画播放分组。 */
+    displayRouteGroups?: TownRouteGroup[];
 
     /** 后端生成的省份边索引，用于后续路线边高亮/动画编排。 */
     provinceEdges?: TownProvinceEdge[];

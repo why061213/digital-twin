@@ -142,6 +142,7 @@ export function mergeTownCommandSnapshot(previous: TownRoadRenderCommand | undef
                 orders: activeOrders,
                 tasks: incoming.tasks ?? activeOrders,
                 routeGroups: incoming.routeGroups ?? [],
+                displayRouteGroups: incoming.displayRouteGroups ?? [],
                 provinceEdges: incoming.provinceEdges ?? [],
             },
             diff: {
@@ -157,6 +158,9 @@ export function mergeTownCommandSnapshot(previous: TownRoadRenderCommand | undef
     const nextRouteGroups = sameArray(previous.routeGroups, incoming.routeGroups)
         ? previous.routeGroups
         : incoming.routeGroups ?? [];
+    const nextDisplayRouteGroups = sameArray(previous.displayRouteGroups, incoming.displayRouteGroups)
+        ? previous.displayRouteGroups
+        : incoming.displayRouteGroups ?? [];
     const nextProvinceEdges = sameArray(previous.provinceEdges, incoming.provinceEdges)
         ? previous.provinceEdges
         : incoming.provinceEdges ?? [];
@@ -174,6 +178,7 @@ export function mergeTownCommandSnapshot(previous: TownRoadRenderCommand | undef
             orders,
             tasks: incoming.tasks ? orders : previous.tasks ? orders : undefined,
             routeGroups: nextRouteGroups,
+            displayRouteGroups: nextDisplayRouteGroups,
             provinceEdges: nextProvinceEdges,
             issuedAt: incoming.issuedAt ?? previous.issuedAt,
         },

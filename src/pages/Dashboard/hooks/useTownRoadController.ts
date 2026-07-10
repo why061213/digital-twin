@@ -122,6 +122,7 @@ function normalizeCommand(command: TownRoadRenderCommand): TownRoadRenderCommand
         renderAdcodes: command.renderAdcodes ?? renderProvinces,
         tasks: command.tasks ?? orders,
         routeGroups: command.routeGroups ?? [],
+        displayRouteGroups: command.displayRouteGroups ?? [],
         provinceEdges: command.provinceEdges ?? [],
         issuedAt: command.issuedAt ?? new Date().toISOString(),
     };
