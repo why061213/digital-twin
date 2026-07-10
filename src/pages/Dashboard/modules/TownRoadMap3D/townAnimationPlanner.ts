@@ -209,7 +209,6 @@ export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAn
     const orders = normalizeOrders(command).filter((order) => !order.deleted && order.status !== '已取消');
     const orderByLineId = groupOrdersByLineId(orders);
     const routeGroups = getDisplayRouteGroups(command);
-    const provinceEdges = command.provinceEdges ?? [];
     const stages: TownAnimationStage[] = [];
     const usedIds = new Set<string>();
 
@@ -236,12 +235,8 @@ export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAn
     });
 
     routeGroups.forEach((group, groupIndex) => {
-        const groupPrimaryOrderLineIds = unique(group.primaryOrderLineIds ?? []);
         const groupRenderProvinces = collectGroupPlaybackRenderProvinces(group, orders);
-        const groupPrimaryOrders = groupPrimaryOrderLineIds
-            .map((lineId) => orderByLineId.get(lineId))
-            .filter((order): order is TownTransportOrder => Boolean(order));
-        const groupEdgeKeys = unique((group.candidatePaths ?? []).flatMap((path) => path.edgeKeys ?? []));
+        const groupOrderLineIds = collectGroupOrderLineIds(group);
         const groupId = safeIdPart(group.groupId, `group_${groupIndex}`);
 
         console.info('[TownRoadPlanner] build route group stage', {
@@ -252,22 +247,10 @@ export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAn
             label: group.groupName ?? `${group.fromProvinceName ?? ''} -> ${group.toProvinceName ?? ''}`.trim(),
             fromProvinceKey: group.fromProvinceKey,
             toProvinceKey: group.toProvinceKey,
-            primaryOrderLineIds: groupPrimaryOrderLineIds,
+            primaryOrderLineIds: group.primaryOrderLineIds ?? [],
             alongOrderLineIds: group.alongOrderLineIds ?? [],
+            allOrderLineIds: groupOrderLineIds,
             groupRenderProvinces,
-            groupEdgeKeys,
-            candidatePathCount: group.candidatePaths?.length ?? 0,
-            candidatePaths: (group.candidatePaths ?? []).map((path) => ({
-                pathId: path.pathId,
-                pathCost: path.pathCost,
-                bestPath: path.bestPath,
-                provincePath: path.provincePath,
-                provinceNames: path.provinceNames,
-                edgeKeys: path.edgeKeys,
-                primaryOrderLineIds: path.primaryOrderLineIds ?? [],
-                alongOrderLineIds: path.alongOrderLineIds ?? [],
-                orderLineIds: collectPathOrderLineIds(path),
-            })),
         });
 
         pushStage({
@@ -280,90 +263,10 @@ export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAn
             playbackStatus: 'pending',
             payload: {
                 routeGroupId: group.groupId,
-                edgeKeys: groupEdgeKeys,
-                // 路线组面板只展示该 group 自己的主订单。
-                // alongOrderLineIds 留给 candidate_path / province_edge 阶段表达沿途和边聚合语义。
-                orderLineIds: groupPrimaryOrders.length > 0 ? groupPrimaryOrders.map((order) => order.lineId) : groupPrimaryOrderLineIds,
+                // 一个方向上的所有订单（primary + along），不分路径逐条展示
+                orderLineIds: groupOrderLineIds,
                 renderProvinces: groupRenderProvinces,
             },
-        });
-
-        (group.candidatePaths ?? []).forEach((path, pathIndex) => {
-            const pathId = safeIdPart(path.pathId, `${groupId}_path_${pathIndex}`);
-            const pathLineIds = collectPathOrderLineIds(path);
-            pushStage({
-                id: `${sceneKey}:path:${pathId}`,
-                kind: 'candidate_path_focus',
-                sceneKey,
-                commandId: command.commandId,
-                label: path.provinceNames?.join(' → ') ?? path.provincePath.join(' → '),
-                version,
-                playbackStatus: 'pending',
-                payload: {
-                    routeGroupId: group.groupId,
-                    candidatePathId: path.pathId,
-                    provincePath: path.provincePath,
-                    edgeKeys: path.edgeKeys,
-                    orderLineIds: pathLineIds,
-                    // 地图范围保持为当前路线组的所有候选最短路径省份并集。
-                    // 具体 candidatePath 只负责高亮，不负责缩小渲染范围。
-                    renderProvinces: groupRenderProvinces,
-                },
-            });
-
-            (path.edgeKeys ?? []).forEach((edgeKey, edgeIndex) => {
-                const edge = provinceEdges.find((item) => item.edgeKey === edgeKey);
-                const globalEdgeLineIds = edge ? collectEdgeOrderLineIds(edge) : [];
-                /**
-                 * 省际边阶段必须限制在当前 candidatePath 上下文内。
-                 * 全局 provinceEdges 聚合的是所有经过该边的订单，直接使用会把其他路线组的订单带进当前路径。
-                 */
-                const scopedEdgeLineIds = globalEdgeLineIds.length > 0
-                    ? pathLineIds.filter((lineId) => globalEdgeLineIds.includes(lineId))
-                    : pathLineIds;
-                const edgeLineIds = scopedEdgeLineIds.length > 0 ? scopedEdgeLineIds : pathLineIds;
-                console.info('[TownRoadPlanner] build province edge stage', {
-                    sceneKey,
-                    commandId: command.commandId,
-                    routeGroupId: group.groupId,
-                    candidatePathId: path.pathId,
-                    edgeKey,
-                    pathLineIds,
-                    globalEdgeLineIds,
-                    scopedEdgeLineIds,
-                    edgeLineIds,
-                    renderProvinces: groupRenderProvinces,
-                    edge: edge ? {
-                        fromProvinceKey: edge.fromProvinceKey,
-                        fromProvinceName: edge.fromProvinceName,
-                        toProvinceKey: edge.toProvinceKey,
-                        toProvinceName: edge.toProvinceName,
-                        orderLineIds: edge.orderLineIds ?? [],
-                        primaryOrderLineIds: edge.primaryOrderLineIds ?? [],
-                        alongOrderLineIds: edge.alongOrderLineIds ?? [],
-                    } : null,
-                });
-                pushStage({
-                    id: `${sceneKey}:edge:${safeIdPart(path.pathId, `${groupId}_path_${pathIndex}`)}:${safeIdPart(edgeKey, `edge_${edgeIndex}`)}`,
-                    kind: 'province_edge_highlight',
-                    sceneKey,
-                    commandId: command.commandId,
-                    label: edge
-                        ? `经过 ${edge.fromProvinceName ?? edge.fromProvinceKey} → ${edge.toProvinceName ?? edge.toProvinceKey} 的运输线`
-                        : `经过 ${edgeKey} 的运输线`,
-                    version,
-                    playbackStatus: 'pending',
-                    payload: {
-                        routeGroupId: group.groupId,
-                        candidatePathId: path.pathId,
-                        edgeKey,
-                        orderLineIds: edgeLineIds,
-                        // 省际边高亮也不能把地图缩到 from/to 两省。
-                        // 必须保留当前路线组所有候选最短路径的完整省份范围。
-                        renderProvinces: groupRenderProvinces,
-                    },
-                });
-            });
         });
     });
 
