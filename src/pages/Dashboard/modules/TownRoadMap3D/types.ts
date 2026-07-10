@@ -196,6 +196,12 @@ export type TownRoadRenderEnvelope = {
     normalizedCount?: number;
     shortHaulCount?: number;
     commandCount?: number;
+    /**
+     * 后端告诉前端当前展示模式：
+     * - single_source：只有一个始发省 command，单场景展示
+     * - multi_source_rotation：多个始发省 command，前端应自动轮播
+     */
+    displayMode?: 'single_source' | 'multi_source_rotation';
     diff?: TownRoadDiffSummary;
     commands: TownRoadRenderCommand[];
 };

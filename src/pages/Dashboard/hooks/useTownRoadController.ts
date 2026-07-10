@@ -239,6 +239,9 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
     const townCommandsRef = useRef(townCommands);
     const activeTownCommandIndexRef = useRef(activeTownCommandIndex);
     const [animationQueueRevision, setAnimationQueueRevision] = useState(0);
+    const [townDisplayMode, setTownDisplayMode] = useState<'single_source' | 'multi_source_rotation' | null>(null);
+    /** 当前 command 已经完整播放的轮次计数，scene_boot 每被 start 一次 +1 */
+    const townRoundCountRef = useRef(0);
 
     useEffect(() => {
         townCommandsRef.current = townCommands;
@@ -446,6 +449,14 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         setTownCommands(merged.commands);
         setActiveTownCommandIndex(nextActiveIndex);
         setLastTownDiff(merged.diff);
+
+        // 从 envelope 读取后端指定的展示模式
+        const envelopeDisplayMode = isEnvelope(payload) ? payload.displayMode : undefined;
+        if (envelopeDisplayMode) {
+            setTownDisplayMode(envelopeDisplayMode);
+            townLog('info', 'display mode updated', { displayMode: envelopeDisplayMode });
+        }
+
         townLog('groupEnd');
     }, []);
 
@@ -557,6 +568,12 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         );
         if (playing) {
             currentStageStartedAtRef.current = performance.now();
+
+            // 追踪 command 轮次：scene_boot 每被 start 一次意味着动画链表的起点又被播放了一次
+            if (playing.kind === 'scene_boot') {
+                townRoundCountRef.current += 1;
+            }
+
             townLog('info', 'stage start', {
                 reason,
                 stageId: playing.id,
@@ -630,10 +647,38 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         if (!animationRunningRef.current) return;
 
         animationTimerRef.current = window.setTimeout(() => {
-            moveNextTownAnimationStage('loop-tick');
+            const next = moveNextTownAnimationStage('loop-tick');
+
+            // 多始发省自动轮播：当动画链表播完一轮回到 scene_boot 时切换 command
+            if (
+                next &&
+                next.kind === 'scene_boot' &&
+                townRoundCountRef.current > 1 &&
+                townDisplayMode === 'multi_source_rotation' &&
+                townCommandsRef.current.length > 1
+            ) {
+                townLog('info', 'command rotation triggered', {
+                    round: townRoundCountRef.current,
+                    activeIndex: activeTownCommandIndexRef.current,
+                    totalCommands: townCommandsRef.current.length,
+                });
+                stopTownAnimationLoop('command-rotation');
+                // 重置轮次计数，新 command 从第 0 轮开始
+                townRoundCountRef.current = 0;
+                // 切换到下一个始发省 command
+                setActiveTownCommandIndex((previous) => {
+                    const total = townCommandsRef.current.length;
+                    if (total <= 1) return 0;
+                    const nextIdx = (previous + 1) % total;
+                    activeTownCommandIndexRef.current = nextIdx;
+                    return nextIdx;
+                });
+                return;
+            }
+
             scheduleNextAnimationTick();
         }, DEFAULT_STAGE_DURATION_MS);
-    }, [moveNextTownAnimationStage]);
+    }, [moveNextTownAnimationStage, townDisplayMode, stopTownAnimationLoop]);
 
     const startTownAnimationLoop = useCallback((reason = 'manual') => {
         if (animationRunningRef.current) {
@@ -666,7 +711,7 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         if (!hasTownCommands || animationQueueRef.current.size === 0) return;
         if (!queueReadySceneKeyRef.current) return;
         startTownAnimationLoop('queue-ready');
-    }, [hasTownCommands, startTownAnimationLoop, stopTownAnimationLoop, view]);
+    }, [hasTownCommands, startTownAnimationLoop, stopTownAnimationLoop, view, animationQueueRevision]);
 
     useEffect(() => {
         return () => {
