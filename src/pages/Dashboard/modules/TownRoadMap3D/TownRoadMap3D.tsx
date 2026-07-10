@@ -3,14 +3,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createLocalProjection, collectRenderProvinceAdcodes, collectTaskCoords, commandOrders, commandRenderProvinces, featureCoords, isLonLat, loadGeoJsonByRenderCommand } from './geo';
 import { MAP_LIFT, MARKER_LIFT, ROUTE_LIFT, TOWN_ROUTE_CURVE_HEIGHT } from './constants';
-import {
-    UNIFIED_COLORS, clamp01, orderColor,
-    drawTubeProgress, routeKey,
-    buildRouteState, ensureOrderLane, ensureVehicleBar,
-    setVehicleBarTransform, updateRouteVisuals,
-} from './townRouteRenderer';
+import { buildRouteFromTasks, disposeObject3D as disposeRoadObjects } from './townRouteRenderer';
 
-const BAR_LIFT = ROUTE_LIFT + 0.3;
 import type { LonLat, TownAnimationStage, TownBoundaryLayers, TownRoadMap3DHandle, TownRoadRenderCommand, TownTransportTask } from './types';
 
 type TownRoadMap3DProps = {
@@ -318,78 +312,34 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
     }, []);
 
     const renderRoutes = useCallback((tasks: TownTransportTask[], projection: ReturnType<typeof createLocalProjection>) => {
-        const mapPosition = mapPositionFactory(projection);
-        const group = new THREE.Group();
+        const scene = sceneRef.current;
+        if (!scene) return { group: new THREE.Group(), points: [] as THREE.Vector3[] };
+
+        const mp = (coords: [number, number], lift: number) => {
+            const p = projection(coords);
+            if (!p) return null;
+            return new THREE.Vector3(-p[0], lift, -p[1]);
+        };
+
+        const roads = buildRouteFromTasks(
+            tasks.filter(t => !t.deleted && t.from.coords && t.to.coords),
+            mp, scene, ROUTE_LIFT, ROUTE_LIFT + 0.28,
+        );
+
         const allPoints: THREE.Vector3[] = [];
         const interactiveObjects: THREE.Object3D[] = [];
-        const activeTasks = tasks.filter(t => !t.deleted);
-
-        const TUBE_SEGMENTS = 128;
-        const RADIAL_SEGS = 8;
-
-        // 1. 按物理路线分组
-        const routeMap = new Map<string, TownTransportTask[]>();
-        activeTasks.forEach(task => {
-            const k = routeKey(task.from.coords, task.to.coords);
-            if (!k) return;
-            if (!routeMap.has(k)) routeMap.set(k, []);
-            routeMap.get(k)!.push(task);
+        roads.forEach(r => {
+            allPoints.push(r.samples[0], r.samples[r.samples.length - 1]);
+            r.orders.forEach(l => l.vehicles.forEach(v => { interactiveObjects.push(v.bar); allPoints.push(v.bar.position); }));
         });
-
-        routeMap.forEach((routeTasks, rtKey) => {
-            const ref = routeTasks[0];
-            const start = mapPosition(ref.from.coords!, ROUTE_LIFT);
-            const end = mapPosition(ref.to.coords!, ROUTE_LIFT);
-            if (!start || !end) return;
-
-            // 公路运输贴地：直线，无空中弧线
-            const curve = new THREE.QuadraticBezierCurve3(
-                start,
-                new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5).setY(ROUTE_LIFT + 0.2),
-                end,
-            );
-
-            const grayTube = new THREE.Mesh(
-                new THREE.TubeGeometry(curve, TUBE_SEGMENTS, 0.065, RADIAL_SEGS, false),
-                new THREE.MeshBasicMaterial({ color: 0x5a6a80, transparent: true, opacity: 0.4, depthWrite: false }),
-            );
-            grayTube.renderOrder = 2;
-            group.add(grayTube);
-
-            // 复用 buildRouteState
-            const route = buildRouteState(curve, grayTube, group, rtKey, TUBE_SEGMENTS, RADIAL_SEGS);
-
-            // 2. 订单分组 → 复用 ensureOrderLane
-            const orderMap = new Map<string, TownTransportTask[]>();
-            routeTasks.forEach(t => { const o = t.orderId ?? t.lineId; if (!orderMap.has(o)) orderMap.set(o, []); orderMap.get(o)!.push(t); });
-
-            let laneIdx = 0;
-            const laneCount = orderMap.size;
-            orderMap.forEach((orderTasks, orderId) => {
-                const offset = (laneIdx - (laneCount - 1) / 2) * 0.12;
-                const lane = ensureOrderLane(route, orderId, laneIdx, curve, offset, 0.05);
-
-                orderTasks.forEach((task, vi) => {
-                    const prog = task.status.includes('完成') ? 1 : task.status.includes('装载') ? 0.05 : clamp01(0.15 + vi * 0.12 + (hashText(task.lineId) % 20) * 0.03);
-                    const isLead = vi === 0 && orderTasks.length > 1;
-                    const veh = ensureVehicleBar(route, lane, task.lineId, task, isLead, vi);
-                    veh.progress = prog;
-                    setVehicleBarTransform(curve, lane, veh, laneCount, BAR_LIFT);
-                    veh.bar.userData = { objectType: '车辆进度条', title: task.vehicle.plate || task.lineId, subtitle: `${task.from.name} → ${task.to.name}`, rows: [['任务ID', task.lineId], ['订单ID', task.orderId ?? '--'], ['车辆ID', task.vehicle.carId], ['货重', `${task.vehicle.cargoWeight ?? '--'} ${task.vehicle.cargoUnit ?? ''}`.trim()], ['状态', task.status]] };
-                    lane.vehicles.push(veh);
-                    interactiveObjects.push(veh.bar);
-                    allPoints.push(veh.bar.position);
-                });
-                laneIdx++;
-            });
-
-            // 复用 updateRouteVisuals
-            updateRouteVisuals(route);
-        });
-
         interactiveObjectsRef.current = interactiveObjects;
+
+        // 把所有路线放到一个统一 group 里
+        const group = new THREE.Group();
+        roads.forEach(r => { scene.remove(r.group); group.add(r.group); });
+
         return { group, points: allPoints };
-    }, [mapPositionFactory]);
+    }, []);
 
     const renderCommand = useCallback((command: TownRoadRenderCommand) => {
         const scene = sceneRef.current;
