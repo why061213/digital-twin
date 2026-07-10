@@ -192,7 +192,7 @@ function getPreferredRenderableStage(queue: CircularAnimationQueue<TownAnimation
 function buildAnimationStageRenderCommand(command: TownRoadRenderCommand, stage: TownAnimationStage | null | undefined) {
     return {
         ...buildTownStageRenderCommand(command, stage),
-        renderLevel: 'province-district' as const,
+        renderLevel: 'province-city' as const,
     };
 }
 

@@ -229,7 +229,15 @@ export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAn
 
             (path.edgeKeys ?? []).forEach((edgeKey, edgeIndex) => {
                 const edge = provinceEdges.find((item) => item.edgeKey === edgeKey);
-                const edgeLineIds = edge ? collectEdgeOrderLineIds(edge) : pathLineIds;
+                const globalEdgeLineIds = edge ? collectEdgeOrderLineIds(edge) : [];
+                /**
+                 * 省际边阶段必须限制在当前 candidatePath 上下文内。
+                 * 全局 provinceEdges 聚合的是所有经过该边的订单，直接使用会把其他路线组的订单带进当前路径。
+                 */
+                const scopedEdgeLineIds = globalEdgeLineIds.length > 0
+                    ? pathLineIds.filter((lineId) => globalEdgeLineIds.includes(lineId))
+                    : pathLineIds;
+                const edgeLineIds = scopedEdgeLineIds.length > 0 ? scopedEdgeLineIds : pathLineIds;
                 pushStage({
                     id: `${sceneKey}:edge:${safeIdPart(path.pathId, `${groupId}_path_${pathIndex}`)}:${safeIdPart(edgeKey, `edge_${edgeIndex}`)}`,
                     kind: 'province_edge_highlight',
