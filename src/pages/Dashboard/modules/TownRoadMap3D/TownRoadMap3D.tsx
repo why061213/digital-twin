@@ -208,7 +208,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
         if (!camera || !controls || points.length === 0) return;
 
         // 1. 重置拉伸
-        if (transformGroup) { transformGroup.scale.setScalar(1); transformGroup.position.set(0, 0, 0); }
+        if (transformGroup) { transformGroup.scale.set(1, 1, 1); transformGroup.rotation.set(0, 0, 0); transformGroup.position.set(0, 0, 0); }
 
         // 2. 舒适相机距离
         const box = new THREE.Box3().setFromPoints(points);
@@ -223,16 +223,27 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
         camera.lookAt(controls.target);
         controls.update();
 
-        // 3. 路线太短 → 拉伸地图板块（不拉相机）
-        if (transformGroup && container && span > 0) {
+        // 3. 沿路线方向拉伸
+        if (transformGroup && container && span > 0 && points.length >= 2) {
             const screenH = container.clientHeight;
             const fovRad = THREE.MathUtils.degToRad(camera.fov);
             const viewportH = 2 * height * Math.tan(fovRad / 2);
             const minSpan = viewportH * (50 / screenH);
             if (span < minSpan) {
                 const s = THREE.MathUtils.clamp(minSpan / span, 1, 4);
-                transformGroup.scale.setScalar(s);
-                transformGroup.position.copy(center.clone().multiplyScalar(1 - s));
+                // 路线方向向量
+                const dir = new THREE.Vector3().subVectors(points[points.length - 1], points[0]);
+                dir.y = 0;
+                if (dir.lengthSq() > 0.0001) {
+                    dir.normalize();
+                    const angle = Math.atan2(dir.x, dir.z);
+                    transformGroup.rotation.y = angle;
+                    transformGroup.scale.set(s, 1, 1);
+                    transformGroup.position.copy(center.clone().multiplyScalar(1 - s));
+                } else {
+                    transformGroup.scale.setScalar(s);
+                    transformGroup.position.copy(center.clone().multiplyScalar(1 - s));
+                }
             }
         }
     }, []);

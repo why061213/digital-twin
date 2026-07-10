@@ -175,7 +175,7 @@ export function ensureVehicleBar(road: TownRoadState, lane: TownOrderLane, lineI
     return vehicle;
 }
 
-export function updateOrderVisuals(road: TownRoadState) {
+export function updateOrderVisuals(road: TownRoadState, truckLift: number) {
     const orderCount = Math.max(1, road.orders.size);
     if (road.renderedOrderCount !== orderCount) {
         const routeWidthFactor = Math.min(2.8, 0.7 + 0.3 * orderCount);
@@ -207,7 +207,7 @@ export function updateOrderVisuals(road: TownRoadState) {
             vehicle.baseScale.set(baseScale.x, baseScale.y, baseScale.z);
             vehicle.bar.scale.copy(vehicle.baseScale);
             vehicle.bar.renderOrder = isLead ? 36 : 18 + (vehicleIndex % 8);
-            setVehicleBarTransform(road, lane, vehicle, 0.36); // TRUCK_LIFT = 0.36
+            setVehicleBarTransform(road, lane, vehicle, truckLift);
         });
     });
 }
@@ -287,7 +287,7 @@ export function buildRouteFromTasks(
                 vehicle.currentCoords = task.from.coords!;
             });
         });
-        updateOrderVisuals(road);
+        updateOrderVisuals(road, truckLift);
     });
 
     return roads;
