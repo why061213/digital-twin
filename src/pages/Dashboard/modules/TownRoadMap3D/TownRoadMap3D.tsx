@@ -223,14 +223,15 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
         camera.lookAt(controls.target);
         controls.update();
 
-        // 3. 沿路线方向拉伸
+        // 3. 沿路线方向大幅拉伸（短途看得清进度）
         if (transformGroup && container && span > 0 && points.length >= 2) {
             const screenH = container.clientHeight;
             const fovRad = THREE.MathUtils.degToRad(camera.fov);
             const viewportH = 2 * height * Math.tan(fovRad / 2);
-            const minSpan = viewportH * (50 / screenH);
-            if (span < minSpan) {
-                const s = THREE.MathUtils.clamp(minSpan / span, 1, 4);
+            const minSpan = viewportH * (300 / screenH); // 目标占屏幕 300px
+            // 绝对下限：span 小于 8 世界单位时强制拉伸
+            const s = THREE.MathUtils.clamp(Math.max(minSpan / span, 8 / Math.max(span, 1)), 1, 20);
+            if (s > 1) {
                 // 路线方向向量
                 const dir = new THREE.Vector3().subVectors(points[points.length - 1], points[0]);
                 dir.y = 0;
