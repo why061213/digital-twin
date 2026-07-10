@@ -178,9 +178,9 @@ export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAn
     });
 
     routeGroups.forEach((group, groupIndex) => {
-        const groupOrderLineIds = collectGroupOrderLineIds(group);
+        const groupPrimaryOrderLineIds = unique(group.primaryOrderLineIds ?? []);
         const groupRenderProvinces = collectGroupPlaybackRenderProvinces(group, orders);
-        const groupOrders = groupOrderLineIds
+        const groupPrimaryOrders = groupPrimaryOrderLineIds
             .map((lineId) => orderByLineId.get(lineId))
             .filter((order): order is TownTransportOrder => Boolean(order));
         const groupEdgeKeys = unique((group.candidatePaths ?? []).flatMap((path) => path.edgeKeys ?? []));
@@ -197,7 +197,9 @@ export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAn
             payload: {
                 routeGroupId: group.groupId,
                 edgeKeys: groupEdgeKeys,
-                orderLineIds: groupOrders.length > 0 ? groupOrders.map((order) => order.lineId) : groupOrderLineIds,
+                // 路线组面板只展示该 group 自己的主订单。
+                // alongOrderLineIds 留给 candidate_path / province_edge 阶段表达沿途和边聚合语义。
+                orderLineIds: groupPrimaryOrders.length > 0 ? groupPrimaryOrders.map((order) => order.lineId) : groupPrimaryOrderLineIds,
                 renderProvinces: groupRenderProvinces,
             },
         });
@@ -234,8 +236,8 @@ export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAn
                     sceneKey,
                     commandId: command.commandId,
                     label: edge
-                        ? `${edge.fromProvinceName ?? edge.fromProvinceKey} → ${edge.toProvinceName ?? edge.toProvinceKey}`
-                        : edgeKey,
+                        ? `经过 ${edge.fromProvinceName ?? edge.fromProvinceKey} → ${edge.toProvinceName ?? edge.toProvinceKey} 的运输线`
+                        : `经过 ${edgeKey} 的运输线`,
                     version,
                     playbackStatus: 'pending',
                     payload: {

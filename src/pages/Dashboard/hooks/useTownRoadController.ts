@@ -673,6 +673,20 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         };
     }, [activeTownCommandIndex, activeTownRenderCommand, animationQueueSnapshot.currentId, animationQueueSnapshot.size, currentRenderableStage, lastTownDiff, townCommand.description, townCommand.sourceProvince?.provinceName, townCommands.length, townProvinceEdges.length, townRouteGroups.length, townTasks]);
 
+    useEffect(() => {
+        if (view !== 'townRoadMap') return;
+
+        console.info('[TownRoadPanel] build panel', {
+            stageId: currentRenderableStage?.id,
+            stageKind: currentRenderableStage?.kind,
+            groupId: currentRenderableStage?.payload.routeGroupId,
+            pathId: currentRenderableStage?.payload.candidatePathId,
+            edgeKey: currentRenderableStage?.payload.edgeKey,
+            title: townSummary.title,
+            orderLineIds: townTasks.map((task) => task.lineId),
+        });
+    }, [currentRenderableStage, townSummary.title, townTasks, view]);
+
     const reloadMockTownCommand = useCallback(() => {
         const command = normalizeCommand({
             ...mockTownProvinceRenderCommand,
