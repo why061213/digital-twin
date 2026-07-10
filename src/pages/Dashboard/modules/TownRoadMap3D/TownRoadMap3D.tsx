@@ -179,9 +179,9 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
     onVisualReadyRef.current = onVisualReady;
 
     const clearMapData = useCallback(() => {
-        const scene = sceneRef.current;
+        const tg = transformGroupRef.current;
         if (mapGroupRef.current) {
-            scene?.remove(mapGroupRef.current);
+            tg?.remove(mapGroupRef.current);
             disposeObject3D(mapGroupRef.current);
             mapGroupRef.current = null;
         }
@@ -191,9 +191,9 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
     }, []);
 
     const clearRouteData = useCallback(() => {
-        const scene = sceneRef.current;
+        const tg = transformGroupRef.current;
         if (routesGroupRef.current) {
-            scene?.remove(routesGroupRef.current);
+            tg?.remove(routesGroupRef.current);
             disposeObject3D(routesGroupRef.current);
             routesGroupRef.current = null;
         }
@@ -321,7 +321,6 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
         const mapPosition = mapPositionFactory(projection);
         const group = new THREE.Group();
         const allPoints: THREE.Vector3[] = [];
-        const endpointMarkers = new Map<string, THREE.Mesh>();
         const interactiveObjects: THREE.Object3D[] = [];
         const activeTasks = tasks.filter(t => !t.deleted);
 
@@ -343,9 +342,12 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
             const end = mapPosition(ref.to.coords!, ROUTE_LIFT);
             if (!start || !end) return;
 
-            const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
-            mid.y += TOWN_ROUTE_CURVE_HEIGHT + Math.min(start.distanceTo(end) * 0.08, 3.5);
-            const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
+            // 公路运输贴地：直线，无空中弧线
+            const curve = new THREE.QuadraticBezierCurve3(
+                start,
+                new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5).setY(ROUTE_LIFT + 0.2),
+                end,
+            );
 
             const grayTube = new THREE.Mesh(
                 new THREE.TubeGeometry(curve, TUBE_SEGMENTS, 0.065, RADIAL_SEGS, false),
@@ -383,21 +385,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
 
             // 复用 updateRouteVisuals
             updateRouteVisuals(route);
-
-            if (isLonLat(ref.from.coords)) { const m = epMarker(ref.from.coords, ref.from.name, 0x38bdf8, 0.88); if (m) allPoints.push(m.position); }
-            if (isLonLat(ref.to.coords)) { const m = epMarker(ref.to.coords, ref.to.name, 0xf59e0b, 1.08); if (m) allPoints.push(m.position); }
         });
-
-        function epMarker(coords: LonLat, label: string, color: number, scale = 1) {
-            const k = `${coords[0].toFixed(6)},${coords[1].toFixed(6)}:${label}`;
-            if (endpointMarkers.has(k)) return endpointMarkers.get(k)!;
-            const p = mapPosition(coords, MARKER_LIFT);
-            if (!p) return null;
-            const m = new THREE.Mesh(new THREE.SphereGeometry(0.34 * scale, 18, 18), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.92 }));
-            m.position.copy(p); m.userData = { title: label, objectType: '站点' };
-            endpointMarkers.set(k, m); group.add(m);
-            return m;
-        }
 
         interactiveObjectsRef.current = interactiveObjects;
         return { group, points: allPoints };
