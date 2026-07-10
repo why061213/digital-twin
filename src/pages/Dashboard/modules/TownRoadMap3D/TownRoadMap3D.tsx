@@ -257,31 +257,21 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                     allPoints.push(new THREE.Vector3(x, MAP_LIFT, y));
                 });
 
-                const geom = new THREE.ExtrudeGeometry(shape, { depth: 0.5, bevelEnabled: false });
+                // 轻量平面填充：每个区县只用 ShapeGeometry，不做 3D 挤压体和边线计算。
+                // 区县轮廓由 createBoundaryOverlay 的 province/city 边界层统一表达。
+                const geom = new THREE.ShapeGeometry(shape);
                 const mesh = new THREE.Mesh(
                     geom,
-                    new THREE.MeshStandardMaterial({
-                        color: 0x20384f,
-                        emissive: 0x061a27,
-                        emissiveIntensity: 0.18,
-                        roughness: 0.68,
-                        metalness: 0.18,
-                        side: THREE.DoubleSide,
-                    })
-                );
-                cityGroup.add(mesh);
-
-                const edge = new THREE.LineSegments(
-                    new THREE.EdgesGeometry(geom, 28),
-                    new THREE.LineBasicMaterial({
-                        color: BOUNDARY_STYLES.district.color,
+                    new THREE.MeshBasicMaterial({
+                        color: 0x1a3550,
                         transparent: true,
-                        opacity: BOUNDARY_STYLES.district.opacity,
+                        opacity: 0.78,
+                        side: THREE.DoubleSide,
+                        depthWrite: false,
                     })
                 );
-                edge.position.z -= 0.018;
-                edge.renderOrder = BOUNDARY_STYLES.district.renderOrder;
-                cityGroup.add(edge);
+                mesh.renderOrder = 8;
+                cityGroup.add(mesh);
             });
 
             cityGroup.rotation.x = Math.PI / 2;
