@@ -611,8 +611,12 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         });
 
         startCurrentTownAnimationStage(`loop-start:${reason}`);
-        scheduleNextAnimationTick();
-    }, [scheduleNextAnimationTick, startCurrentTownAnimationStage]);
+        /**
+         * 调试阶段先不要 scheduleNextAnimationTick。
+         * 等首帧地图稳定显示后再恢复。
+         */
+        // scheduleNextAnimationTick();
+    }, [startCurrentTownAnimationStage]);
 
     useEffect(() => {
         if (view !== 'townRoadMap') {
