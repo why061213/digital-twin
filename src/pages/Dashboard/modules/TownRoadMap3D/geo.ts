@@ -458,7 +458,13 @@ export async function loadGeoJsonByRenderCommand(command: TownRoadRenderCommand)
         await Promise.all(
             cityFeatures.map(async (cityFeature: any) => {
                 const children = await loadCityDistrictFeatures(cityFeature);
-                districtFeatures.push(...children);
+                // 只保留真正的区县级（排除直辖市返回的省级/城市级自身、特别行政区外壳等）
+                const realDistricts = children.filter((f: any) => {
+                    const adcode = featureAdcode(f);
+                    if (!adcode) return false;
+                    return !isCityAdcode(adcode) && !isProvinceAdcode(adcode);
+                });
+                districtFeatures.push(...realDistricts);
             })
         );
         // 诊断：打印 features 的 adcode 级别

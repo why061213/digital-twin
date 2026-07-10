@@ -272,7 +272,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                 mesh.renderOrder = 8;
                 cityGroup.add(mesh);
 
-                }
+                
             });
 
             cityGroup.rotation.x = Math.PI / 2;
