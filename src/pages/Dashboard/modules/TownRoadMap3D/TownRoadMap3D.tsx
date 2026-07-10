@@ -90,7 +90,7 @@ const BOUNDARY_STYLES: Record<BoundaryLevel, BoundaryStyle> = {
     // 市界：次高、偏 cyan，负责在省内分出地市层级。
     city: { color: 0x22d3ee, opacity: 0.54, lift: MAP_LIFT + 0.76, lineWidth: 2, renderOrder: 24 },
     // 县界：最细、最暗，主要由每个区县块自己的 EdgesGeometry 表达。
-    district: { color: 0x93c5fd, opacity: 0.35, lift: MAP_LIFT + 0.58, lineWidth: 1, renderOrder: 12 },
+    district: { color: 0x93c5fd, opacity: 0.48, lift: MAP_LIFT + 0.58, lineWidth: 1, renderOrder: 12 },
 };
 
 function commandMapKey(command: TownRoadRenderCommand) {
@@ -257,15 +257,30 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
     const focusPoints = useCallback((points: THREE.Vector3[]) => {
         const camera = cameraRef.current;
         const controls = controlsRef.current;
+        const container = containerRef.current;
         if (!camera || !controls || points.length === 0) return;
 
         const box = new THREE.Box3().setFromPoints(points);
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
-        const span = Math.max(size.x, size.z, 4);
-        // 短途配送：更贴近地面，细节更清晰
-        const height = THREE.MathUtils.clamp(span * 0.72 + 12, 12, 72);
-        const tilt = THREE.MathUtils.clamp(span * 0.32 + 6, 8, 36);
+        const span = Math.max(size.x, size.z, 3);
+
+        // 短途配送：更贴近地面
+        let height = THREE.MathUtils.clamp(span * 0.65 + 10, 8, 64);
+        let tilt = THREE.MathUtils.clamp(span * 0.28 + 5, 5, 30);
+
+        // 指标2：路线在屏幕上至少 50px。
+        // 视口高度 ≈ 2 * height * tan(fov/2)，50px 占比 = 50 / screenH
+        const screenH = container?.clientHeight ?? 1080;
+        const fovRad = THREE.MathUtils.degToRad(camera.fov);
+        const viewportHeight = 2 * height * Math.tan(fovRad / 2);
+        const minWorldSpan = viewportHeight * (50 / screenH);
+        if (span < minWorldSpan) {
+            // 路线太短，缩近相机让路线至少占 50px
+            height = (span * screenH) / (50 * 2 * Math.tan(fovRad / 2));
+            height = THREE.MathUtils.clamp(height, 5, 64);
+            tilt = Math.max(4, height * 0.25);
+        }
 
         camera.position.set(center.x, height, center.z - tilt);
         controls.target.set(center.x, 0, center.z);
@@ -320,9 +335,9 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                 const mesh = new THREE.Mesh(
                     geom,
                     new THREE.MeshBasicMaterial({
-                        color: 0x1a3550,
+                        color: 0x1e3d5c,
                         transparent: true,
-                        opacity: 0.78,
+                        opacity: 0.88,
                         side: THREE.DoubleSide,
                         depthWrite: false,
                     })
