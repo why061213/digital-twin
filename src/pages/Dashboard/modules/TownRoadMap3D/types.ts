@@ -133,6 +133,23 @@ export type TownProvinceEdge = {
     orderCount?: number;
 };
 
+export type TownRoadDiffDetail = {
+    count: number;
+    lineIds: string[];
+};
+
+export type TownRoadDiffDetails = {
+    added?: TownRoadDiffDetail;
+    updated?: TownRoadDiffDetail;
+    deleted?: TownRoadDiffDetail;
+    unchanged?: TownRoadDiffDetail;
+    routeChanged?: TownRoadDiffDetail;
+    skippedInvalid?: TownRoadDiffDetail;
+    skippedNotRenderable?: TownRoadDiffDetail;
+    skippedLongHaul?: TownRoadDiffDetail;
+    deletedOrCancelled?: TownRoadDiffDetail;
+};
+
 export type TownRoadDiffSummary = {
     added?: number;
     updated?: number;
@@ -142,6 +159,9 @@ export type TownRoadDiffSummary = {
     skippedInvalid?: number;
     skippedNotRenderable?: number;
     skippedLongHaul?: number;
+    deletedOrCancelled?: number;
+    /** 每个分类的具体订单号列表 */
+    details?: TownRoadDiffDetails;
 };
 
 /**
@@ -203,6 +223,8 @@ export type TownRoadRenderEnvelope = {
      */
     displayMode?: 'single_source' | 'multi_source_rotation';
     diff?: TownRoadDiffSummary;
+    /** 后端生成的完整数据流水账，展示 rawCount 如何一步步变成 shortHaulCount */
+    accounting?: Record<string, unknown>;
     commands: TownRoadRenderCommand[];
 };
 

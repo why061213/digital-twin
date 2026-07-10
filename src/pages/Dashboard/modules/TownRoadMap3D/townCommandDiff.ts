@@ -19,6 +19,7 @@ const EMPTY_DIFF: Required<TownRoadDiffSummary> = {
     skippedInvalid: 0,
     skippedNotRenderable: 0,
     skippedLongHaul: 0,
+    deletedOrCancelled: 0,
 };
 
 function cloneDiff(diff?: TownRoadDiffSummary): Required<TownRoadDiffSummary> {
@@ -37,6 +38,7 @@ function addDiff(target: Required<TownRoadDiffSummary>, source: TownRoadDiffSumm
     target.skippedInvalid += source.skippedInvalid ?? 0;
     target.skippedNotRenderable += source.skippedNotRenderable ?? 0;
     target.skippedLongHaul += source.skippedLongHaul ?? 0;
+    target.deletedOrCancelled += source.deletedOrCancelled ?? 0;
 }
 
 export function getTownCommandKey(command: TownRoadRenderCommand) {
