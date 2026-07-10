@@ -255,9 +255,9 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                     const y = -projected[1];
                     if (index === 0) shape.moveTo(x, y);
                     else shape.lineTo(x, y);
-                    const pt = new THREE.Vector3(x, MAP_LIFT, y);
-                    allPoints.push(pt);
-                    ringPoints.push(new THREE.Vector3(x, MAP_LIFT + 0.03, y));
+                    allPoints.push(new THREE.Vector3(x, MAP_LIFT, y));
+                    // 区县边界线在 XY 平面微偏 Z，cityGroup 旋转后变成水平面上的微高度
+                    ringPoints.push(new THREE.Vector3(x, y, 0.02));
                 });
 
                 // 轻量平面实体填充
