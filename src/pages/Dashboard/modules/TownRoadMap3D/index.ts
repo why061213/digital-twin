@@ -1,6 +1,12 @@
 export { default } from './TownRoadMap3D';
 export { CircularAnimationQueue } from './animationQueue';
-export { buildTownAnimationStages, buildTownStageRenderCommand, getTownSceneKey, scoreTownScene } from './townAnimationPlanner';
+export {
+    buildTownAnimationStages,
+    buildTownStageRenderCommand,
+    getTownRouteGroupDebugSnapshot,
+    getTownSceneKey,
+    scoreTownScene,
+} from './townAnimationPlanner';
 export { mergeTownRenderCommandSnapshot, mergeTownCommandSnapshot, getTownCommandKey } from './townCommandDiff';
 
 export type {

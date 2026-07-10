@@ -7,6 +7,7 @@ import {
     buildTownAnimationStages,
     buildTownStageRenderCommand,
     CircularAnimationQueue,
+    getTownRouteGroupDebugSnapshot,
     getTownCommandKey,
     mergeTownRenderCommandSnapshot,
     scoreTownScene,
@@ -196,6 +197,28 @@ function buildAnimationStageRenderCommand(command: TownRoadRenderCommand, stage:
     };
 }
 
+function countTownStagesByKind(stages: TownAnimationStage[]) {
+    return stages.reduce<Record<string, number>>((acc, stage) => {
+        acc[stage.kind] = (acc[stage.kind] ?? 0) + 1;
+        return acc;
+    }, {});
+}
+
+function summarizeTownStageForGroupDebug(stage: TownAnimationStage) {
+    return {
+        id: stage.id,
+        kind: stage.kind,
+        label: stage.label,
+        routeGroupId: stage.payload.routeGroupId,
+        candidatePathId: stage.payload.candidatePathId,
+        edgeKey: stage.payload.edgeKey,
+        edgeKeys: stage.payload.edgeKeys,
+        provincePath: stage.payload.provincePath,
+        renderProvinces: stage.payload.renderProvinces,
+        orderLineIds: stage.payload.orderLineIds,
+    };
+}
+
 export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadControllerParams) {
     const [townCommands, setTownCommands] = useState<TownRoadRenderCommand[]>([]);
     const [activeTownCommandIndex, setActiveTownCommandIndex] = useState(0);
@@ -237,6 +260,25 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         const nextSceneKey = getTownCommandKey(command);
         const queue = animationQueueRef.current;
         const isSceneChanged = lastQueueSceneKeyRef.current !== nextSceneKey;
+
+        townLog('info', 'route group diagnostics', {
+            sceneKey: nextSceneKey,
+            ...getTownRouteGroupDebugSnapshot(command),
+        });
+        townLog('info', 'animation stage diagnostics', {
+            sceneKey: nextSceneKey,
+            stageCount: nextStages.length,
+            stageCountByKind: countTownStagesByKind(nextStages),
+            routeGroupStages: nextStages
+                .filter((stage) => stage.kind === 'route_group_focus')
+                .map(summarizeTownStageForGroupDebug),
+            candidatePathStages: nextStages
+                .filter((stage) => stage.kind === 'candidate_path_focus')
+                .map(summarizeTownStageForGroupDebug),
+            provinceEdgeStages: nextStages
+                .filter((stage) => stage.kind === 'province_edge_highlight')
+                .map(summarizeTownStageForGroupDebug),
+        });
 
         if (isSceneChanged) {
             queue.replaceAll(nextStages, { keepCurrent: false });

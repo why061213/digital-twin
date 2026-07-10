@@ -115,7 +115,37 @@ function isLargerAbsorbingGroup(candidate: TownRouteGroup, target: TownRouteGrou
     return hasEveryPrimaryOrderAbsorbedByLargerGroup(target, candidate);
 }
 
-function getDisplayRouteGroups(command: TownRoadRenderCommand) {
+function summarizeRouteGroupForDebug(group: TownRouteGroup) {
+    return {
+        groupId: group.groupId,
+        groupName: group.groupName,
+        fromProvinceKey: group.fromProvinceKey,
+        fromProvinceName: group.fromProvinceName,
+        toProvinceKey: group.toProvinceKey,
+        toProvinceName: group.toProvinceName,
+        display: group.display,
+        absorbed: group.absorbed,
+        absorbedByGroupIds: group.absorbedByGroupIds,
+        absorbedReason: group.absorbedReason,
+        primaryOrderLineIds: group.primaryOrderLineIds ?? [],
+        alongOrderLineIds: group.alongOrderLineIds ?? [],
+        allOrderLineIds: collectGroupOrderLineIds(group),
+        candidatePathCount: group.candidatePaths?.length ?? 0,
+        candidatePaths: (group.candidatePaths ?? []).map((path) => ({
+            pathId: path.pathId,
+            pathCost: path.pathCost,
+            bestPath: path.bestPath,
+            provincePath: path.provincePath,
+            provinceNames: path.provinceNames,
+            edgeKeys: path.edgeKeys,
+            primaryOrderLineIds: path.primaryOrderLineIds ?? [],
+            alongOrderLineIds: path.alongOrderLineIds ?? [],
+            orderLineIds: collectPathOrderLineIds(path),
+        })),
+    };
+}
+
+export function getDisplayRouteGroups(command: TownRoadRenderCommand) {
     const sourceGroups = command.displayRouteGroups?.length
         ? command.displayRouteGroups
         : command.routeGroups ?? [];
@@ -125,6 +155,32 @@ function getDisplayRouteGroups(command: TownRoadRenderCommand) {
         const absorbedByLargerGroup = displayEnabledGroups.some((candidate) => isLargerAbsorbingGroup(candidate, group));
         return !absorbedByLargerGroup;
     });
+}
+
+export function getTownRouteGroupDebugSnapshot(command: TownRoadRenderCommand) {
+    const rawGroups = command.routeGroups ?? [];
+    const backendDisplayGroups = command.displayRouteGroups ?? [];
+    const effectiveDisplayGroups = getDisplayRouteGroups(command);
+    const sourceGroups = backendDisplayGroups.length > 0 ? backendDisplayGroups : rawGroups;
+    const displayEnabledGroups = sourceGroups.filter((group) => group.display !== false && !group.absorbed);
+    const frontendAbsorbedGroups = displayEnabledGroups.filter((group) => !effectiveDisplayGroups.includes(group));
+
+    return {
+        commandId: command.commandId,
+        title: command.title,
+        sourceProvince: command.sourceProvince,
+        rawGroupCount: rawGroups.length,
+        backendDisplayGroupCount: backendDisplayGroups.length,
+        sourceGroupCount: sourceGroups.length,
+        displayEnabledGroupCount: displayEnabledGroups.length,
+        effectiveDisplayGroupCount: effectiveDisplayGroups.length,
+        backendHiddenGroupCount: rawGroups.filter((group) => group.display === false || group.absorbed).length,
+        frontendAbsorbedGroupCount: frontendAbsorbedGroups.length,
+        rawGroups: rawGroups.map(summarizeRouteGroupForDebug),
+        backendDisplayGroups: backendDisplayGroups.map(summarizeRouteGroupForDebug),
+        effectiveDisplayGroups: effectiveDisplayGroups.map(summarizeRouteGroupForDebug),
+        frontendAbsorbedGroups: frontendAbsorbedGroups.map(summarizeRouteGroupForDebug),
+    };
 }
 
 function collectPathOrderLineIds(path: TownCandidatePath) {
@@ -157,6 +213,8 @@ export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAn
     const stages: TownAnimationStage[] = [];
     const usedIds = new Set<string>();
 
+    console.info('[TownRoadPlanner] route group snapshot', getTownRouteGroupDebugSnapshot(command));
+
     const pushStage = (stage: TownAnimationStage) => {
         if (usedIds.has(stage.id)) return;
         usedIds.add(stage.id);
@@ -185,6 +243,32 @@ export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAn
             .filter((order): order is TownTransportOrder => Boolean(order));
         const groupEdgeKeys = unique((group.candidatePaths ?? []).flatMap((path) => path.edgeKeys ?? []));
         const groupId = safeIdPart(group.groupId, `group_${groupIndex}`);
+
+        console.info('[TownRoadPlanner] build route group stage', {
+            sceneKey,
+            commandId: command.commandId,
+            groupIndex,
+            groupId: group.groupId,
+            label: group.groupName ?? `${group.fromProvinceName ?? ''} -> ${group.toProvinceName ?? ''}`.trim(),
+            fromProvinceKey: group.fromProvinceKey,
+            toProvinceKey: group.toProvinceKey,
+            primaryOrderLineIds: groupPrimaryOrderLineIds,
+            alongOrderLineIds: group.alongOrderLineIds ?? [],
+            groupRenderProvinces,
+            groupEdgeKeys,
+            candidatePathCount: group.candidatePaths?.length ?? 0,
+            candidatePaths: (group.candidatePaths ?? []).map((path) => ({
+                pathId: path.pathId,
+                pathCost: path.pathCost,
+                bestPath: path.bestPath,
+                provincePath: path.provincePath,
+                provinceNames: path.provinceNames,
+                edgeKeys: path.edgeKeys,
+                primaryOrderLineIds: path.primaryOrderLineIds ?? [],
+                alongOrderLineIds: path.alongOrderLineIds ?? [],
+                orderLineIds: collectPathOrderLineIds(path),
+            })),
+        });
 
         pushStage({
             id: `${sceneKey}:group:${groupId}`,
@@ -238,6 +322,27 @@ export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAn
                     ? pathLineIds.filter((lineId) => globalEdgeLineIds.includes(lineId))
                     : pathLineIds;
                 const edgeLineIds = scopedEdgeLineIds.length > 0 ? scopedEdgeLineIds : pathLineIds;
+                console.info('[TownRoadPlanner] build province edge stage', {
+                    sceneKey,
+                    commandId: command.commandId,
+                    routeGroupId: group.groupId,
+                    candidatePathId: path.pathId,
+                    edgeKey,
+                    pathLineIds,
+                    globalEdgeLineIds,
+                    scopedEdgeLineIds,
+                    edgeLineIds,
+                    renderProvinces: groupRenderProvinces,
+                    edge: edge ? {
+                        fromProvinceKey: edge.fromProvinceKey,
+                        fromProvinceName: edge.fromProvinceName,
+                        toProvinceKey: edge.toProvinceKey,
+                        toProvinceName: edge.toProvinceName,
+                        orderLineIds: edge.orderLineIds ?? [],
+                        primaryOrderLineIds: edge.primaryOrderLineIds ?? [],
+                        alongOrderLineIds: edge.alongOrderLineIds ?? [],
+                    } : null,
+                });
                 pushStage({
                     id: `${sceneKey}:edge:${safeIdPart(path.pathId, `${groupId}_path_${pathIndex}`)}:${safeIdPart(edgeKey, `edge_${edgeIndex}`)}`,
                     kind: 'province_edge_highlight',
