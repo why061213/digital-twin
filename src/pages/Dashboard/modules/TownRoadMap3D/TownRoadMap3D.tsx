@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createLocalProjection, collectRenderProvinceAdcodes, collectTaskCoords, commandOrders, commandRenderProvinces, featureCoords, isLonLat, loadGeoJsonByRenderCommand } from './geo';
 import { MAP_LIFT, MARKER_LIFT, ROUTE_LIFT, TOWN_ROUTE_CURVE_HEIGHT } from './constants';
+
+const BAR_LIFT = ROUTE_LIFT + 0.3;
 import type { LonLat, TownAnimationStage, TownBoundaryLayers, TownRoadMap3DHandle, TownRoadRenderCommand, TownTransportTask } from './types';
 
 type TownRoadMap3DProps = {
@@ -26,6 +28,61 @@ type BoundaryStyle = {
     lineWidth: number;
     renderOrder: number;
 };
+
+// ---- 路线车道/车辆进度条（从 RoadMap 迁移） ----
+
+const ORDER_LANE_COLORS = [
+    0x00ff88, 0x00ccff, 0xffaa00, 0xff44aa, 0xaaff00,
+    0x00ffff, 0xff8800, 0x44aaff, 0xff0000, 0xffff00,
+    0xff00ff, 0x00ff00,
+];
+
+type TownVehicleBar = {
+    lineId: string;
+    orderId: string;
+    bar: THREE.Mesh;
+    progress: number;
+    info: TownTransportTask;
+};
+
+type TownOrderLane = {
+    orderId: string;
+    color: number;
+    progressTube: THREE.Mesh;
+    vehicles: TownVehicleBar[];
+    maxProgress: number;
+    laneIndex: number;
+};
+
+type TownRouteState = {
+    pathKey: string;
+    routeGroup: THREE.Group;
+    pathCurve: THREE.QuadraticBezierCurve3;
+    grayTube: THREE.Mesh;
+    orders: Map<string, TownOrderLane>;
+    samples: THREE.Vector3[];
+    totalLength: number;
+};
+
+function routeKey(from: LonLat | undefined, to: LonLat | undefined) {
+    if (!from || !to) return null;
+    return `${from[0].toFixed(4)},${from[1].toFixed(4)}>${to[0].toFixed(4)},${to[1].toFixed(4)}`;
+}
+
+function orderColor(orderId: string, index: number) {
+    let hash = 0;
+    for (const c of orderId) hash += c.charCodeAt(0);
+    return ORDER_LANE_COLORS[(hash + index) % ORDER_LANE_COLORS.length];
+}
+
+function clamp01(v: number) { return Math.max(0, Math.min(1, v)); }
+
+function drawTubeProgress(tube: THREE.Mesh, progress: number, segments: number, radialSegs: number) {
+    const idxCount = tube.geometry.index?.count ?? 0;
+    if (progress <= 0 || segments <= 0 || idxCount <= 0) { tube.geometry.setDrawRange(0, 0); return; }
+    const doneSeg = Math.max(1, Math.ceil(progress * segments));
+    tube.geometry.setDrawRange(0, Math.min(idxCount, doneSeg * radialSegs * 6));
+}
 
 const BOUNDARY_STYLES: Record<BoundaryLevel, BoundaryStyle> = {
     // 省界：最高、最亮，用暖色，负责告诉用户“这是一整个省的外边界”。
@@ -206,8 +263,9 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
         const span = Math.max(size.x, size.z, 4);
-        const height = THREE.MathUtils.clamp(span * 1.22 + 22, 24, 126);
-        const tilt = THREE.MathUtils.clamp(span * 0.55 + 12, 18, 70);
+        // 短途配送：更贴近地面，细节更清晰
+        const height = THREE.MathUtils.clamp(span * 0.72 + 12, 12, 72);
+        const tilt = THREE.MathUtils.clamp(span * 0.32 + 6, 8, 36);
 
         camera.position.set(center.x, height, center.z - tilt);
         controls.target.set(center.x, 0, center.z);
@@ -272,7 +330,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                 mesh.renderOrder = 8;
                 cityGroup.add(mesh);
 
-                
+
             });
 
             cityGroup.rotation.x = Math.PI / 2;
@@ -292,15 +350,158 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
     const renderRoutes = useCallback((tasks: TownTransportTask[], projection: ReturnType<typeof createLocalProjection>) => {
         const mapPosition = mapPositionFactory(projection);
         const group = new THREE.Group();
-        const points: THREE.Vector3[] = [];
+        const allPoints: THREE.Vector3[] = [];
         const endpointMarkers = new Map<string, THREE.Mesh>();
         const interactiveObjects: THREE.Object3D[] = [];
+        const activeTasks = tasks.filter(t => !t.deleted);
 
-        const createEndpointMarker = (coords: LonLat, label: string, color: number, scale = 1) => {
+        // ---- 1. 按物理路线分组（相同 from→to 坐标） ----
+        const routeMap = new Map<string, { tasks: TownTransportTask[]; from: LonLat; to: LonLat }>();
+        activeTasks.forEach(task => {
+            const key = routeKey(task.from.coords, task.to.coords);
+            if (!key) return;
+            let entry = routeMap.get(key);
+            if (!entry) {
+                entry = { tasks: [], from: task.from.coords!, to: task.to.coords! };
+                routeMap.set(key, entry);
+            }
+            entry.tasks.push(task);
+        });
+
+        const TUBE_SEGMENTS = 128;
+        const RADIAL_SEGS = 8;
+        const GRAY_TUBE_RADIUS = 0.065;
+        const LANE_TUBE_RADIUS = 0.05;
+        const BAR_WIDTH = 0.26;
+        const BAR_HEIGHT = 0.06;
+        const BAR_DEPTH = 0.09;
+
+        routeMap.forEach(({ tasks: routeTasks, from, to }, routeId) => {
+            const start = mapPosition(from, ROUTE_LIFT);
+            const end = mapPosition(to, ROUTE_LIFT);
+            if (!start || !end) return;
+
+            // 曲线
+            const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+            const dist = start.distanceTo(end);
+            mid.y += TOWN_ROUTE_CURVE_HEIGHT + Math.min(dist * 0.08, 3.5);
+            const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
+            const samples = curve.getSpacedPoints(TUBE_SEGMENTS);
+            const totalLength = curve.getLength();
+
+            // 灰底管
+            const grayTube = new THREE.Mesh(
+                new THREE.TubeGeometry(curve, TUBE_SEGMENTS, GRAY_TUBE_RADIUS, RADIAL_SEGS, false),
+                new THREE.MeshBasicMaterial({ color: 0x5a6a80, transparent: true, opacity: 0.4, depthWrite: false })
+            );
+            grayTube.renderOrder = 2;
+            grayTube.userData = { routeId, objectType: '短途路线' };
+            group.add(grayTube);
+
+            const routeState: TownRouteState = {
+                pathKey: routeId,
+                routeGroup: group,
+                pathCurve: curve,
+                grayTube,
+                orders: new Map(),
+                samples,
+                totalLength,
+            };
+
+            // ---- 2. 按订单分组（orderId → lane） ----
+            const orderMap = new Map<string, TownTransportTask[]>();
+            routeTasks.forEach(task => {
+                const oid = task.orderId ?? task.lineId;
+                if (!orderMap.has(oid)) orderMap.set(oid, []);
+                orderMap.get(oid)!.push(task);
+            });
+
+            let laneIdx = 0;
+            orderMap.forEach((orderTasks, orderId) => {
+                const color = orderColor(orderId, laneIdx);
+                const laneCount = orderMap.size;
+
+                // 进度管（车道偏移）
+                const laneOffset = (laneIdx - (laneCount - 1) / 2) * 0.12;
+                const progressTubeCurve = new THREE.QuadraticBezierCurve3(
+                    start.clone().add(new THREE.Vector3(0, laneOffset * 0.3, 0)),
+                    mid.clone().add(new THREE.Vector3(0, laneOffset * 0.5, 0)),
+                    end.clone().add(new THREE.Vector3(0, laneOffset * 0.3, 0))
+                );
+                const progressTube = new THREE.Mesh(
+                    new THREE.TubeGeometry(progressTubeCurve, TUBE_SEGMENTS, LANE_TUBE_RADIUS, RADIAL_SEGS, false),
+                    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false })
+                );
+                progressTube.renderOrder = 10 + laneIdx;
+                progressTube.geometry.setDrawRange(0, 0);
+                progressTube.userData = { routeId, orderId, objectType: '订单进度' };
+                group.add(progressTube);
+
+                const vehicles: TownVehicleBar[] = [];
+                let maxProgress = 0;
+
+                orderTasks.forEach((task, vi) => {
+                    // 进度：模拟沿路径的运输进度
+                    const progress = task.status.includes('完成') ? 1
+                        : task.status.includes('装载') ? 0.05
+                        : clamp01(0.15 + vi * 0.12 + (hashText(task.lineId) % 20) * 0.03);
+                    if (progress > maxProgress) maxProgress = progress;
+
+                    const isLead = vi === 0 && orderTasks.length > 1;
+                    const barColor = isLead ? color : ORDER_LANE_COLORS[(laneIdx + vi + 5) % ORDER_LANE_COLORS.length];
+                    const barScale = isLead ? { x: 1.1, y: 1.3, z: 1.1 } : { x: 0.65, y: 0.8, z: 0.65 };
+
+                    const bar = new THREE.Mesh(
+                        new THREE.BoxGeometry(BAR_WIDTH, BAR_HEIGHT, BAR_DEPTH),
+                        new THREE.MeshBasicMaterial({ color: barColor, transparent: true, opacity: isLead ? 1 : 0.8, depthWrite: false })
+                    );
+                    bar.renderOrder = isLead ? 36 : 18 + (vi % 8);
+
+                    // 定位车辆到曲线上的 progress 位置
+                    const pt = curve.getPoint(progress);
+                    const laneNormal = (laneCount > 1) ? laneOffset * 0.15 : 0;
+                    bar.position.copy(pt).add(new THREE.Vector3(0, BAR_LIFT + laneIdx * 0.004, laneNormal));
+                    bar.userData = {
+                        objectType: '车辆进度条',
+                        title: task.vehicle.plate || task.lineId,
+                        subtitle: `${task.from.name} → ${task.to.name}`,
+                        rows: [
+                            ['任务ID', task.lineId],
+                            ['订单ID', task.orderId ?? '--'],
+                            ['车辆ID', task.vehicle.carId],
+                            ['货重', `${task.vehicle.cargoWeight ?? '--'} ${task.vehicle.cargoUnit ?? ''}`.trim()],
+                            ['状态', task.status],
+                        ],
+                    };
+                    group.add(bar);
+                    interactiveObjects.push(bar);
+
+                    vehicles.push({ lineId: task.lineId, orderId, bar, progress, info: task });
+                    allPoints.push(pt);
+                });
+
+                drawTubeProgress(progressTube, maxProgress, TUBE_SEGMENTS, RADIAL_SEGS);
+
+                const lane: TownOrderLane = { orderId, color, progressTube, vehicles, maxProgress, laneIndex: laneIdx };
+                routeState.orders.set(orderId, lane);
+                laneIdx++;
+            });
+
+            // 端点标记
+            if (isLonLat(from)) {
+                const mk = createEndpointMarker(from, routeTasks[0]?.from.name ?? '起点', 0x38bdf8, 0.88);
+                if (mk) allPoints.push(mk.position);
+            }
+            if (isLonLat(to)) {
+                const mk = createEndpointMarker(to, routeTasks[0]?.to.name ?? '终点', 0xf59e0b, 1.08);
+                if (mk) allPoints.push(mk.position);
+            }
+        });
+
+        function createEndpointMarker(coords: LonLat, label: string, color: number, scale = 1) {
             const key = `${coords[0].toFixed(6)},${coords[1].toFixed(6)}:${label}`;
             const cached = endpointMarkers.get(key);
             if (cached) return cached;
-
             const position = mapPosition(coords, MARKER_LIFT);
             if (!position) return null;
             const marker = new THREE.Mesh(
@@ -311,79 +512,11 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
             marker.userData = { title: label, objectType: '站点' };
             endpointMarkers.set(key, marker);
             group.add(marker);
-            points.push(position);
             return marker;
-        };
-
-        tasks.forEach((task, index) => {
-            if (task.deleted) return;
-            const fallbackCoords = isLonLat(task.from.coords) && isLonLat(task.to.coords)
-                ? [task.from.coords, task.to.coords]
-                : [];
-            const coords = task.coordinates && task.coordinates.length >= 2
-                ? task.coordinates
-                : fallbackCoords;
-            const routePoints = coords
-                .filter(isLonLat)
-                .map((coord) => mapPosition(coord, ROUTE_LIFT))
-                .filter((point): point is THREE.Vector3 => Boolean(point));
-            if (routePoints.length < 2) return;
-
-            const start = routePoints[0];
-            const end = routePoints[routePoints.length - 1];
-            const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
-            const distance = start.distanceTo(end);
-            const sideOffset = ((hashText(task.lineId) % 9) - 4) * 0.18;
-            mid.y += TOWN_ROUTE_CURVE_HEIGHT + Math.min(distance * 0.08, 3.5);
-            mid.x += sideOffset;
-            mid.z -= sideOffset;
-
-            const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
-            const tube = new THREE.Mesh(
-                new THREE.TubeGeometry(curve, 96, 0.055, 7, false),
-                new THREE.MeshBasicMaterial({
-                    color: statusTone(task.status),
-                    transparent: true,
-                    opacity: task.status.includes('完成') ? 0.44 : 0.82,
-                    depthWrite: false,
-                })
-            );
-            tube.userData = {
-                objectType: '短途路线',
-                title: task.vehicle.plate || task.lineId,
-                subtitle: `${task.from.name} → ${task.to.name}`,
-                rows: [
-                    ['任务ID', task.lineId],
-                    ['订单ID', task.orderId ?? '--'],
-                    ['车辆ID', task.vehicle.carId],
-                    ['货重', `${task.vehicle.cargoWeight ?? '--'} ${task.vehicle.cargoUnit ?? ''}`.trim()],
-                    ['状态', task.status],
-                ],
-            };
-            group.add(tube);
-            interactiveObjects.push(tube);
-
-            const vehiclePosition = curve.getPoint(task.status.includes('完成') ? 1 : Math.min(0.18 + index * 0.08, 0.82));
-            const vehicle = new THREE.Mesh(
-                new THREE.SphereGeometry(0.22, 16, 16),
-                new THREE.MeshBasicMaterial({ color: 0xfbbf24 })
-            );
-            vehicle.position.copy(vehiclePosition);
-            vehicle.userData = tube.userData;
-            group.add(vehicle);
-            interactiveObjects.push(vehicle);
-
-            if (isLonLat(task.from.coords)) {
-                createEndpointMarker(task.from.coords, task.from.name, 0x38bdf8, 0.88);
-            }
-            if (isLonLat(task.to.coords)) {
-                createEndpointMarker(task.to.coords, task.to.name, 0xf59e0b, 1.08);
-            }
-            points.push(...routePoints);
-        });
+        }
 
         interactiveObjectsRef.current = interactiveObjects;
-        return { group, points };
+        return { group, points: allPoints };
     }, [mapPositionFactory]);
 
     const renderCommand = useCallback((command: TownRoadRenderCommand) => {
@@ -573,7 +706,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
         sceneRef.current = scene;
 
         const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 10000);
-        camera.position.set(0, 54, -42);
+        camera.position.set(0, 18, -14);
         cameraRef.current = camera;
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -603,8 +736,8 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
         controls.target.set(0, 0, 0);
         controls.minPolarAngle = Math.PI / 10;
         controls.maxPolarAngle = Math.PI / 2 - 0.035;
-        controls.minDistance = 8;
-        controls.maxDistance = 180;
+        controls.minDistance = 4;
+        controls.maxDistance = 80;
         controls.update();
         controlsRef.current = controls;
 
