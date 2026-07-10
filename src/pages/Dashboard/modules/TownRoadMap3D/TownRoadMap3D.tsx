@@ -210,6 +210,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
     const controlsRef = useRef<OrbitControls | null>(null);
     const mapGroupRef = useRef<THREE.Group | null>(null);
     const routesGroupRef = useRef<THREE.Group | null>(null);
+    const transformGroupRef = useRef<THREE.Group | null>(null); // 拉伸地图板块用
     const projectionRef = useRef<ReturnType<typeof createLocalProjection> | null>(null);
     const renderedMapKeyRef = useRef<string | null>(null);
     const renderedMapPointsRef = useRef<THREE.Vector3[]>([]);
@@ -257,35 +258,38 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
     const focusPoints = useCallback((points: THREE.Vector3[]) => {
         const camera = cameraRef.current;
         const controls = controlsRef.current;
+        const transformGroup = transformGroupRef.current;
         const container = containerRef.current;
         if (!camera || !controls || points.length === 0) return;
 
+        // 1. 重置拉伸
+        if (transformGroup) { transformGroup.scale.setScalar(1); transformGroup.position.set(0, 0, 0); }
+
+        // 2. 舒适相机距离
         const box = new THREE.Box3().setFromPoints(points);
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
         const span = Math.max(size.x, size.z, 3);
-
-        // 短途配送：更贴近地面
-        let height = THREE.MathUtils.clamp(span * 0.65 + 10, 8, 64);
-        let tilt = THREE.MathUtils.clamp(span * 0.28 + 5, 5, 30);
-
-        // 指标2：路线在屏幕上至少 50px。
-        // 视口高度 ≈ 2 * height * tan(fov/2)，50px 占比 = 50 / screenH
-        const screenH = container?.clientHeight ?? 1080;
-        const fovRad = THREE.MathUtils.degToRad(camera.fov);
-        const viewportHeight = 2 * height * Math.tan(fovRad / 2);
-        const minWorldSpan = viewportHeight * (50 / screenH);
-        if (span < minWorldSpan) {
-            // 路线太短，缩近相机让路线至少占 50px
-            height = (span * screenH) / (50 * 2 * Math.tan(fovRad / 2));
-            height = THREE.MathUtils.clamp(height, 5, 64);
-            tilt = Math.max(4, height * 0.25);
-        }
+        const height = THREE.MathUtils.clamp(span * 0.72 + 12, 14, 72);
+        const tilt = THREE.MathUtils.clamp(span * 0.30 + 6, 8, 36);
 
         camera.position.set(center.x, height, center.z - tilt);
         controls.target.set(center.x, 0, center.z);
         camera.lookAt(controls.target);
         controls.update();
+
+        // 3. 路线太短 → 拉伸地图板块（不拉相机）
+        if (transformGroup && container && span > 0) {
+            const screenH = container.clientHeight;
+            const fovRad = THREE.MathUtils.degToRad(camera.fov);
+            const viewportH = 2 * height * Math.tan(fovRad / 2);
+            const minSpan = viewportH * (50 / screenH);
+            if (span < minSpan) {
+                const s = THREE.MathUtils.clamp(minSpan / span, 1, 4);
+                transformGroup.scale.setScalar(s);
+                transformGroup.position.copy(center.clone().multiplyScalar(1 - s));
+            }
+        }
     }, []);
 
     const mapPositionFactory = useCallback((projection: ReturnType<typeof createLocalProjection>) => {
@@ -592,7 +596,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                         if (isStale()) return;
                         mapGroupRef.current = renderedMap.group;
                         renderedMapPoints = renderedMap.points;
-                        scene.add(renderedMap.group);
+                        transformGroupRef.current?.add(renderedMap.group);
                     }
 
                     if (isStale()) return;
@@ -624,7 +628,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
             const renderedRoutes = renderRoutes(validTasks, projection);
             if (isStale()) return;
             routesGroupRef.current = renderedRoutes.group;
-            scene.add(renderedRoutes.group);
+            transformGroupRef.current?.add(renderedRoutes.group);
             console.info('[TownRoadMap3D] route features rendered', {
                 nextMapKey,
                 taskCount: validTasks.length,
@@ -755,6 +759,13 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
         controls.maxDistance = 80;
         controls.update();
         controlsRef.current = controls;
+
+        // 拉伸容器：包裹地图+路线，focus 时缩放它而不是拉相机
+        const transformGroup = new THREE.Group();
+        transformGroup.name = 'townTransform';
+        transformGroup.scale.setScalar(1);
+        scene.add(transformGroup);
+        transformGroupRef.current = transformGroup;
 
         scene.add(new THREE.AmbientLight(0xdbeafe, 0.82));
         const keyLight = new THREE.DirectionalLight(0xe0f2fe, 1.25);
