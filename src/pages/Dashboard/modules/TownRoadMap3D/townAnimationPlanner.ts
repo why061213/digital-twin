@@ -126,7 +126,6 @@ export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAn
     const orderByLineId = groupOrdersByLineId(orders);
     const routeGroups = command.routeGroups ?? [];
     const provinceEdges = command.provinceEdges ?? [];
-    const renderProvinces = normalizeRenderProvinces(command);
     const stages: TownAnimationStage[] = [];
     const usedIds = new Set<string>();
 
@@ -145,7 +144,7 @@ export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAn
         version,
         playbackStatus: 'pending',
         payload: {
-            renderProvinces,
+            renderProvinces: [],
             orderLineIds: orders.map((order) => order.lineId),
         },
     });

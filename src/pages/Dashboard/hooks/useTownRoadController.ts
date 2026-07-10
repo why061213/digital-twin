@@ -236,10 +236,16 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
             queue.sync(nextStages, { skipLocked: true, removeMissing: true });
         }
 
+        const preferredStage = getPreferredRenderableStageFromStages(nextStages);
+        if (preferredStage) {
+            queue.setCurrent(preferredStage.id);
+        }
+
         townLog('info', 'animation queue rebuilt', {
             sceneKey: nextSceneKey,
             stageCount: nextStages.length,
             firstStage: nextStages[0]?.id,
+            currentStage: queue.current?.id,
             groupCount: command.routeGroups?.length ?? 0,
         });
         const queueSnapshot = queue.toDebugSnapshot();
@@ -287,7 +293,7 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
                 stageId: stage.id,
                 stageKind: stage.kind,
             });
-            townRoadMapRef.current?.setRenderCommand(command);
+            townRoadMapRef.current?.setRenderCommand?.(command);
             return;
         }
 
@@ -299,18 +305,8 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
             stageId: stage.id,
             stageKind: stage.kind,
         });
-        townRoadMapRef.current?.setRenderCommand(command);
+        townRoadMapRef.current?.setRenderCommand?.(command);
     }, [townCommand, townRoadMapRef]);
-
-    useEffect(() => {
-        if (view !== 'townRoadMap') return;
-        if (!hasTownCommands) {
-            townLog('debug', 'map sync skipped: no town commands yet');
-            return;
-        }
-        if (!currentRenderableStage) return;
-        syncTownMapWithStage(currentRenderableStage, 'view-sync');
-    }, [currentRenderableStage, hasTownCommands, syncTownMapWithStage, view]);
 
     const applyTownRoadEnvelope = useCallback((payload: TownRoadRenderIncoming, source = 'unknown') => {
         const packet = extractRenderPacket(payload);

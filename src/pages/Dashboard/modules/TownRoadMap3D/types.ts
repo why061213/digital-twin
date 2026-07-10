@@ -199,13 +199,13 @@ export type TownRoadRenderIncoming =
 
 export type TownRoadMap3DHandle = {
     setRoute: (fromCoords: LonLat, toCoords: LonLat) => void;
-    setTransportTasks: (tasks: TownTransportOrder[]) => void;
-    setRenderCommand: (command: TownRoadRenderCommand) => void;
+    setTransportTasks?: (tasks: TownTransportTask[]) => void;
+    setRenderCommand?: (command: TownRoadRenderCommand) => void;
     /** 预留动画启动入口：这一版只接收阶段，不执行具体 Three 动画。 */
     startAnimationStage?: (stage: TownAnimationStage) => void;
     /** 预留动画播放入口：下一步按 stage.kind 分发镜头、路径、边和订单动画。 */
     playAnimationStage?: (stage: TownAnimationStage) => void;
-    clearRoutes: () => void;
+    clearRoutes?: () => void;
 };
 
 export type TownRouteInput = TownTransportOrder;
