@@ -82,6 +82,8 @@ export type TownTransportOrder = {
     coordinates?: LonLat[];
     routeLengthKm?: number;
     speedKmh?: number;
+    cityPath?: string[];
+    cityNames?: string[];
 };
 
 export type TownTransportTask = TownTransportOrder;
@@ -100,6 +102,9 @@ export type TownCandidatePath = {
     bestPath?: boolean | null;
     primaryOrderLineIds?: string[];
     alongOrderLineIds?: string[];
+    cityPath?: string[];
+    cityNames?: string[];
+    cityCoordinates?: LonLat[];
 };
 
 export type TownRouteGroup = {

@@ -99,9 +99,7 @@ function makePathCurve(points: THREE.Vector3[]) {
     if (points.length === 2) return makeLinearCurve(points);
 
     const path = new THREE.CurvePath<THREE.Vector3>();
-    for (let i = 0; i < points.length - 1; i++) {
-        path.add(new THREE.LineCurve3(points[i], points[i + 1]));
-    }
+    path.add(new THREE.CatmullRomCurve3(points, false, 'centripetal', 0.35));
     return path;
 }
 
