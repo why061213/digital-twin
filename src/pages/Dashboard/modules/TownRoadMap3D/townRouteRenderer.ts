@@ -95,6 +95,85 @@ function makeLinearCurve(points: THREE.Vector3[]) {
     return path;
 }
 
+function makePathCurve(points: THREE.Vector3[]) {
+    if (points.length === 2) return makeLinearCurve(points);
+
+    const path = new THREE.CurvePath<THREE.Vector3>();
+    for (let i = 0; i < points.length - 1; i++) {
+        path.add(new THREE.LineCurve3(points[i], points[i + 1]));
+    }
+    return path;
+}
+
+function isLonLat(value: unknown): value is [number, number] {
+    return Array.isArray(value)
+        && value.length === 2
+        && Number.isFinite(value[0])
+        && Number.isFinite(value[1]);
+}
+
+function routeCoordsFor(task: {
+    from: { coords?: [number, number] };
+    to: { coords?: [number, number] };
+    coordinates?: [number, number][];
+}) {
+    const coords = (task.coordinates ?? []).filter(isLonLat);
+    const start = task.from.coords;
+    const end = task.to.coords;
+
+    if (coords.length >= 2) return coords;
+    if (start && end) return [start, end];
+    return [];
+}
+
+function formatNumber(value: unknown, digits = 2) {
+    return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '--';
+}
+
+function cargoLabel(vehicle: { cargoWeight?: number; cargoUnit?: string } | undefined) {
+    if (!vehicle || typeof vehicle.cargoWeight !== 'number') return '--';
+    return `${formatNumber(vehicle.cargoWeight, 1)}${vehicle.cargoUnit ?? ''}`;
+}
+
+function taskInfo(task: {
+    lineId: string;
+    orderId?: string | null;
+    groupName?: string;
+    from: { name?: string; coords?: [number, number] };
+    to: { name?: string; coords?: [number, number] };
+    vehicle?: {
+        plate?: string;
+        carId?: string;
+        cargoWeight?: number;
+        cargoUnit?: string;
+        currentCoords?: [number, number] | null;
+        speedKmh?: number | null;
+    };
+    status?: string;
+    routeLengthKm?: number;
+    speedKmh?: number;
+}) {
+    const currentCoords = task.vehicle?.currentCoords ?? task.from.coords;
+    return {
+        title: task.vehicle?.plate ?? task.lineId,
+        subtitle: `${task.from.name ?? '起点'} -> ${task.to.name ?? '终点'}`,
+        rows: [
+            ['订单', task.orderId ?? '--'],
+            ['货物', cargoLabel(task.vehicle)],
+            ['状态', task.status ?? '--'],
+            ['当前经度', formatNumber(currentCoords?.[0], 6)],
+            ['当前纬度', formatNumber(currentCoords?.[1], 6)],
+            ['时速', `${formatNumber(task.vehicle?.speedKmh ?? task.speedKmh, 1)} km/h`],
+            ['路线长度', `${formatNumber(task.routeLengthKm, 1)} km`],
+        ],
+        lineId: task.lineId,
+        orderId: task.orderId,
+        groupName: task.groupName,
+        vehicle: task.vehicle,
+        status: task.status,
+    };
+}
+
 export function progressOnRoad(road: TownRoadState, worldPos: THREE.Vector3) {
     if (road.samples.length < 2 || road.cumulativeLengths.length !== road.samples.length || road.totalLength <= 0) return 0;
     let nearestDistanceSq = Number.POSITIVE_INFINITY;
@@ -161,13 +240,17 @@ export function ensureOrderLane(road: TownRoadState, orderId: string) {
 
 export function ensureVehicleBar(road: TownRoadState, lane: TownOrderLane, lineId: string, info: Record<string, unknown>) {
     let vehicle = lane.vehicles.get(lineId);
-    if (vehicle) { vehicle.info = { ...vehicle.info, ...info }; return vehicle; }
+    if (vehicle) {
+        vehicle.info = { ...vehicle.info, ...info };
+        vehicle.bar.userData = { ...vehicle.bar.userData, ...vehicle.info };
+        return vehicle;
+    }
     const bar = new THREE.Mesh(
         new THREE.BoxGeometry(0.28, 0.07, 0.1),
         new THREE.MeshBasicMaterial({ color: lane.color, transparent: true, opacity: 0.95, depthWrite: false }),
     );
     bar.renderOrder = 22;
-    bar.userData = { roadId: road.pathKey, lineId, objectType: '车辆进度条' };
+    bar.userData = { roadId: road.pathKey, lineId, objectType: '车辆进度条', ...info };
     road.group.add(bar);
     vehicle = { lineId, orderId: lane.orderId, bar, baseScale: new THREE.Vector3(1, 1, 1), progress: 0, currentCoords: road.currentCoords, info };
     lane.vehicles.set(lineId, vehicle);
@@ -203,6 +286,11 @@ export function updateOrderVisuals(road: TownRoadState, truckLift: number) {
                 material.color.setHex(UNIFIED_COLORS[ci]);
             }
             material.opacity = isLead ? 1.0 : 0.85;
+            vehicle.bar.userData = {
+                ...vehicle.bar.userData,
+                ...vehicle.info,
+                isLeadVehicle: isLead,
+            };
             const baseScale = isLead ? { x: 1.08, y: 1.22, z: 1.08 } : { x: 0.65, y: 0.80, z: 0.65 };
             vehicle.baseScale.set(baseScale.x, baseScale.y, baseScale.z);
             vehicle.bar.scale.copy(vehicle.baseScale);
@@ -215,7 +303,26 @@ export function updateOrderVisuals(road: TownRoadState, truckLift: number) {
 // ============ TownRoad 专用：从 tasks 构建路线 ============
 
 export function buildRouteFromTasks(
-    tasks: Array<{ lineId: string; orderId?: string | null; from: { coords?: [number, number] }; to: { coords?: [number, number] }; [k: string]: unknown }>,
+    tasks: Array<{
+        lineId: string;
+        orderId?: string | null;
+        groupName?: string;
+        from: { name?: string; coords?: [number, number] };
+        to: { name?: string; coords?: [number, number] };
+        coordinates?: [number, number][];
+        vehicle?: {
+            plate?: string;
+            carId?: string;
+            cargoWeight?: number;
+            cargoUnit?: string;
+            currentCoords?: [number, number] | null;
+            speedKmh?: number | null;
+        };
+        status?: string;
+        routeLengthKm?: number;
+        speedKmh?: number;
+        [k: string]: unknown;
+    }>,
     mapPosition: (coords: [number, number], lift: number) => THREE.Vector3 | null,
     scene: THREE.Scene,
     roadLift: number,
@@ -224,7 +331,10 @@ export function buildRouteFromTasks(
     const routeMap = new Map<string, typeof tasks>();
     tasks.forEach(t => {
         if (!t.from.coords || !t.to.coords) return;
-        const k = trackKeyFor(t.from.coords, t.to.coords);
+        const routeCoords = routeCoordsFor(t);
+        if (routeCoords.length < 2) return;
+        const k = routeCoords.map(([lng, lat]) => `${lng.toFixed(4)},${lat.toFixed(4)}`).join('|')
+            || trackKeyFor(t.from.coords, t.to.coords);
         if (!routeMap.has(k)) routeMap.set(k, []);
         routeMap.get(k)!.push(t);
     });
@@ -234,13 +344,13 @@ export function buildRouteFromTasks(
 
     routeMap.forEach((routeTasks, pathKey) => {
         const ref = routeTasks[0];
-        const start = mapPosition(ref.from.coords!, roadLift);
-        const end = mapPosition(ref.to.coords!, roadLift);
-        if (!start || !end) return;
+        const points = routeCoordsFor(ref)
+            .map(coord => mapPosition(coord, roadLift))
+            .filter((point): point is THREE.Vector3 => Boolean(point));
+        if (points.length < 2) return;
 
-        // 直线！不要曲线
-        const pathCurve = makeLinearCurve([start, end]);
-        const tubularSegments = PATH_SAMPLE_COUNT;
+        const pathCurve = makePathCurve(points);
+        const tubularSegments = Math.max(PATH_SAMPLE_COUNT, points.length * 32);
         const radialSegments = 6;
         const samples = pathCurve.getSpacedPoints(tubularSegments);
         const cumulativeLengths: number[] = [0];
@@ -268,7 +378,7 @@ export function buildRouteFromTasks(
             samples, cumulativeLengths,
             totalLength: cumulativeLengths[cumulativeLengths.length - 1] ?? 0,
             tubularSegments, radialSegments,
-            currentCoords: ref.from.coords!,
+            currentCoords: ref.vehicle?.currentCoords ?? ref.from.coords!,
             info: {}, orders: new Map(), lineIds: new Set(),
             renderedOrderCount: 0, isSelected: false,
         };
@@ -280,11 +390,20 @@ export function buildRouteFromTasks(
         orderMap.forEach((orderTasks, orderId) => {
             const lane = ensureOrderLane(road, orderId);
             orderTasks.forEach(task => {
-                const vehicle = ensureVehicleBar(road, lane, task.lineId, task);
-                // 模拟进度
-                const status = (task as Record<string, unknown>).status as string ?? '';
-                vehicle.progress = status.includes('完成') ? 1 : status.includes('装载') ? 0.05 : clamp01(0.15 + Math.random() * 0.7);
-                vehicle.currentCoords = task.from.coords!;
+                const info = taskInfo(task);
+                const vehicle = ensureVehicleBar(road, lane, task.lineId, info);
+                const status = task.status ?? '';
+                const currentCoords = task.vehicle?.currentCoords ?? task.from.coords;
+                const currentPoint = currentCoords ? mapPosition(currentCoords, truckLift) : null;
+                vehicle.progress = status.includes('完成')
+                    ? 1
+                    : status.includes('装载') || status.includes('待装载')
+                        ? 0.03
+                        : currentPoint
+                            ? progressOnRoad(road, currentPoint)
+                            : 0;
+                vehicle.currentCoords = currentCoords ?? task.from.coords!;
+                vehicle.info = info;
             });
         });
         updateOrderVisuals(road, truckLift);

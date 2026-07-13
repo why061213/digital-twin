@@ -20,6 +20,7 @@ const EMPTY_DIFF: Required<TownRoadDiffSummary> = {
     skippedNotRenderable: 0,
     skippedLongHaul: 0,
     deletedOrCancelled: 0,
+    details: {},
 };
 
 function cloneDiff(diff?: TownRoadDiffSummary): Required<TownRoadDiffSummary> {

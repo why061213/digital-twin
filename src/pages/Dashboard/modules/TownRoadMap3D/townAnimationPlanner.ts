@@ -1,7 +1,6 @@
 import type {
     TownAnimationStage,
     TownCandidatePath,
-    TownProvinceEdge,
     TownRoadRenderCommand,
     TownRouteGroup,
     TownTransportOrder,
@@ -82,14 +81,6 @@ export function getTownSceneKey(command: TownRoadRenderCommand) {
     if (command.commandId) return `command-${command.commandId}`;
     const provinces = normalizeRenderProvinces(command).slice().sort().join('_');
     return `scene-${provinces || 'unknown'}`;
-}
-
-function groupOrdersByLineId(orders: TownTransportOrder[]) {
-    const map = new Map<string, TownTransportOrder>();
-    orders.forEach((order) => {
-        if (order.lineId) map.set(order.lineId, order);
-    });
-    return map;
 }
 
 function collectGroupOrderLineIds(group: TownRouteGroup) {
@@ -190,14 +181,6 @@ function collectPathOrderLineIds(path: TownCandidatePath) {
     ]));
 }
 
-function collectEdgeOrderLineIds(edge: TownProvinceEdge) {
-    return Array.from(new Set([
-        ...(edge.orderLineIds ?? []),
-        ...(edge.primaryOrderLineIds ?? []),
-        ...(edge.alongOrderLineIds ?? []),
-    ]));
-}
-
 function buildStageBase(command: TownRoadRenderCommand) {
     const sceneKey = getTownSceneKey(command);
     const version = command.issuedAt ?? command.commandId ?? `${Date.now()}`;
@@ -207,7 +190,6 @@ function buildStageBase(command: TownRoadRenderCommand) {
 export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAnimationStage[] {
     const { sceneKey, version } = buildStageBase(command);
     const orders = normalizeOrders(command).filter((order) => !order.deleted && order.status !== '已取消');
-    const orderByLineId = groupOrdersByLineId(orders);
     const routeGroups = getDisplayRouteGroups(command);
     const stages: TownAnimationStage[] = [];
     const usedIds = new Set<string>();

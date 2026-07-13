@@ -1,9 +1,9 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { createLocalProjection, collectRenderProvinceAdcodes, collectTaskCoords, commandOrders, commandRenderProvinces, featureCoords, isLonLat, loadGeoJsonByRenderCommand } from './geo';
-import { MAP_LIFT, MARKER_LIFT, ROUTE_LIFT, TOWN_ROUTE_CURVE_HEIGHT } from './constants';
-import { buildRouteFromTasks, disposeObject3D as disposeRoadObjects } from './townRouteRenderer';
+import { createLocalProjection, collectRenderProvinceAdcodes, collectTaskCoords, commandOrders, commandRenderProvinces, featureCoords, loadGeoJsonByRenderCommand } from './geo';
+import { MAP_LIFT, ROUTE_LIFT } from './constants';
+import { buildRouteFromTasks } from './townRouteRenderer';
 
 import type { LonLat, TownAnimationStage, TownBoundaryLayers, TownRoadMap3DHandle, TownRoadRenderCommand, TownTransportTask } from './types';
 
@@ -16,6 +16,7 @@ type TownHoverInfo = {
     y: number;
     title: string;
     subtitle: string;
+    status: string;
     rows: Array<[string, string]>;
 };
 
@@ -121,21 +122,6 @@ function disposeObject3D(object: THREE.Object3D) {
             }
         }
     });
-}
-
-function statusTone(status: string) {
-    if (status.includes('完成')) return 0x34d399;
-    if (status.includes('装载')) return 0xfbbf24;
-    if (status.includes('取消')) return 0x94a3b8;
-    return 0x22d3ee;
-}
-
-function hashText(text: string) {
-    let hash = 0;
-    for (let i = 0; i < text.length; i++) {
-        hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
-    }
-    return hash;
 }
 
 function screenPosition(point: THREE.Vector3, camera: THREE.Camera, container: HTMLDivElement) {
@@ -614,6 +600,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                 y: point.y,
                 title: data.title ?? '短途任务',
                 subtitle: data.subtitle ?? data.objectType ?? '',
+                status: data.status ?? '--',
                 rows: data.rows ?? [],
             });
         };
@@ -680,9 +667,14 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                         top: Math.min(Math.max(116, hoverInfo.y - 18), Math.max(116, (containerRef.current?.clientHeight ?? 180) - 12)),
                     }}
                 >
-                    <div className="mb-2 border-b border-white/10 pb-2">
-                        <div className="truncate text-sm font-medium text-cyan-100">{hoverInfo.title}</div>
-                        <div className="mt-0.5 truncate text-[11px] text-slate-400" title={hoverInfo.subtitle}>{hoverInfo.subtitle}</div>
+                    <div className="mb-2 flex items-start justify-between gap-3 border-b border-white/10 pb-2">
+                        <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-cyan-100">{hoverInfo.title}</div>
+                            <div className="mt-0.5 truncate text-[11px] text-slate-400" title={hoverInfo.subtitle}>{hoverInfo.subtitle}</div>
+                        </div>
+                        <span className="shrink-0 rounded border border-emerald-300/25 bg-emerald-400/10 px-1.5 py-0.5 text-[10px] text-emerald-200">
+                            {hoverInfo.status}
+                        </span>
                     </div>
                     <div className="space-y-1.5">
                         {hoverInfo.rows.map(([label, value]) => (
@@ -692,6 +684,8 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                             </div>
                         ))}
                     </div>
+                    <div className="absolute left-1/2 top-full h-4 w-px -translate-x-1/2 bg-cyan-300/45" />
+                    <div className="absolute left-1/2 top-[calc(100%+1rem)] h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-cyan-200 shadow-[0_0_12px_rgba(125,211,252,0.8)]" />
                 </div>
             )}
         </div>
