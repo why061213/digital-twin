@@ -539,7 +539,7 @@ export function createLocalProjection(coords: LonLat[]) {
         return geoMercator().center([104.5, 35]).scale(80).translate([0, 0]);
     }
 
-    const center: LonLat = [(minLng + maxLng) / 2, (minLat + maxLat) / 2];
+    const center: LonLat = [104.5, 35]; // 固定全国中心，保持省份间空间关系
     const deltaDeg = Math.max(maxLng - minLng, maxLat - minLat, 0.08);
     const deltaRad = (deltaDeg * Math.PI) / 180;
     const scale = Math.min(Math.max(76 / deltaRad, 220), 4200);
