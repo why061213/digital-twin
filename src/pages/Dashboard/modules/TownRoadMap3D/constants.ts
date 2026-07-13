@@ -3,4 +3,3 @@ export const DIRECT_CITY_ADCODES = [110000, 120000, 310000, 500000, 710000, 8100
 export const MAP_LIFT = 0;
 export const ROUTE_LIFT = 0.72;
 export const MARKER_LIFT = 1.08;
-export const TOWN_ROUTE_CURVE_HEIGHT = 2.6;

@@ -126,6 +126,70 @@ function routeCoordsFor(task: {
     return [];
 }
 
+function distanceKmBetween(from: [number, number], to: [number, number]) {
+    const earthRadiusKm = 6371.0088;
+    const toRad = (value: number) => value * Math.PI / 180;
+    const lat1 = toRad(from[1]);
+    const lat2 = toRad(to[1]);
+    const dLat = toRad(to[1] - from[1]);
+    const dLng = toRad(to[0] - from[0]);
+    const a = Math.sin(dLat / 2) ** 2
+        + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+    return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function routeLengthKmFor(task: {
+    routeLengthKm?: number;
+    from: { coords?: [number, number] };
+    to: { coords?: [number, number] };
+    coordinates?: [number, number][];
+}) {
+    if (typeof task.routeLengthKm === 'number' && Number.isFinite(task.routeLengthKm) && task.routeLengthKm > 0) {
+        return task.routeLengthKm;
+    }
+
+    const coords = routeCoordsFor(task);
+    let total = 0;
+    for (let i = 1; i < coords.length; i++) {
+        total += distanceKmBetween(coords[i - 1], coords[i]);
+    }
+    return total;
+}
+
+function lonLatAtProgress(routeCoords: [number, number][], progress: number) {
+    if (routeCoords.length === 0) return null;
+    if (routeCoords.length === 1) return routeCoords[0];
+
+    const p = clamp01(progress);
+    const segmentLengths: number[] = [];
+    let total = 0;
+    for (let i = 1; i < routeCoords.length; i++) {
+        const length = distanceKmBetween(routeCoords[i - 1], routeCoords[i]);
+        segmentLengths.push(length);
+        total += length;
+    }
+
+    if (total <= 0) return routeCoords[0];
+    let target = total * p;
+    for (let i = 0; i < segmentLengths.length; i++) {
+        const length = segmentLengths[i];
+        if (target > length) {
+            target -= length;
+            continue;
+        }
+
+        const start = routeCoords[i];
+        const end = routeCoords[i + 1];
+        const localProgress = length > 0 ? target / length : 0;
+        return [
+            start[0] + (end[0] - start[0]) * localProgress,
+            start[1] + (end[1] - start[1]) * localProgress,
+        ] as [number, number];
+    }
+
+    return routeCoords[routeCoords.length - 1];
+}
+
 function formatNumber(value: unknown, digits = 2) {
     return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '--';
 }
@@ -150,10 +214,11 @@ function taskInfo(task: {
         speedKmh?: number | null;
     };
     status?: string;
+    updatedAt?: string;
     routeLengthKm?: number;
     speedKmh?: number;
-}) {
-    const currentCoords = task.vehicle?.currentCoords ?? task.from.coords;
+}, displayCoords?: [number, number] | null) {
+    const currentCoords = displayCoords ?? task.vehicle?.currentCoords ?? task.from.coords;
     return {
         title: task.vehicle?.plate ?? task.lineId,
         subtitle: `${task.from.name ?? '起点'} -> ${task.to.name ?? '终点'}`,
@@ -172,6 +237,46 @@ function taskInfo(task: {
         vehicle: task.vehicle,
         status: task.status,
     };
+}
+
+function predictedProgressForTask(
+    road: TownRoadState,
+    task: {
+        from: { coords?: [number, number] };
+        to: { coords?: [number, number] };
+        coordinates?: [number, number][];
+        vehicle?: { currentCoords?: [number, number] | null; speedKmh?: number | null };
+        status?: string;
+        updatedAt?: string;
+        routeLengthKm?: number;
+        speedKmh?: number;
+    },
+    mapPosition: (coords: [number, number], lift: number) => THREE.Vector3 | null,
+    truckLift: number,
+) {
+    const status = task.status ?? '';
+    if (status.includes('完成')) return 1;
+    if (status.includes('装载') || status.includes('待装载')) return 0.03;
+
+    const currentCoords = task.vehicle?.currentCoords ?? task.from.coords;
+    const currentPoint = currentCoords ? mapPosition(currentCoords, truckLift) : null;
+    const baseProgress = currentPoint ? progressOnRoad(road, currentPoint) : 0;
+    const speedKmh = task.vehicle?.speedKmh ?? task.speedKmh;
+    const updatedAtMs = task.updatedAt ? Date.parse(task.updatedAt) : Number.NaN;
+    const routeLengthKm = routeLengthKmFor(task);
+
+    if (
+        typeof speedKmh !== 'number'
+        || !Number.isFinite(speedKmh)
+        || speedKmh <= 0
+        || !Number.isFinite(updatedAtMs)
+        || routeLengthKm <= 0
+    ) {
+        return baseProgress;
+    }
+
+    const elapsedHours = Math.max(0, (Date.now() - updatedAtMs) / 3600000);
+    return clamp01(baseProgress + (speedKmh * elapsedHours) / routeLengthKm);
 }
 
 export function progressOnRoad(road: TownRoadState, worldPos: THREE.Vector3) {
@@ -319,6 +424,7 @@ export function buildRouteFromTasks(
             speedKmh?: number | null;
         };
         status?: string;
+        updatedAt?: string;
         routeLengthKm?: number;
         speedKmh?: number;
         [k: string]: unknown;
@@ -390,19 +496,12 @@ export function buildRouteFromTasks(
         orderMap.forEach((orderTasks, orderId) => {
             const lane = ensureOrderLane(road, orderId);
             orderTasks.forEach(task => {
-                const info = taskInfo(task);
+                const progress = predictedProgressForTask(road, task, mapPosition, truckLift);
+                const predictedCoords = lonLatAtProgress(routeCoordsFor(task), progress) ?? task.vehicle?.currentCoords ?? task.from.coords;
+                const info = taskInfo(task, predictedCoords);
                 const vehicle = ensureVehicleBar(road, lane, task.lineId, info);
-                const status = task.status ?? '';
-                const currentCoords = task.vehicle?.currentCoords ?? task.from.coords;
-                const currentPoint = currentCoords ? mapPosition(currentCoords, truckLift) : null;
-                vehicle.progress = status.includes('完成')
-                    ? 1
-                    : status.includes('装载') || status.includes('待装载')
-                        ? 0.03
-                        : currentPoint
-                            ? progressOnRoad(road, currentPoint)
-                            : 0;
-                vehicle.currentCoords = currentCoords ?? task.from.coords!;
+                vehicle.progress = progress;
+                vehicle.currentCoords = predictedCoords ?? task.from.coords!;
                 vehicle.info = info;
             });
         });
