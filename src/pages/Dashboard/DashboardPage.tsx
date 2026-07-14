@@ -17,6 +17,7 @@ import { DispatchButtons } from './components/DispatchButtons';
 import { DashboardCenterPanel } from './components/DashboardCenterPanel';
 import { RoadGroupQueue } from './components/RoadGroupQueue';
 import { RoadGroupTabs } from './components/RoadGroupTabs';
+import { Rm2Diagnostics } from './components/Rm2Diagnostics';
 import { ViewButtons } from './components/ViewButtons';
 import {
     dispatchBulkRoutes,
@@ -98,7 +99,9 @@ function DashboardPage() {
         groups: rm2Groups,
         activeGroupId: activeRm2GroupId,
         isLoading: isLoadingRm2Group,
+        diagnostics: rm2Diagnostics,
         loadGroup: loadRm2Group,
+        refreshRm2,
     } = useRm2RoadController({
         roadMapRef: roadMap2Ref,
         view,
@@ -199,6 +202,13 @@ function DashboardPage() {
             onSelectGroup={(groupId) => void loadRm2Group(groupId)}
         />
     );
+    const rm2DiagnosticsPanel = view === 'roadMap2' && (
+        <Rm2Diagnostics
+            diagnostics={rm2Diagnostics}
+            isLoading={isLoadingRm2Group}
+            onRefresh={() => void refreshRm2()}
+        />
+    );
 
     const dispatchControls = view === 'roadMap' && (
         <DispatchButtons
@@ -254,6 +264,7 @@ function DashboardPage() {
                     />
                     {roadGroupQueue}
                     {rm2GroupQueue}
+                    {rm2DiagnosticsPanel}
                     {roadStrategyTabs}
                     {viewButtons}
                     {dispatchControls}

@@ -40,6 +40,15 @@ export type Rm2GroupsResponse = {
     groupSize: number;
     totalRoutes: number;
     groups: Rm2GroupDTO[];
+    diagnostics: Rm2GroupsDiagnostics;
+};
+
+export type Rm2GroupsDiagnostics = {
+    snapshotVersion: string;
+    totalRoutes: number;
+    backendGroupCount: number;
+    acceptedGroupCount: number;
+    rejectedGroups: string[];
 };
 
 export type Rm2GroupRoutesResponse = {
@@ -49,6 +58,7 @@ export type Rm2GroupRoutesResponse = {
     coordinateSystem: string;
     routes: RenderRouteDTO[];
     rejected: unknown[];
+    receivedRouteCount: number;
 };
 
 const CHINA_LNG_MIN = 72;
@@ -77,15 +87,19 @@ export function isValidCoordinates(value: unknown): value is [number, number][] 
     return Array.isArray(value) && value.length >= 2 && value.every(isValidLonLat);
 }
 
+function groupRejectReason(value: unknown): string | null {
+    if (!isRecord(value)) return 'group is not an object';
+    if (typeof value.groupId !== 'string' || value.groupId.length === 0) return 'missing groupId';
+    if (typeof value.groupName !== 'string' || value.groupName.length === 0) return `${value.groupId}: missing groupName`;
+    if (typeof value.index !== 'number' || !Number.isFinite(value.index)) return `${value.groupId}: invalid index`;
+    if (typeof value.count !== 'number' || !Number.isFinite(value.count)) return `${value.groupId}: invalid count`;
+    if (!Array.isArray(value.lineIds) || !value.lineIds.every((lineId) => typeof lineId === 'string')) return `${value.groupId}: invalid lineIds`;
+    if (typeof value.mapKey !== 'string' || value.mapKey.length === 0) return `${value.groupId}: missing mapKey`;
+    return null;
+}
+
 function isRm2Group(value: unknown): value is Rm2GroupDTO {
-    if (!isRecord(value)) return false;
-    return typeof value.groupId === 'string'
-        && typeof value.groupName === 'string'
-        && typeof value.index === 'number'
-        && typeof value.count === 'number'
-        && typeof value.mapKey === 'string'
-        && Array.isArray(value.lineIds)
-        && value.lineIds.every((lineId) => typeof lineId === 'string');
+    return groupRejectReason(value) === null;
 }
 
 function isRenderRoute(value: unknown): value is RenderRouteDTO {
@@ -112,12 +126,28 @@ export async function fetchRm2Groups(signal?: AbortSignal): Promise<Rm2GroupsRes
         throw new Error('Invalid RM2 groups response');
     }
 
+    const snapshotVersion = typeof data.snapshotVersion === 'string' ? data.snapshotVersion : '';
+    const totalRoutes = typeof data.totalRoutes === 'number' ? data.totalRoutes : 0;
+    const rejectedGroups = data.groups
+        .map(groupRejectReason)
+        .filter((reason): reason is string => reason !== null);
+    const groups = data.groups.filter(isRm2Group);
+    const diagnostics = {
+        snapshotVersion,
+        totalRoutes,
+        backendGroupCount: data.groups.length,
+        acceptedGroupCount: groups.length,
+        rejectedGroups,
+    };
+    console.info('[RM2 groups]', diagnostics);
+
     return {
-        snapshotVersion: typeof data.snapshotVersion === 'string' ? data.snapshotVersion : '',
+        snapshotVersion,
         scope: 'rm2',
         groupSize: typeof data.groupSize === 'number' ? data.groupSize : 12,
-        totalRoutes: typeof data.totalRoutes === 'number' ? data.totalRoutes : 0,
-        groups: data.groups.filter(isRm2Group),
+        totalRoutes,
+        groups,
+        diagnostics,
     };
 }
 
@@ -135,6 +165,7 @@ export async function fetchRm2GroupRoutes(groupId: string, signal?: AbortSignal)
         coordinateSystem: typeof data.coordinateSystem === 'string' ? data.coordinateSystem : 'GCJ02',
         routes: data.routes.filter(isRenderRoute),
         rejected: [...(Array.isArray(data.rejected) ? data.rejected : []), ...Array(invalidCount).fill('client-invalid-route')],
+        receivedRouteCount: data.routes.length,
     };
 }
 
