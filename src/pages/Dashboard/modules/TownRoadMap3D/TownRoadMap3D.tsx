@@ -144,11 +144,13 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
     const renderedRoadsRef = useRef<TownRoadState[]>([]);
     const [hoverInfo, setHoverInfo] = useState<TownHoverInfo | null>(null);
 
-    /** GeoJSON 缓存：相同省份组合不重复请求行政区划数据。key = mapKey */
-    const geoJsonCacheRef = useRef<Map<string, { geoJson: TownGeoFeatureCollection; projection: ReturnType<typeof createLocalProjection>; points: THREE.Vector3[] }>>(new Map());
+    /** 地图数据缓存：只缓存 GeoJSON 数据和 projection，不缓存 Three.js 对象。key = mapKey */
+    const mapDataCacheRef = useRef<Map<string, { geoJson: TownGeoFeatureCollection; boundaryFeatures: TownBoundaryLayers; projection: ReturnType<typeof createLocalProjection> }>>(new Map());
     /** 已 dispose 标记，防止重复 dispose */
     const disposedMaterialsRef = useRef<WeakSet<THREE.Material>>(new WeakSet());
     const disposedGeometriesRef = useRef<WeakSet<THREE.BufferGeometry>>(new WeakSet());
+    /** 车辆最新位置跨阶段持久化：key = lineId */
+    const latestPositionByLineId = useRef<Map<string, { position: LonLat; progress: number; timestamp: number; pathSignature: string }>>(new Map());
 
     const safeDisposeObject3D = useCallback((object: THREE.Object3D) => {
         object.traverse((child) => {
@@ -409,76 +411,112 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
             const targetProvinces = commandRenderProvinces(command);
 
             let projection = projectionRef.current;
-            let renderedMapPoints = renderedMapPointsRef.current;
             const shouldReloadMap = renderedMapKeyRef.current !== nextMapKey || !projection;
+
+            // ---------- 计算 primary/along 视觉区分标记 ----------
+            const routeGroups = command.displayRouteGroups ?? command.routeGroups ?? [];
+            const primaryLineIdSet = new Set(routeGroups.flatMap((g) => g.primaryOrderLineIds ?? []));
+            const alongLineIdSet = new Set(routeGroups.flatMap((g) => g.alongOrderLineIds ?? []));
+            const styledTasks: Array<TownTransportTask & { _townVisualStyle: 'primary' | 'along' }> = validTasks.map((task) => ({
+                ...task,
+                _townVisualStyle: (primaryLineIdSet.has(task.lineId) ? 'primary' : alongLineIdSet.has(task.lineId) ? 'along' : 'primary') as 'primary' | 'along',
+            }));
 
             if (shouldReloadMap) {
                 inFlightMapKeyRef.current = nextMapKey;
 
                 try {
-                    // 检查 GeoJSON 缓存：相同省份+renderLevel 组合复用已有数据
-                    const cached = geoJsonCacheRef.current.get(nextMapKey);
+                    // Step 1: 获取地图数据（缓存优先，未命中则请求）
+                    const cached = mapDataCacheRef.current.get(nextMapKey);
                     let geoJson: TownGeoFeatureCollection;
                     let boundaryFeatures: TownBoundaryLayers;
 
                     if (cached) {
                         geoJson = cached.geoJson;
-                        boundaryFeatures = geoJson.boundaryFeatures ?? {};
+                        boundaryFeatures = cached.boundaryFeatures;
                         projection = cached.projection;
-                        renderedMapPoints = cached.points;
-                        console.info('[TownRoadMap3D] using cached GeoJSON', {
+                        console.info('[TownRoadMap3D] using cached GeoJSON data', {
                             nextMapKey,
-                            cacheSize: geoJsonCacheRef.current.size,
+                            cacheSize: mapDataCacheRef.current.size,
+                            fillFeatureCount: geoJson.features?.length ?? 0,
                         });
                     } else {
                         geoJson = targetProvinces.length > 0
                             ? await loadGeoJsonByRenderCommand(command)
                             : { type: 'FeatureCollection', features: [], boundaryFeatures: {} };
-                        if (isStale()) return;
+                        if (isStale()) { inFlightMapKeyRef.current = null; return; }
 
                         boundaryFeatures = geoJson.boundaryFeatures ?? {};
                         const boundaryFeatureList = Object.values(boundaryFeatures).flat();
                         const featurePoints = [...(geoJson.features ?? []), ...boundaryFeatureList].flatMap(featureCoords);
                         projection = createLocalProjection([...taskCoords, ...featurePoints]);
-                        if (isStale()) return;
-                        clearRenderedData();
-                        if (isStale()) return;
+                        if (isStale()) { inFlightMapKeyRef.current = null; return; }
 
-                        renderedMapPoints = [];
-                        if (geoJson.features?.length) {
-                            const renderedMap = renderMapFeatures(geoJson.features, projection, boundaryFeatures);
-                            if (isStale()) return;
-                            mapGroupRef.current = renderedMap.group;
-                            renderedMapPoints = renderedMap.points;
-                            transformGroupRef.current?.add(renderedMap.group);
-                        }
-
-                        // 缓存到组件级缓存
-                        if (geoJson.features?.length) {
-                            geoJsonCacheRef.current.set(nextMapKey, {
-                                geoJson,
-                                projection,
-                                points: renderedMapPoints,
-                            });
-                            console.info('[TownRoadMap3D] GeoJSON cached', {
-                                nextMapKey,
-                                cacheSize: geoJsonCacheRef.current.size,
-                            });
-                        }
+                        // 缓存地图数据（只缓存原始数据，不缓存 Three.js 对象）
+                        mapDataCacheRef.current.set(nextMapKey, {
+                            geoJson,
+                            boundaryFeatures,
+                            projection,
+                        });
+                        console.info('[TownRoadMap3D] GeoJSON data cached', {
+                            nextMapKey,
+                            cacheSize: mapDataCacheRef.current.size,
+                            fillFeatureCount: geoJson.features?.length ?? 0,
+                        });
                     }
 
-                    if (isStale()) return;
+                    if (isStale()) { inFlightMapKeyRef.current = null; return; }
+
+                    // Step 2: 无条件创建新地图 Group（即使 features 为空，boundaryFeatures 也可能存在）
+                    const features = geoJson.features ?? [];
+                    const renderedMap = renderMapFeatures(features, projection, boundaryFeatures);
+
+                    if (isStale()) { inFlightMapKeyRef.current = null; return; }
+
+                    // Step 3: 原子替换——先准备好新 Group，再一次性清理旧数据并挂载
+                    clearRenderedData();
+                    if (isStale()) { inFlightMapKeyRef.current = null; return; }
+
+                    mapGroupRef.current = renderedMap.group;
+                    transformGroupRef.current?.add(renderedMap.group);
                     projectionRef.current = projection;
                     renderedMapKeyRef.current = nextMapKey;
-                    renderedMapPointsRef.current = renderedMapPoints;
+                    renderedMapPointsRef.current = renderedMap.points;
+
+                    // 地图场景诊断日志
+                    const boundaryProvinceCount = boundaryFeatures.province?.length ?? 0;
+                    const boundaryCityCount = boundaryFeatures.city?.length ?? 0;
+                    const boundaryDistrictCount = boundaryFeatures.district?.length ?? 0;
+                    const mapChildren = mapGroupRef.current?.children.length ?? 0;
+                    const mapPointCount = renderedMap.points.length;
+                    const cacheHit = Boolean(cached);
+                    const cancelled = isStale();
+
                     console.info('[TownRoadMap3D] map features rendered', {
                         nextMapKey,
-                        featureCount: geoJson.features?.length ?? 0,
-                        boundaryProvinceCount: boundaryFeatures.province?.length ?? 0,
-                        boundaryCityCount: boundaryFeatures.city?.length ?? 0,
-                        mapChildren: mapGroupRef.current?.children.length ?? 0,
-                        fromCache: Boolean(cached),
+                        cacheHit,
+                        fillFeatureCount: features.length,
+                        boundaryProvinceCount,
+                        boundaryCityCount,
+                        boundaryDistrictCount,
+                        mapChildren,
+                        mapPointCount,
+                        stale: cancelled,
                     });
+
+                    if (mapChildren === 0) {
+                        console.error('[TownRoadMap3D] map group is empty after render!', {
+                            nextMapKey,
+                            cacheHit,
+                            fillFeatureCount: features.length,
+                            hasProvince: boundaryProvinceCount > 0,
+                            hasCity: boundaryCityCount > 0,
+                            hasDistrict: boundaryDistrictCount > 0,
+                            boundaryKeys: Object.keys(boundaryFeatures).filter((k) => (boundaryFeatures as Record<string, unknown[]>)[k]?.length > 0),
+                        });
+                    }
+                } catch (error) {
+                    console.error('[TownRoadMap3D] map render failed', { nextMapKey, error });
                 } finally {
                     if (inFlightMapKeyRef.current === nextMapKey) {
                         inFlightMapKeyRef.current = null;
@@ -494,26 +532,89 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
             if (isStale()) return;
             if (!projection) return;
 
-            const renderedRoutes = renderRoutes(validTasks, projection);
+            // 注入跨阶段持久化的最新车辆位置到 styledTasks
+            const positionStore = latestPositionByLineId.current;
+            if (positionStore.size > 0) {
+                styledTasks.forEach((task) => {
+                    const latest = positionStore.get(task.lineId);
+                    if (!latest || !task.vehicle) return;
+                    // 只注入比 task 中更晚的位置
+                    if (latest.timestamp > new Date(task.updatedAt ?? 0).getTime()) {
+                        (task as Record<string, unknown>).vehicle = {
+                            ...task.vehicle,
+                            currentCoords: latest.position,
+                        };
+                        (task as Record<string, unknown>).updatedAt = new Date(latest.timestamp).toISOString();
+                    }
+                });
+            }
+
+            const renderedRoutes = renderRoutes(styledTasks, projection);
             if (isStale()) return;
             routesGroupRef.current = renderedRoutes.group;
             transformGroupRef.current?.add(renderedRoutes.group);
+
+            const routeCount = renderedRoutes.group.children.length;
             console.info('[TownRoadMap3D] route features rendered', {
                 nextMapKey,
-                taskCount: validTasks.length,
-                routeChildren: renderedRoutes.group.children.length,
+                taskCount: styledTasks.length,
+                primaryCount: styledTasks.filter((t) => t._townVisualStyle === 'primary').length,
+                alongCount: styledTasks.filter((t) => t._townVisualStyle === 'along').length,
+                routeCount,
             });
 
-            const taskFocusPoints = taskCoords
-                .map((coord) => mapPositionFactory(projection)(coord, 0))
-                .filter((point): point is THREE.Vector3 => Boolean(point));
-            const focusSource = renderedRoutes.points.length > 0
-                ? renderedRoutes.points
-                : taskFocusPoints.length > 0
-                    ? taskFocusPoints
-                    : renderedMapPoints;
+            // ---------- 相机 focus：地图点 + 线路点并集，防止地图被排除在镜头外 ----------
+            const renderedMapPoints = renderedMapPointsRef.current;
+            const routePoints = renderedRoutes.points;
+
+            const mapBox = renderedMapPoints.length > 0
+                ? new THREE.Box3().setFromPoints(renderedMapPoints)
+                : new THREE.Box3();
+            const routeBox = routePoints.length > 0
+                ? new THREE.Box3().setFromPoints(routePoints)
+                : new THREE.Box3();
+
+            let focusSource: THREE.Vector3[];
+            if (mapBox.isEmpty() && routeBox.isEmpty()) {
+                focusSource = [];
+            } else if (mapBox.isEmpty()) {
+                focusSource = routePoints;
+            } else if (routeBox.isEmpty()) {
+                focusSource = renderedMapPoints;
+            } else {
+                const mapSpan = Math.max(
+                    mapBox.max.x - mapBox.min.x,
+                    mapBox.max.z - mapBox.min.z,
+                );
+                const routeSpan = Math.max(
+                    routeBox.max.x - routeBox.min.x,
+                    routeBox.max.z - routeBox.min.z,
+                );
+                // 线路跨度超过地图 3 倍时，以地图为主，避免异常长线路把地图缩成一个点
+                if (routeSpan > mapSpan * 3 && mapSpan > 0) {
+                    focusSource = renderedMapPoints;
+                    console.info('[TownRoadMap3D] route span too large, using map-only focus', {
+                        mapSpan: mapSpan.toFixed(1),
+                        routeSpan: routeSpan.toFixed(1),
+                        ratio: (routeSpan / mapSpan).toFixed(2),
+                    });
+                } else {
+                    focusSource = [...renderedMapPoints, ...routePoints];
+                }
+            }
+
             if (isStale()) return;
-            focusPoints(focusSource, nextMapKey);
+            if (focusSource.length > 0) {
+                const mapPointCount = renderedMapPoints.length;
+                const routePointCount = routePoints.length;
+                console.info('[TownRoadMap3D] camera focus', {
+                    nextMapKey,
+                    mapPointCount,
+                    routePointCount,
+                    focusPointCount: focusSource.length,
+                });
+                focusPoints(focusSource, nextMapKey);
+            }
 
             const pending = pendingCommandForMapKeyRef.current;
             if (pending && commandMapKey(pending) === nextMapKey && pending !== command) {
@@ -565,35 +666,91 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
         const projected = mapPositionFactory(projection)(position, ROUTE_LIFT + 0.28);
         if (!projected) return;
 
-        for (const road of renderedRoadsRef.current) {
-            if (!road.lineIds.has(lineId)) continue;
+        const now = Date.now();
+        const timestamp = meta?.updatedAt ? new Date(meta.updatedAt).getTime() : now;
 
-            for (const lane of road.orders.values()) {
-                const vehicle = lane.vehicles.get(lineId);
-                if (!vehicle) continue;
+        const found = (() => {
+            for (const road of renderedRoadsRef.current) {
+                if (!road.lineIds.has(lineId)) continue;
 
-                const progress = progressOnRoad(road, projected);
-                vehicle.progress = progress;
-                vehicle.currentCoords = position;
-                vehicle.info = {
-                    ...vehicle.info,
-                    status: meta?.status ?? vehicle.info.status,
-                    rows: Array.isArray(vehicle.info.rows)
-                        ? (vehicle.info.rows as Array<[string, string]>).map(([label, value]) => {
-                            if (label === '当前经度') return [label, position[0].toFixed(6)];
-                            if (label === '当前纬度') return [label, position[1].toFixed(6)];
-                            if (label === '时速' && typeof meta?.speedKmh === 'number') return [label, `${meta.speedKmh.toFixed(1)} km/h`];
-                            if (label === '状态' && meta?.status) return [label, meta.status];
-                            return [label, value];
-                        })
-                        : vehicle.info.rows,
-                    realtimeUpdatedAt: meta?.updatedAt ?? new Date().toISOString(),
-                    speedKmh: meta?.speedKmh,
-                    currentCoords: position,
-                };
-                updateOrderVisuals(road, ROUTE_LIFT + 0.28);
-                return;
+                for (const lane of road.orders.values()) {
+                    const vehicle = lane.vehicles.get(lineId);
+                    if (!vehicle) continue;
+
+                    const progress = progressOnRoad(road, projected);
+
+                    // 进度单调性检查：同一路径签名下进度不应明显倒退
+                    const pathSignature = road.pathKey;
+                    const latest = latestPositionByLineId.current.get(lineId);
+                    if (latest && latest.pathSignature === pathSignature && progress < latest.progress - 0.05) {
+                        console.warn('[TownRoadMap3D] progress regression detected', {
+                            lineId,
+                            oldProgress: latest.progress.toFixed(4),
+                            newProgress: progress.toFixed(4),
+                            pathSignature,
+                        });
+                    }
+
+                    // 距离诊断：车辆点到线路的最近距离过大时输出警告
+                    const nearestDist = Math.sqrt(
+                        road.samples.reduce((minDist, sample) => {
+                            const dx = projected.x - sample.x;
+                            const dz = projected.z - sample.z;
+                            const d = dx * dx + dz * dz;
+                            return d < minDist ? d : minDist;
+                        }, Number.POSITIVE_INFINITY)
+                    );
+                    if (nearestDist > 25) {
+                        console.warn('[TownRoadMap3D] vehicle position far from route', {
+                            lineId,
+                            nearestDist: Math.sqrt(nearestDist).toFixed(2),
+                            position,
+                            pathSignature,
+                        });
+                    }
+
+                    vehicle.progress = progress;
+                    vehicle.currentCoords = position;
+                    vehicle.info = {
+                        ...vehicle.info,
+                        status: meta?.status ?? vehicle.info.status,
+                        rows: Array.isArray(vehicle.info.rows)
+                            ? (vehicle.info.rows as Array<[string, string]>).map(([label, value]) => {
+                                if (label === '当前经度') return [label, position[0].toFixed(6)];
+                                if (label === '当前纬度') return [label, position[1].toFixed(6)];
+                                if (label === '时速' && typeof meta?.speedKmh === 'number') return [label, `${meta.speedKmh.toFixed(1)} km/h`];
+                                if (label === '状态' && meta?.status) return [label, meta.status];
+                                return [label, value];
+                            })
+                            : vehicle.info.rows,
+                        realtimeUpdatedAt: meta?.updatedAt ?? new Date().toISOString(),
+                        speedKmh: meta?.speedKmh,
+                        currentCoords: position,
+                    };
+                    updateOrderVisuals(road, ROUTE_LIFT + 0.28);
+
+                    // 持久化到跨阶段存储
+                    latestPositionByLineId.current.set(lineId, {
+                        position,
+                        progress,
+                        timestamp,
+                        pathSignature,
+                    });
+
+                    return true;
+                }
             }
+            return false;
+        })();
+
+        // 即使当前没有匹配的 road（线路尚未渲染），仍然持久化位置，供后续渲染使用
+        if (!found) {
+            latestPositionByLineId.current.set(lineId, {
+                position,
+                progress: 0,
+                timestamp,
+                pathSignature: '',
+            });
         }
     }, [mapPositionFactory]);
     const startAnimationStage = useCallback((stage: TownAnimationStage) => {
@@ -654,7 +811,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                 renderRunId: renderRunRef.current,
                 mapChildren: mapGroupRef.current?.children.length,
                 routeChildren: routesGroupRef.current?.children.length,
-                geoJsonCacheSize: geoJsonCacheRef.current.size,
+                geoJsonCacheSize: mapDataCacheRef.current.size,
                 memory: memoryInfo ? {
                     geometries: memoryInfo.geometries,
                     textures: memoryInfo.textures,

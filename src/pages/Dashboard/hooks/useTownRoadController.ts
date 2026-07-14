@@ -60,7 +60,8 @@ function getRenderKey(provinces: string[]) {
 }
 
 function isDeletedTownOrder(order: TownTransportOrder) {
-    return Boolean(order.deleted) || order.status === '已取消';
+    const status = (order.status ?? '').trim();
+    return Boolean(order.deleted) || status === '已取消';
 }
 
 function mergeOrders(
@@ -235,6 +236,8 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
     const suppressTownWsUntilRef = useRef(0);
     const townPositionRequestsRef = useRef<Set<string>>(new Set());
     const townNextPositionQueryAtRef = useRef<Map<string, number>>(new Map());
+    /** 按 lineId 追踪最近已知位置和路径签名，防止进度倒退 */
+    const latestProgressByLineId = useRef<Map<string, { coords: [number, number]; updatedAt: string; pathKey?: string }>>(new Map());
     const animationQueueRef = useRef(new CircularAnimationQueue<TownAnimationStage>());
     const animationTimerRef = useRef<number | null>(null);
     const animationRunningRef = useRef(false);
@@ -362,6 +365,22 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
             const newCoords = latest.vehicle.currentCoords;
             const oldSpeed = order.vehicle?.speedKmh;
             const newSpeed = latest.vehicle.speedKmh;
+
+            // 进度单调性：更新时间更旧的数据不注入
+            const prevProgress = latestProgressByLineId.current.get(order.lineId);
+            const latestTime = latest.updatedAt ? new Date(latest.updatedAt).getTime() : 0;
+            const prevTime = prevProgress?.updatedAt ? new Date(prevProgress.updatedAt).getTime() : 0;
+
+            if (prevProgress && latestTime <= prevTime) {
+                return order;
+            }
+
+            // 更新追踪
+            latestProgressByLineId.current.set(order.lineId, {
+                coords: newCoords,
+                updatedAt: latest.updatedAt ?? new Date().toISOString(),
+            });
+
             const hasChanged = (
                 (oldCoords?.[0] !== newCoords?.[0] || oldCoords?.[1] !== newCoords?.[1]) ||
                 (oldSpeed !== newSpeed) ||
@@ -419,6 +438,17 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         const commandRenderProvinces = command.renderProvinces ?? [];
         const commandRenderKey = `${command.renderLevel}:${commandRenderProvinces.slice().sort().join('|')}`;
 
+        // 阶段诊断日志
+        const stageOrders = command.orders ?? command.tasks ?? [];
+        const routeGroups = command.routeGroups ?? [];
+        const requestedLineIds = stage.payload.orderLineIds ?? [];
+        const stageLineIdSet = new Set(requestedLineIds);
+        const primaryCount = routeGroups.reduce((sum, g) => sum + (g.primaryOrderLineIds?.length ?? 0), 0);
+        const alongCount = routeGroups.reduce((sum, g) => sum + (g.alongOrderLineIds?.length ?? 0), 0);
+        const matchedLineIds = stageOrders.filter((o) => stageLineIdSet.has(o.lineId)).map((o) => o.lineId);
+        const missingLineIds = requestedLineIds.filter((id) => !stageOrders.some((o) => o.lineId === id));
+        const vehicleCount = stageOrders.filter((o) => o.vehicle?.currentCoords).length;
+
         townLog('info', 'current animation stage', {
             reason,
             stageId: stage.id,
@@ -429,6 +459,14 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
             renderProvinces,
             status: stage.playbackStatus,
             commandRenderKey,
+            primaryCount,
+            alongCount,
+            requestedLineIdsCount: requestedLineIds.length,
+            matchedLineIdsCount: matchedLineIds.length,
+            missingLineIdsCount: missingLineIds.length,
+            routeCount: routeGroups.length,
+            vehicleCount,
+            orderCount: stageOrders.length,
         });
 
         townLog('info', 'stage render command built', {
@@ -437,7 +475,7 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
             renderLevel: command.renderLevel,
             renderProvinces: commandRenderProvinces,
             renderKey: commandRenderKey,
-            orderCount: command.orders?.length ?? command.tasks?.length ?? 0,
+            orderCount: stageOrders.length,
         });
 
         if (activeRenderKeyRef.current === renderKey) {
@@ -536,7 +574,9 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
     const handleTownTruckPosition = useCallback((message: TruckPositionMessage, forceCalibration = false) => {
         if (!message?.lineId || !Array.isArray(message.position) || message.position.length < 2) return;
         const existing = orderMapRef.current.get(message.lineId);
-        if (!existing || existing.deleted || existing.status === '已取消' || existing.status === '已完成') return;
+        if (!existing || existing.deleted) return;
+        const status = (existing.status ?? '').trim();
+        if (status === '已取消' || status === '已完成') return;
 
         const updatedAt = new Date().toISOString();
         const nextOrder: TownTransportOrder = {
@@ -625,7 +665,9 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         const timer = window.setInterval(() => {
             const now = performance.now();
             orderMapRef.current.forEach((order) => {
-                if (!order.lineId || order.deleted || order.status !== '运输中') return;
+                if (!order.lineId || order.deleted) return;
+                const status = (order.status ?? '').trim();
+                if (status !== '运输中' && !status.includes('运输')) return;
                 const nextAt = townNextPositionQueryAtRef.current.get(order.lineId) ?? 0;
                 if (now < nextAt || townPositionRequestsRef.current.has(order.lineId)) return;
 

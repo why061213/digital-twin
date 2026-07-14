@@ -253,6 +253,8 @@ export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAn
             label: group.groupName ?? `${group.fromProvinceName ?? ''} -> ${group.toProvinceName ?? ''}`.trim(),
             fromProvinceKey: group.fromProvinceKey,
             toProvinceKey: group.toProvinceKey,
+            primaryCount: (group.primaryOrderLineIds ?? []).length,
+            alongCount: (group.alongOrderLineIds ?? []).length,
             primaryOrderLineIds: group.primaryOrderLineIds ?? [],
             alongOrderLineIds: group.alongOrderLineIds ?? [],
             allOrderLineIds: groupOrderLineIds,

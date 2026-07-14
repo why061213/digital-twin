@@ -453,6 +453,10 @@ export function buildRouteFromTasks(
             .filter((point): point is THREE.Vector3 => Boolean(point));
         if (points.length < 2) return;
 
+        // 判断整条路线的视觉层级：如有任一 primary 任务则按 primary 显示，全 along 则降级
+        const hasPrimary = routeTasks.some((t) => (t as Record<string, unknown>)._townVisualStyle === 'primary');
+        const isAlongOnly = routeTasks.length > 0 && routeTasks.every((t) => (t as Record<string, unknown>)._townVisualStyle === 'along');
+
         const pathCurve = makePathCurve(points);
         const tubularSegments = Math.max(PATH_SAMPLE_COUNT, points.length * 32);
         const radialSegments = 6;
@@ -460,12 +464,15 @@ export function buildRouteFromTasks(
         const cumulativeLengths: number[] = [0];
         for (let i = 1; i < samples.length; i++) cumulativeLengths[i] = cumulativeLengths[i - 1] + samples[i - 1].distanceTo(samples[i]);
 
+        // along 路线：更细、更透明，降低视觉权重
+        const baseRadius = isAlongOnly ? 0.045 : 0.08;
+        const grayOpacity = isAlongOnly ? 0.22 : 0.45;
         const grayTube = new THREE.Mesh(
-            new THREE.TubeGeometry(pathCurve, tubularSegments, 0.08, radialSegments, false),
-            new THREE.MeshBasicMaterial({ color: 0x6b7280, transparent: true, opacity: 0.45, depthWrite: false }),
+            new THREE.TubeGeometry(pathCurve, tubularSegments, baseRadius, radialSegments, false),
+            new THREE.MeshBasicMaterial({ color: 0x6b7280, transparent: true, opacity: grayOpacity, depthWrite: false }),
         );
-        grayTube.renderOrder = 2;
-        grayTube.userData = { roadId: pathKey, objectType: '共享路线' };
+        grayTube.renderOrder = isAlongOnly ? 1 : 2;
+        grayTube.userData = { roadId: pathKey, objectType: isAlongOnly ? '吸收路线' : '共享路线', visualStyle: isAlongOnly ? 'along' : 'primary' };
 
         const selectionTube = new THREE.Mesh(
             new THREE.TubeGeometry(pathCurve, tubularSegments, 0.17, radialSegments, false),
