@@ -34,6 +34,53 @@ export async function fetchTruckPosition(lineId: string): Promise<TruckPositionM
     return await response.json() as TruckPositionMessage;
 }
 
+/**
+ * 批量查询车辆位置（调用后端缓存接口，不穿透外部服务）。
+ */
+export async function fetchTruckPositions(
+    lineIds: string[],
+    options?: { signal?: AbortSignal; since?: string },
+): Promise<BatchPositionResponse> {
+    const deduped = [...new Set(lineIds.filter(Boolean))];
+    if (deduped.length === 0) {
+        return { serverTime: new Date().toISOString(), positions: [], missingLineIds: [], staleLineIds: [] };
+    }
+
+    const body: Record<string, unknown> = { lineIds: deduped };
+    if (options?.since) body.since = options.since;
+
+    const response = await fetch(`${API_BASE_URL}/road/vehicles/positions/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: options?.signal,
+    });
+    if (!response.ok) throw new Error(`Batch position request failed: ${response.status}`);
+
+    return await response.json() as BatchPositionResponse;
+}
+
+export interface BatchPositionResponse {
+    serverTime: string;
+    cacheAgeMs?: number;
+    positions: BatchPositionItem[];
+    missingLineIds: string[];
+    staleLineIds: string[];
+}
+
+export interface BatchPositionItem {
+    lineId: string;
+    type: string;
+    position: [number, number];
+    speedKmh: number;
+    status?: string;
+    source?: string;
+    stale?: boolean;
+    fetchedAt?: string;
+    vehicleId?: string;
+    progress?: number;
+}
+
 export async function dispatchRoute(): Promise<RoadPathMessage> {
     const response = await fetch(`${API_BASE_URL}/road/dispatch`, { method: 'POST' });
     if (!response.ok) throw new Error(`Dispatch failed: ${response.status}`);
