@@ -190,7 +190,31 @@ function buildStageBase(command: TownRoadRenderCommand) {
 export function buildTownAnimationStages(command: TownRoadRenderCommand): TownAnimationStage[] {
     const { sceneKey, version } = buildStageBase(command);
     const orders = normalizeOrders(command).filter((order) => !order.deleted && order.status !== '已取消');
-    const routeGroups = getDisplayRouteGroups(command);
+    const rawRouteGroups = getDisplayRouteGroups(command);
+
+    // 确定性排序：跨省 group 优先，同省 group 放在最后
+    // 不修改后端传来的订单归属、primaryOrderLineIds、alongOrderLineIds
+    const routeGroups = [...rawRouteGroups].sort((a, b) => {
+        const aCrossProvince = a.fromProvinceKey !== a.toProvinceKey ? 0 : 1;
+        const bCrossProvince = b.fromProvinceKey !== b.toProvinceKey ? 0 : 1;
+        if (aCrossProvince !== bCrossProvince) return aCrossProvince - bCrossProvince;
+        // 同类型内按 groupId 稳定性排序
+        return (a.groupId ?? '').localeCompare(b.groupId ?? '');
+    });
+
+    // 诊断：如果存在同省 group，明确告知这是后端省级 group 粒度
+    const sameProvinceGroups = routeGroups.filter((g) => g.fromProvinceKey === g.toProvinceKey);
+    if (sameProvinceGroups.length > 0) {
+        console.info('[TownRoadPlanner] same-province groups detected (backend granularity, not frontend split)', {
+            sceneKey,
+            commandId: command.commandId,
+            sameProvinceCount: sameProvinceGroups.length,
+            sameProvinceGroupIds: sameProvinceGroups.map((g) => g.groupId),
+            sameProvinceLabels: sameProvinceGroups.map((g) => g.groupName ?? `${g.fromProvinceName ?? ''} → ${g.toProvinceName ?? ''}`),
+            note: '这些同省 group 是后端按省级粒度分组的，前端不做拆分',
+        });
+    }
+
     const stages: TownAnimationStage[] = [];
     const usedIds = new Set<string>();
 

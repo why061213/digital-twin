@@ -345,10 +345,77 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         return buildAnimationStageRenderCommand(townCommand, currentRenderableStage);
     }, [currentRenderableStage, townCommand]);
 
+    /** 将 orderMapRef 中最新的车辆坐标/进度回写到 command，确保 stage 切换不丢失位置。 */
+    const injectLatestOrderPositions = useCallback((command: TownRoadRenderCommand): TownRoadRenderCommand => {
+        const orderMap = orderMapRef.current;
+        if (orderMap.size === 0) return command;
+
+        const sourceOrders = commandOrders(command);
+        if (sourceOrders.length === 0) return command;
+
+        let patchedCount = 0;
+        const patchedOrders = sourceOrders.map((order) => {
+            const latest = orderMap.get(order.lineId);
+            if (!latest || !latest.vehicle?.currentCoords) return order;
+
+            const oldCoords = order.vehicle?.currentCoords;
+            const newCoords = latest.vehicle.currentCoords;
+            const oldSpeed = order.vehicle?.speedKmh;
+            const newSpeed = latest.vehicle.speedKmh;
+            const hasChanged = (
+                (oldCoords?.[0] !== newCoords?.[0] || oldCoords?.[1] !== newCoords?.[1]) ||
+                (oldSpeed !== newSpeed) ||
+                (order.updatedAt !== latest.updatedAt)
+            );
+
+            if (!hasChanged) return order;
+
+            patchedCount += 1;
+            townLog('debug', 'inject latest order position', {
+                lineId: order.lineId,
+                oldCoords,
+                newCoords,
+                oldSpeed,
+                newSpeed,
+                oldUpdatedAt: order.updatedAt,
+                newUpdatedAt: latest.updatedAt,
+                progress: latest.vehicle.currentCoords ? 'has-position' : 'no-position',
+            });
+
+            return {
+                ...order,
+                updatedAt: latest.updatedAt ?? order.updatedAt,
+                vehicle: {
+                    ...order.vehicle,
+                    ...latest.vehicle,
+                    currentCoords: latest.vehicle.currentCoords,
+                    speedKmh: latest.vehicle.speedKmh,
+                },
+            };
+        });
+
+        if (patchedCount > 0) {
+            townLog('info', 'injected latest positions into stage command', {
+                stageId: 'pre-sync',
+                patchedCount,
+                totalOrders: sourceOrders.length,
+            });
+        }
+
+        return {
+            ...command,
+            orders: patchedOrders,
+            tasks: patchedOrders,
+        };
+    }, []);
+
     const syncTownMapWithStage = useCallback((stage: TownAnimationStage, reason: string) => {
         const renderProvinces = stage.payload.renderProvinces ?? [];
         const renderKey = getRenderKey(renderProvinces);
-        const command = buildAnimationStageRenderCommand(townCommand, stage);
+
+        // 注入 orderMapRef 中最新的车辆位置，避免 stage 切换后车辆回到起点
+        const patchedCommand = injectLatestOrderPositions(townCommand);
+        const command = buildAnimationStageRenderCommand(patchedCommand, stage);
         const commandRenderProvinces = command.renderProvinces ?? [];
         const commandRenderKey = `${command.renderLevel}:${commandRenderProvinces.slice().sort().join('|')}`;
 
@@ -361,6 +428,7 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
             edgeKey: stage.payload.edgeKey,
             renderProvinces,
             status: stage.playbackStatus,
+            commandRenderKey,
         });
 
         townLog('info', 'stage render command built', {
@@ -392,7 +460,7 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
             stageKind: stage.kind,
         });
         townRoadMapRef.current?.setRenderCommand?.(command);
-    }, [townCommand, townRoadMapRef]);
+    }, [townCommand, townRoadMapRef, injectLatestOrderPositions]);
 
     const applyTownRoadEnvelope = useCallback((payload: TownRoadRenderIncoming, source = 'unknown') => {
         const packet = extractRenderPacket(payload);
@@ -634,6 +702,15 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
             // 追踪 command 轮次：scene_boot 每被 start 一次意味着动画链表的起点又被播放了一次
             if (playing.kind === 'scene_boot') {
                 townRoundCountRef.current += 1;
+                townLog('info', 'scene_boot boundary reached (no map sync)', {
+                    reason,
+                    round: townRoundCountRef.current,
+                    stageId: playing.id,
+                });
+                // scene_boot 是循环边界节点，不触发地图/路线渲染
+                // 只标记 played 状态并 bump revision 让 UI 感知
+                bumpAnimationQueue();
+                return playing;
             }
 
             townLog('info', 'stage start', {
@@ -711,31 +788,37 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         animationTimerRef.current = window.setTimeout(() => {
             const next = moveNextTownAnimationStage('loop-tick');
 
-            // 多始发省自动轮播：当动画链表播完一轮回到 scene_boot 时切换 command
-            if (
-                next &&
-                next.kind === 'scene_boot' &&
-                townRoundCountRef.current > 1 &&
-                townDisplayMode === 'multi_source_rotation' &&
-                townCommandsRef.current.length > 1
-            ) {
-                townLog('info', 'command rotation triggered', {
+            if (next && next.kind === 'scene_boot') {
+                // 多始发省自动轮播：当动画链表播完一轮回到 scene_boot 时切换 command
+                if (
+                    townRoundCountRef.current > 1 &&
+                    townDisplayMode === 'multi_source_rotation' &&
+                    townCommandsRef.current.length > 1
+                ) {
+                    townLog('info', 'command rotation triggered at scene_boot', {
+                        round: townRoundCountRef.current,
+                        activeIndex: activeTownCommandIndexRef.current,
+                        totalCommands: townCommandsRef.current.length,
+                    });
+                    stopTownAnimationLoop('command-rotation');
+                    // 重置轮次计数，新 command 从第 0 轮开始
+                    townRoundCountRef.current = 0;
+                    // 切换到下一个始发省 command
+                    setActiveTownCommandIndex((previous) => {
+                        const total = townCommandsRef.current.length;
+                        if (total <= 1) return 0;
+                        const nextIdx = (previous + 1) % total;
+                        activeTownCommandIndexRef.current = nextIdx;
+                        return nextIdx;
+                    });
+                    return;
+                }
+
+                // 不切换 command：立即跳过 scene_boot 进入下一阶段，避免 12s 空白等待
+                townLog('info', 'skipping scene_boot to next real stage', {
                     round: townRoundCountRef.current,
-                    activeIndex: activeTownCommandIndexRef.current,
-                    totalCommands: townCommandsRef.current.length,
                 });
-                stopTownAnimationLoop('command-rotation');
-                // 重置轮次计数，新 command 从第 0 轮开始
-                townRoundCountRef.current = 0;
-                // 切换到下一个始发省 command
-                setActiveTownCommandIndex((previous) => {
-                    const total = townCommandsRef.current.length;
-                    if (total <= 1) return 0;
-                    const nextIdx = (previous + 1) % total;
-                    activeTownCommandIndexRef.current = nextIdx;
-                    return nextIdx;
-                });
-                return;
+                moveNextTownAnimationStage('skip-boot');
             }
 
             scheduleNextAnimationTick();
@@ -761,8 +844,15 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         });
 
         startCurrentTownAnimationStage(`loop-start:${reason}`);
+
+        // 如果当前是 scene_boot（队列的第一个节点），立即跳到第一个真正的渲染阶段
+        if (animationQueueRef.current.current?.kind === 'scene_boot') {
+            townLog('info', 'skipping initial scene_boot on loop start');
+            moveNextTownAnimationStage('skip-initial-boot');
+        }
+
         scheduleNextAnimationTick();
-    }, [scheduleNextAnimationTick, startCurrentTownAnimationStage]);
+    }, [scheduleNextAnimationTick, startCurrentTownAnimationStage, moveNextTownAnimationStage]);
 
     useEffect(() => {
         if (view !== 'townRoadMap') {

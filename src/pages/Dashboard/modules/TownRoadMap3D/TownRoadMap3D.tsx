@@ -6,7 +6,7 @@ import { MAP_LIFT, ROUTE_LIFT } from './constants';
 import { buildRouteFromTasks, progressOnRoad, updateOrderVisuals } from './townRouteRenderer';
 
 import type { TownRoadState } from './townRouteRenderer';
-import type { LonLat, TownAnimationStage, TownBoundaryLayers, TownRoadMap3DHandle, TownRoadRenderCommand, TownTransportTask } from './types';
+import type { LonLat, TownAnimationStage, TownBoundaryLayers, TownGeoFeatureCollection, TownRoadMap3DHandle, TownRoadRenderCommand, TownTransportTask } from './types';
 
 type TownRoadMap3DProps = {
     onVisualReady?: () => void;
@@ -111,20 +111,6 @@ function createBoundaryOverlay(
     return group;
 }
 
-function disposeObject3D(object: THREE.Object3D) {
-    object.traverse((child) => {
-        if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
-            child.geometry.dispose();
-            const material = child.material;
-            if (Array.isArray(material)) {
-                material.forEach((item) => item.dispose());
-            } else {
-                material.dispose();
-            }
-        }
-    });
-}
-
 function screenPosition(point: THREE.Vector3, camera: THREE.Camera, container: HTMLDivElement) {
     const projected = point.clone().project(camera);
     return {
@@ -158,82 +144,130 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
     const renderedRoadsRef = useRef<TownRoadState[]>([]);
     const [hoverInfo, setHoverInfo] = useState<TownHoverInfo | null>(null);
 
+    /** GeoJSON 缓存：相同省份组合不重复请求行政区划数据。key = mapKey */
+    const geoJsonCacheRef = useRef<Map<string, { geoJson: TownGeoFeatureCollection; projection: ReturnType<typeof createLocalProjection>; points: THREE.Vector3[] }>>(new Map());
+    /** 已 dispose 标记，防止重复 dispose */
+    const disposedMaterialsRef = useRef<WeakSet<THREE.Material>>(new WeakSet());
+    const disposedGeometriesRef = useRef<WeakSet<THREE.BufferGeometry>>(new WeakSet());
+
+    const safeDisposeObject3D = useCallback((object: THREE.Object3D) => {
+        object.traverse((child) => {
+            if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
+                const geom = child.geometry;
+                if (geom && !disposedGeometriesRef.current.has(geom)) {
+                    disposedGeometriesRef.current.add(geom);
+                    geom.dispose();
+                }
+                const material = child.material;
+                if (Array.isArray(material)) {
+                    material.forEach((item) => {
+                        if (!disposedMaterialsRef.current.has(item)) {
+                            disposedMaterialsRef.current.add(item);
+                            item.dispose();
+                        }
+                    });
+                } else if (material && !disposedMaterialsRef.current.has(material)) {
+                    disposedMaterialsRef.current.add(material);
+                    material.dispose();
+                }
+            }
+        });
+    }, []);
+
     onVisualReadyRef.current = onVisualReady;
 
     const clearMapData = useCallback(() => {
         const tg = transformGroupRef.current;
         if (mapGroupRef.current) {
             tg?.remove(mapGroupRef.current);
-            disposeObject3D(mapGroupRef.current);
+            safeDisposeObject3D(mapGroupRef.current);
             mapGroupRef.current = null;
         }
         renderedMapKeyRef.current = null;
         renderedMapPointsRef.current = [];
         projectionRef.current = null;
-    }, []);
+    }, [safeDisposeObject3D]);
 
     const clearRouteData = useCallback(() => {
         const tg = transformGroupRef.current;
         if (routesGroupRef.current) {
             tg?.remove(routesGroupRef.current);
-            disposeObject3D(routesGroupRef.current);
+            safeDisposeObject3D(routesGroupRef.current);
             routesGroupRef.current = null;
         }
         interactiveObjectsRef.current = [];
         renderedRoadsRef.current = [];
         setHoverInfo(null);
-    }, []);
+    }, [safeDisposeObject3D]);
 
     const clearRenderedData = useCallback(() => {
         clearRouteData();
         clearMapData();
     }, [clearMapData, clearRouteData]);
 
-    const focusPoints = useCallback((points: THREE.Vector3[]) => {
+    const focusPoints = useCallback((points: THREE.Vector3[], mapKey?: string) => {
         const camera = cameraRef.current;
         const controls = controlsRef.current;
         const transformGroup = transformGroupRef.current;
-        const container = containerRef.current;
         if (!camera || !controls || points.length === 0) return;
 
-        // 1. 重置拉伸
-        if (transformGroup) { transformGroup.scale.set(1, 1, 1); transformGroup.rotation.set(0, 0, 0); transformGroup.position.set(0, 0, 0); }
+        // 1. 重置 transform，确保地图在世界坐标中处于原始位置
+        if (transformGroup) {
+            transformGroup.scale.set(1, 1, 1);
+            transformGroup.rotation.set(0, 0, 0);
+            transformGroup.position.set(0, 0, 0);
+        }
 
-        // 2. 舒适相机距离
-        const box = new THREE.Box3().setFromPoints(points);
-        const center = box.getCenter(new THREE.Vector3());
-        const size = box.getSize(new THREE.Vector3());
-        const span = Math.max(size.x, size.z, 3);
+        // 2. 从输入 points 计算本地包围盒（这些 points 已经是世界坐标，但 transformGroup 已重置）
+        const localBox = new THREE.Box3().setFromPoints(points);
+        const localCenter = localBox.getCenter(new THREE.Vector3());
+        const localSize = localBox.getSize(new THREE.Vector3());
+        const span = Math.max(localSize.x, localSize.z, 3);
         const height = THREE.MathUtils.clamp(span * 0.72 + 12, 14, 72);
         const tilt = THREE.MathUtils.clamp(span * 0.30 + 6, 8, 36);
 
-        camera.position.set(center.x, height, center.z - tilt);
-        controls.target.set(center.x, 0, center.z);
+        // 3. 直接根据未变换 points 设置相机，不使用 transform 拉伸
+        //    之前这里的 transform 拉伸会导致相机基于变换前坐标定位，但地图已被缩放/旋转移出视野
+        camera.position.set(localCenter.x, height, localCenter.z - tilt);
+        controls.target.set(localCenter.x, 0, localCenter.z);
         camera.lookAt(controls.target);
         controls.update();
 
-        // 3. 沿路线方向大幅拉伸（短途看得清进度）
-        if (transformGroup && container && span > 0 && points.length >= 2) {
-            const screenH = container.clientHeight;
-            const fovRad = THREE.MathUtils.degToRad(camera.fov);
-            const viewportH = 2 * height * Math.tan(fovRad / 2);
-            const minSpan = viewportH * (300 / screenH); // 目标占屏幕 300px
-            // 绝对下限：span 小于 8 世界单位时强制拉伸
-            const s = THREE.MathUtils.clamp(Math.max(minSpan / span, 8 / Math.max(span, 1)), 1, 20);
-            if (s > 1) {
-                // 路线方向向量
-                const dir = new THREE.Vector3().subVectors(points[points.length - 1], points[0]);
-                dir.y = 0;
-                if (dir.lengthSq() > 0.0001) {
-                    dir.normalize();
-                    const angle = Math.atan2(dir.x, dir.z);
-                    transformGroup.rotation.y = angle;
-                    transformGroup.scale.set(s, 1, 1);
-                    transformGroup.position.copy(center.clone().multiplyScalar(1 - s));
-                } else {
-                    transformGroup.scale.setScalar(s);
-                    transformGroup.position.copy(center.clone().multiplyScalar(1 - s));
+        // 4. 根据场景实际状态（含地图和路线），用 setFromObject 获取世界坐标包围盒做最终校验
+        if (transformGroup) {
+            const worldBox = new THREE.Box3().setFromObject(transformGroup);
+            if (!worldBox.isEmpty()) {
+                const worldCenter = worldBox.getCenter(new THREE.Vector3());
+                const worldSize = worldBox.getSize(new THREE.Vector3());
+                const worldSpan = Math.max(worldSize.x, worldSize.z, 1);
+
+                // 调整 camera near/far 以匹配实际场景范围，避免 z-fighting 和裁剪
+                const near = Math.max(0.5, worldSpan * 0.01);
+                const far = Math.max(worldSpan * 3, 200);
+                camera.near = near;
+                camera.far = far;
+                camera.updateProjectionMatrix();
+
+                // 更新 fog 范围以匹配新场景
+                if (sceneRef.current?.fog instanceof THREE.Fog) {
+                    sceneRef.current.fog.near = far * 0.25;
+                    sceneRef.current.fog.far = far * 0.85;
                 }
+
+                console.info('[TownRoadMap3D] focusPoints applied', {
+                    mapKey: mapKey ?? 'unknown',
+                    pointsCount: points.length,
+                    localBoxCenter: localCenter.toArray(),
+                    localBoxSize: localSize.toArray(),
+                    worldBoxCenter: worldCenter.toArray(),
+                    worldBoxSize: worldSize.toArray(),
+                    cameraPos: camera.position.toArray(),
+                    controlsTarget: controls.target.toArray(),
+                    near,
+                    far,
+                    transformScale: transformGroup.scale.toArray(),
+                    transformRotation: transformGroup.rotation.toArray(),
+                });
             }
         }
     }, []);
@@ -382,26 +416,55 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                 inFlightMapKeyRef.current = nextMapKey;
 
                 try {
-                    const geoJson = targetProvinces.length > 0
-                        ? await loadGeoJsonByRenderCommand(command)
-                        : { type: 'FeatureCollection', features: [], boundaryFeatures: {} };
-                    if (isStale()) return;
+                    // 检查 GeoJSON 缓存：相同省份+renderLevel 组合复用已有数据
+                    const cached = geoJsonCacheRef.current.get(nextMapKey);
+                    let geoJson: TownGeoFeatureCollection;
+                    let boundaryFeatures: TownBoundaryLayers;
 
-                    const boundaryFeatures: TownBoundaryLayers = geoJson.boundaryFeatures ?? {};
-                    const boundaryFeatureList = Object.values(boundaryFeatures).flat();
-                    const featurePoints = [...(geoJson.features ?? []), ...boundaryFeatureList].flatMap(featureCoords);
-                    projection = createLocalProjection([...taskCoords, ...featurePoints]);
-                    if (isStale()) return;
-                    clearRenderedData();
-                    if (isStale()) return;
-
-                    renderedMapPoints = [];
-                    if (geoJson.features?.length) {
-                        const renderedMap = renderMapFeatures(geoJson.features, projection, boundaryFeatures);
+                    if (cached) {
+                        geoJson = cached.geoJson;
+                        boundaryFeatures = geoJson.boundaryFeatures ?? {};
+                        projection = cached.projection;
+                        renderedMapPoints = cached.points;
+                        console.info('[TownRoadMap3D] using cached GeoJSON', {
+                            nextMapKey,
+                            cacheSize: geoJsonCacheRef.current.size,
+                        });
+                    } else {
+                        geoJson = targetProvinces.length > 0
+                            ? await loadGeoJsonByRenderCommand(command)
+                            : { type: 'FeatureCollection', features: [], boundaryFeatures: {} };
                         if (isStale()) return;
-                        mapGroupRef.current = renderedMap.group;
-                        renderedMapPoints = renderedMap.points;
-                        transformGroupRef.current?.add(renderedMap.group);
+
+                        boundaryFeatures = geoJson.boundaryFeatures ?? {};
+                        const boundaryFeatureList = Object.values(boundaryFeatures).flat();
+                        const featurePoints = [...(geoJson.features ?? []), ...boundaryFeatureList].flatMap(featureCoords);
+                        projection = createLocalProjection([...taskCoords, ...featurePoints]);
+                        if (isStale()) return;
+                        clearRenderedData();
+                        if (isStale()) return;
+
+                        renderedMapPoints = [];
+                        if (geoJson.features?.length) {
+                            const renderedMap = renderMapFeatures(geoJson.features, projection, boundaryFeatures);
+                            if (isStale()) return;
+                            mapGroupRef.current = renderedMap.group;
+                            renderedMapPoints = renderedMap.points;
+                            transformGroupRef.current?.add(renderedMap.group);
+                        }
+
+                        // 缓存到组件级缓存
+                        if (geoJson.features?.length) {
+                            geoJsonCacheRef.current.set(nextMapKey, {
+                                geoJson,
+                                projection,
+                                points: renderedMapPoints,
+                            });
+                            console.info('[TownRoadMap3D] GeoJSON cached', {
+                                nextMapKey,
+                                cacheSize: geoJsonCacheRef.current.size,
+                            });
+                        }
                     }
 
                     if (isStale()) return;
@@ -414,6 +477,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                         boundaryProvinceCount: boundaryFeatures.province?.length ?? 0,
                         boundaryCityCount: boundaryFeatures.city?.length ?? 0,
                         mapChildren: mapGroupRef.current?.children.length ?? 0,
+                        fromCache: Boolean(cached),
                     });
                 } finally {
                     if (inFlightMapKeyRef.current === nextMapKey) {
@@ -449,7 +513,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
                     ? taskFocusPoints
                     : renderedMapPoints;
             if (isStale()) return;
-            focusPoints(focusSource);
+            focusPoints(focusSource, nextMapKey);
 
             const pending = pendingCommandForMapKeyRef.current;
             if (pending && commandMapKey(pending) === nextMapKey && pending !== command) {
@@ -580,12 +644,27 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
 
         const onContextLost = (event: Event) => {
             event.preventDefault();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const memoryInfo = (renderer.info as any)?.memory;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const renderInfo = (renderer.info as any)?.render;
             console.error('[TownRoadMap3D] WebGL context lost', {
                 renderedMapKey: renderedMapKeyRef.current,
                 inFlightMapKey: inFlightMapKeyRef.current,
                 renderRunId: renderRunRef.current,
                 mapChildren: mapGroupRef.current?.children.length,
                 routeChildren: routesGroupRef.current?.children.length,
+                geoJsonCacheSize: geoJsonCacheRef.current.size,
+                memory: memoryInfo ? {
+                    geometries: memoryInfo.geometries,
+                    textures: memoryInfo.textures,
+                } : 'unavailable',
+                render: renderInfo ? {
+                    calls: renderInfo.calls,
+                    triangles: renderInfo.triangles,
+                    points: renderInfo.points,
+                    lines: renderInfo.lines,
+                } : 'unavailable',
             });
         };
         const onContextRestored = () => {
