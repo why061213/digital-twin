@@ -2,15 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import MainLayout from '@/components/Layout/MainLayout';
 import Header from '@/components/Layout/Header';
 import type { ChinaMap3DHandle } from './modules/ChinaMap3D';
-import type { RoadMap3DHandle } from './modules/RoadMap3D';
+import type { RoadMap3DHandle as RoadMap3D1Handle } from './modules/RoadMap3D-1';
+import type { RoadMap3DHandle as RoadMap3D2Handle } from './modules/RoadMap3D-2';
 import DashboardSidePanels from './modules/DashboardSidePanels';
 import type { RoadGroupPanelState } from './modules/DashboardSidePanels';
 import { useDashboardRealtime } from './hooks/useDashboardRealtime';
-import { useDashboardViewTransition } from './hooks/useDashboardViewTransition';
 import { useRoadGroupsController } from './hooks/useRoadGroupsController';
 import { useTruckPositionController } from './hooks/useTruckPositionController';
+import { useRm2TestRoadController } from './hooks/useRm2TestRoadController';
 import { useWarehouseController } from './hooks/useWarehouseController';
 import type { RouteOrder } from './hooks/useDashboardRealtime';
+import type { ViewMode } from './types';
 import { DispatchButtons } from './components/DispatchButtons';
 import { DashboardCenterPanel } from './components/DashboardCenterPanel';
 import { RoadGroupQueue } from './components/RoadGroupQueue';
@@ -23,42 +25,32 @@ import {
 
 function DashboardPage() {
     const [isDispatching, setIsDispatching] = useState(false);
+    const [view, setView] = useState<ViewMode>('warehouse');
+    const [isRoadMapVisualReady, setIsRoadMapVisualReady] = useState(false);
+    const [isRoadMap2VisualReady, setIsRoadMap2VisualReady] = useState(false);
     const mapRef = useRef<ChinaMap3DHandle>(null);
-    const roadMapRef = useRef<RoadMap3DHandle>(null);
+    const roadMapRef = useRef<RoadMap3D1Handle>(null);
+    const roadMap2Ref = useRef<RoadMap3D2Handle>(null);
+    const skipNextRoadMapRefreshRef = useRef(false);
+    const requestViewChange = useCallback((nextView: ViewMode) => {
+        if (view === nextView) return;
+        setIsRoadMapVisualReady(false);
+        setIsRoadMap2VisualReady(false);
+        setView(nextView);
+    }, [view]);
+    const handleChinaMapVisualReady = useCallback(() => {}, []);
+    const handleRoadMapVisualReady = useCallback(() => setIsRoadMapVisualReady(true), []);
+    const handleRoadMap2VisualReady = useCallback(() => setIsRoadMap2VisualReady(true), []);
     const {
         warehouseFocus,
-        clearWarehouseFocus,
         handleCityRaise,
         handleCityFall,
         handleWarehouseUpdate,
         handleWarehouseTourStateChange,
         handleCameraControl,
         handleWarehouseFocus,
-        requestWarehouseSnapshot,
     } = useWarehouseController({
         mapRef,
-    });
-    const {
-        view,
-        requestViewChange,
-        chinaMapSession,
-        isPreparingChinaMap,
-        isRevealingChinaMap,
-        roadMapSession,
-        isPreparingRoadMap,
-        isRevealingRoadMap,
-        isRoadMapVisualReady,
-        chinaMapPrepareRunRef,
-        roadMapPrepareRunRef,
-        skipNextRoadMapRefreshRef,
-        handleChinaMapVisualReady,
-        handleRoadMapVisualReady,
-        markChinaMapDataReady,
-        markRoadMapDataReady,
-        failChinaMapPrepare,
-        failRoadMapPrepare,
-    } = useDashboardViewTransition({
-        onBeforeViewChange: clearWarehouseFocus,
     });
     const {
         routeOrders,
@@ -102,6 +94,11 @@ function DashboardPage() {
         renderTruckPosition,
         setRouteOrders,
     });
+    useRm2TestRoadController({
+        roadMapRef: roadMap2Ref,
+        view,
+        sceneReady: isRoadMap2VisualReady,
+    });
     const handleRouteRaise = useCallback((_order: RouteOrder) => {
         // 城市飞线事件由 ChinaMap3D 处理；道路级地图只加载后端分组后的路线。
     }, []);
@@ -136,18 +133,13 @@ function DashboardPage() {
     }, [isDispatching]);
 
 
-    const requestRoadMapSnapshot = useCallback(async (prepareRunId: number) => {
+    const requestRoadMapSnapshot = useCallback(async () => {
         try {
             await refreshRoadGroups(activeRoadGroupIdRef.current ?? undefined);
-            if (roadMapPrepareRunRef.current !== prepareRunId) return;
-            markRoadMapDataReady();
         } catch (error) {
             console.warn('Road map prepare failed', error);
-            if (roadMapPrepareRunRef.current === prepareRunId) {
-                failRoadMapPrepare();
-            }
         }
-    }, [failRoadMapPrepare, markRoadMapDataReady, refreshRoadGroups]);
+    }, [activeRoadGroupIdRef, refreshRoadGroups]);
 
     useDashboardRealtime({
         onCityRaise: handleCityRaise,
@@ -162,43 +154,19 @@ function DashboardPage() {
     });
 
     useEffect(() => {
-        if (!isPreparingChinaMap) return;
-        if (chinaMapSession <= 0) return;
-
-        const prepareRunId = chinaMapPrepareRunRef.current;
-        void requestWarehouseSnapshot({
-            isCurrentPrepareRun: () => chinaMapPrepareRunRef.current === prepareRunId,
-            onDataReady: markChinaMapDataReady,
-            onPrepareFailed: failChinaMapPrepare,
-        });
-    }, [
-        chinaMapPrepareRunRef,
-        chinaMapSession,
-        failChinaMapPrepare,
-        isPreparingChinaMap,
-        markChinaMapDataReady,
-        requestWarehouseSnapshot,
-    ]);
-
-    useEffect(() => {
-        if (!isPreparingRoadMap || !isRoadMapVisualReady || roadMapSession <= 0) return;
-        void requestRoadMapSnapshot(roadMapPrepareRunRef.current);
-    }, [isPreparingRoadMap, isRoadMapVisualReady, requestRoadMapSnapshot, roadMapSession]);
+        if (view !== 'roadMap' || !isRoadMapVisualReady) return;
+        void requestRoadMapSnapshot();
+    }, [isRoadMapVisualReady, requestRoadMapSnapshot, view]);
 
     const renderCenterPanel = () => (
         <DashboardCenterPanel
             view={view}
-            isPreparingChinaMap={isPreparingChinaMap}
-            isRevealingChinaMap={isRevealingChinaMap}
-            isPreparingRoadMap={isPreparingRoadMap}
-            isRevealingRoadMap={isRevealingRoadMap}
-            isRoadGroupFading={isRoadGroupFading}
-            chinaMapSession={chinaMapSession}
-            roadMapSession={roadMapSession}
             mapRef={mapRef}
             roadMapRef={roadMapRef}
+            roadMap2Ref={roadMap2Ref}
             onChinaMapVisualReady={handleChinaMapVisualReady}
             onRoadMapVisualReady={handleRoadMapVisualReady}
+            onRoadMap2VisualReady={handleRoadMap2VisualReady}
             onWarehouseTourStateChange={handleWarehouseTourStateChange}
         />
     );
@@ -206,10 +174,6 @@ function DashboardPage() {
     const viewButtons = (
         <ViewButtons
             view={view}
-            isPreparingChinaMap={isPreparingChinaMap}
-            isRevealingChinaMap={isRevealingChinaMap}
-            isPreparingRoadMap={isPreparingRoadMap}
-            isRevealingRoadMap={isRevealingRoadMap}
             onRequestViewChange={requestViewChange}
         />
     );

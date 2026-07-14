@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react';
-import type { RoadMap3DHandle } from '../modules/RoadMap3D';
+import type { RoadMap3DHandle } from '../modules/RoadMap3D-1';
 import type { RoadPathMessage, RouteOrder } from './useDashboardRealtime';
 import { fetchRoadGroupRoutes, fetchRoadGroupsByStrategy } from '../services/roadApi';
 import type {

@@ -1,25 +1,21 @@
-﻿import type { RefObject } from 'react';
+import type { RefObject } from 'react';
 import Warehouse3D from '../modules/Warehouse3D';
 import ChinaMap3D from '../modules/ChinaMap3D';
 import type { ChinaMap3DHandle } from '../modules/ChinaMap3D';
-import RoadMap3D from '../modules/RoadMap3D';
-import type { RoadMap3DHandle } from '../modules/RoadMap3D';
+import RoadMap3D1 from '../modules/RoadMap3D-1';
+import type { RoadMap3DHandle as RoadMap3D1Handle } from '../modules/RoadMap3D-1';
+import RoadMap3D2 from '../modules/RoadMap3D-2';
+import type { RoadMap3DHandle as RoadMap3D2Handle } from '../modules/RoadMap3D-2';
 import type { ViewMode } from '../types';
-import { MAP_VIEW_TRANSITION_MS, ROAD_GROUP_TRANSITION_MS } from '../constants';
 
 type DashboardCenterPanelProps = {
     view: ViewMode;
-    isPreparingChinaMap: boolean;
-    isRevealingChinaMap: boolean;
-    isPreparingRoadMap: boolean;
-    isRevealingRoadMap: boolean;
-    isRoadGroupFading: boolean;
-    chinaMapSession: number;
-    roadMapSession: number;
     mapRef: RefObject<ChinaMap3DHandle | null>;
-    roadMapRef: RefObject<RoadMap3DHandle | null>;
+    roadMapRef: RefObject<RoadMap3D1Handle | null>;
+    roadMap2Ref: RefObject<RoadMap3D2Handle | null>;
     onChinaMapVisualReady: () => void;
     onRoadMapVisualReady: () => void;
+    onRoadMap2VisualReady: () => void;
     onWarehouseTourStateChange: (state: {
         mode: 'overview' | 'focus';
         cityName?: string;
@@ -29,70 +25,31 @@ type DashboardCenterPanelProps = {
 
 export function DashboardCenterPanel({
     view,
-    isPreparingChinaMap,
-    isRevealingChinaMap,
-    isPreparingRoadMap,
-    isRevealingRoadMap,
-    isRoadGroupFading,
-    chinaMapSession,
-    roadMapSession,
     mapRef,
     roadMapRef,
+    roadMap2Ref,
     onChinaMapVisualReady,
     onRoadMapVisualReady,
+    onRoadMap2VisualReady,
     onWarehouseTourStateChange,
 }: DashboardCenterPanelProps) {
-    const showChinaMapLayer = view === 'chinaMap' || isPreparingChinaMap || isRevealingChinaMap;
-    const isChinaMapLeaving = view === 'chinaMap' && isRevealingRoadMap;
-    const isChinaMapVisible = (view === 'chinaMap' && !isChinaMapLeaving) || isRevealingChinaMap;
-    const showRoadMapLayer = view === 'roadMap' || isPreparingRoadMap || isRevealingRoadMap;
-    const isRoadMapLeaving = view === 'roadMap' && isRevealingChinaMap;
-    const isRoadGroupTransition = view === 'roadMap' && !isPreparingRoadMap && !isRevealingRoadMap;
-    const isRoadMapVisible = ((view === 'roadMap' && !isRoadMapLeaving) || isRevealingRoadMap) && !isRoadGroupFading;
-    const roadMapTransitionMs = isRoadGroupTransition ? ROAD_GROUP_TRANSITION_MS : MAP_VIEW_TRANSITION_MS;
-
-    return (
-        <>
-            {view === 'warehouse' && (
-                <div className="absolute inset-0">
-                    <Warehouse3D key="warehouse" />
-                </div>
-            )}
-            {showRoadMapLayer && (
-                <div
-                    className={`absolute inset-0 transition-opacity ${
-                        isRoadMapVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
-                    } ${isPreparingRoadMap || isRevealingRoadMap ? 'z-20' : 'z-10'}`}
-                    style={{
-                        transitionDuration: `${roadMapTransitionMs}ms`,
-                        transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
-                    }}
-                >
-                    <RoadMap3D
-                        key={`roadMap-${roadMapSession}`}
-                        ref={roadMapRef}
-                        onVisualReady={onRoadMapVisualReady}
-                    />
-                </div>
-            )}
-            {showChinaMapLayer && (
-                <div
-                    className={`absolute inset-0 transition-opacity ${
-                        isChinaMapVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
-                    } ${isPreparingChinaMap || isRevealingChinaMap ? 'z-20' : 'z-10'}`}
-                    style={{
-                        transitionDuration: `${MAP_VIEW_TRANSITION_MS}ms`,
-                        transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
-                    }}
-                >
-                    <ChinaMap3D
-                        key={`chinaMap-${chinaMapSession}`}
-                        ref={mapRef}
-                        onVisualReady={onChinaMapVisualReady}
-                        onTourStateChange={onWarehouseTourStateChange}
-                    />
-                </div>
-            )}
-        </>
-    );
+    // 只挂载当前活动场景：卸载会触发各自的 Three.js cleanup，避免 RAF/Timer/WebGL 累积。
+    if (view === 'warehouse') {
+        return <div className="absolute inset-0"><Warehouse3D /></div>;
+    }
+    if (view === 'chinaMap') {
+        return (
+            <div className="absolute inset-0">
+                <ChinaMap3D
+                    ref={mapRef}
+                    onVisualReady={onChinaMapVisualReady}
+                    onTourStateChange={onWarehouseTourStateChange}
+                />
+            </div>
+        );
+    }
+    if (view === 'roadMap2') {
+        return <div className="absolute inset-0"><RoadMap3D2 ref={roadMap2Ref} onVisualReady={onRoadMap2VisualReady} /></div>;
+    }
+    return <div className="absolute inset-0"><RoadMap3D1 ref={roadMapRef} onVisualReady={onRoadMapVisualReady} /></div>;
 }

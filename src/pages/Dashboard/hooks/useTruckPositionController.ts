@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react';
-import type { RoadMap3DHandle } from '../modules/RoadMap3D';
+import type { RoadMap3DHandle } from '../modules/RoadMap3D-1';
 import {
     loadTruckPositionsFromCache,
     saveTruckPositionToCache,
-} from '../modules/RoadMap3D/utils';
+} from '../modules/RoadMap3D-1/utils';
 import type { ActiveRoute, ViewMode } from '../types';
 import type { RoadPathMessage, RouteOrder, TruckPositionMessage } from './useDashboardRealtime';
 import { fetchTruckPosition } from '../services/roadApi';
