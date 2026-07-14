@@ -30,7 +30,7 @@ export type Rm2GroupDTO = {
     groupName: string;
     index: number;
     count: number;
-    lineIds: string[];
+    orderLineIds: string[];
     mapKey: string;
 };
 
@@ -93,7 +93,8 @@ function groupRejectReason(value: unknown): string | null {
     if (typeof value.groupName !== 'string' || value.groupName.length === 0) return `${value.groupId}: missing groupName`;
     if (typeof value.index !== 'number' || !Number.isFinite(value.index)) return `${value.groupId}: invalid index`;
     if (typeof value.count !== 'number' || !Number.isFinite(value.count)) return `${value.groupId}: invalid count`;
-    if (!Array.isArray(value.lineIds) || !value.lineIds.every((lineId) => typeof lineId === 'string')) return `${value.groupId}: invalid lineIds`;
+    const lineIds = (value as Record<string, unknown>).orderLineIds ?? (value as Record<string, unknown>).lineIds;
+    if (!Array.isArray(lineIds) || !lineIds.every((lineId: unknown) => typeof lineId === 'string')) return `${value.groupId}: invalid orderLineIds`;
     if (typeof value.mapKey !== 'string' || value.mapKey.length === 0) return `${value.groupId}: missing mapKey`;
     return null;
 }
