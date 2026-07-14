@@ -14,19 +14,28 @@ export function ViewButtons({ view, onRequestViewChange }: ViewButtonsProps) {
 
     return (
         <div className="absolute bottom-4 left-1/2 z-30 flex -translate-x-1/2 gap-2">
-            {buttons.map(([mode, label]) => (
-                <button
-                    key={mode}
-                    onClick={() => onRequestViewChange(mode)}
-                    className={`rounded-full border px-4 py-2 text-xs shadow-lg backdrop-blur-md transition-all pointer-events-auto ${
-                        view === mode
-                            ? 'border-cyan-400/50 bg-cyan-500/20 text-cyan-300'
-                            : 'border-white/10 bg-white/10 text-gray-400 hover:bg-white/20'
-                    }`}
-                >
-                    {label}
-                </button>
-            ))}
+            {buttons.map(([mode, label]) => {
+                const isWarehouseSection = mode === 'warehouse' && (view === 'warehouse' || view === 'chinaMap');
+                const targetView = mode !== 'warehouse'
+                    ? mode
+                    : view === 'warehouse'
+                        ? 'chinaMap'
+                        : 'warehouse';
+                const displayLabel = mode === 'warehouse' && view === 'chinaMap' ? '全国地图' : label;
+                return (
+                    <button
+                        key={mode}
+                        onClick={() => onRequestViewChange(targetView)}
+                        className={`rounded-full border px-4 py-2 text-xs shadow-lg backdrop-blur-md transition-all pointer-events-auto ${
+                            view === mode || isWarehouseSection
+                                ? 'border-cyan-400/50 bg-cyan-500/20 text-cyan-300'
+                                : 'border-white/10 bg-white/10 text-gray-400 hover:bg-white/20'
+                        }`}
+                    >
+                        {displayLabel}
+                    </button>
+                );
+            })}
         </div>
     );
 }
