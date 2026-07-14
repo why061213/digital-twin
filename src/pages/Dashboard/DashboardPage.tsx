@@ -9,7 +9,7 @@ import type { RoadGroupPanelState } from './modules/DashboardSidePanels';
 import { useDashboardRealtime } from './hooks/useDashboardRealtime';
 import { useRoadGroupsController } from './hooks/useRoadGroupsController';
 import { useTruckPositionController } from './hooks/useTruckPositionController';
-import { useRm2TestRoadController } from './hooks/useRm2TestRoadController';
+import { useRm2RoadController } from './hooks/useRm2RoadController';
 import { useWarehouseController } from './hooks/useWarehouseController';
 import type { RouteOrder } from './hooks/useDashboardRealtime';
 import type { ViewMode } from './types';
@@ -94,7 +94,12 @@ function DashboardPage() {
         renderTruckPosition,
         setRouteOrders,
     });
-    useRm2TestRoadController({
+    const {
+        groups: rm2Groups,
+        activeGroupId: activeRm2GroupId,
+        isLoading: isLoadingRm2Group,
+        loadGroup: loadRm2Group,
+    } = useRm2RoadController({
         roadMapRef: roadMap2Ref,
         view,
         sceneReady: isRoadMap2VisualReady,
@@ -186,6 +191,14 @@ function DashboardPage() {
             onSelectGroup={(groupId) => void loadRoadGroup(groupId)}
         />
     );
+    const rm2GroupQueue = view === 'roadMap2' && rm2Groups.length > 0 && (
+        <RoadGroupQueue
+            groups={rm2Groups}
+            activeGroupId={activeRm2GroupId}
+            isLoading={isLoadingRm2Group}
+            onSelectGroup={(groupId) => void loadRm2Group(groupId)}
+        />
+    );
 
     const dispatchControls = view === 'roadMap' && (
         <DispatchButtons
@@ -240,6 +253,7 @@ function DashboardPage() {
                         isRoadGroupFading={isRoadGroupFading}
                     />
                     {roadGroupQueue}
+                    {rm2GroupQueue}
                     {roadStrategyTabs}
                     {viewButtons}
                     {dispatchControls}

@@ -32,6 +32,10 @@ export type RoadPathMessage = {
     travelDurationMs?: number;
     routeLengthKm?: number;
     speedKmh?: number;
+    plate?: string;
+    cargo?: string;
+    status?: string;
+    vehicleId?: string;
 };
 
 export type TruckPositionMessage = {
