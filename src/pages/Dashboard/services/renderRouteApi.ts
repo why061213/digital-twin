@@ -59,6 +59,17 @@ export type Rm2GroupRoutesResponse = {
     routes: RenderRouteDTO[];
     rejected: unknown[];
     receivedRouteCount: number;
+    /** 版本不一致时后端返回 mismatch:true + 空 routes */
+    mismatch?: boolean;
+};
+
+export type RouteSnapshotChangedMessage = {
+    type: 'route_snapshot_changed';
+    scope: 'rm2';
+    snapshotVersion: string;
+    changedGroupIds: string[];
+    removedGroupIds: string[];
+    serverTime: string;
 };
 
 const CHINA_LNG_MIN = 72;
@@ -152,8 +163,31 @@ export async function fetchRm2Groups(signal?: AbortSignal): Promise<Rm2GroupsRes
     };
 }
 
-export async function fetchRm2GroupRoutes(groupId: string, signal?: AbortSignal): Promise<Rm2GroupRoutesResponse> {
-    const data = await getJson(`/road/rm2/groups/${encodeURIComponent(groupId)}/routes`, signal);
+export async function fetchRm2GroupRoutes(
+    groupId: string,
+    snapshotVersion: string,
+    signal?: AbortSignal,
+): Promise<Rm2GroupRoutesResponse> {
+    const query = new URLSearchParams({ snapshotVersion });
+    const data = await getJson(
+        `/road/rm2/groups/${encodeURIComponent(groupId)}/routes?${query}`,
+        signal,
+    );
+
+    // 版本不一致：后端返回 mismatch:true + 空 routes
+    if (isRecord(data) && data.mismatch === true) {
+        return {
+            snapshotVersion: typeof data.snapshotVersion === 'string' ? data.snapshotVersion : '',
+            scope: 'rm2',
+            groupId,
+            coordinateSystem: 'GCJ02',
+            routes: [],
+            rejected: [],
+            receivedRouteCount: 0,
+            mismatch: true,
+        };
+    }
+
     if (!isRecord(data) || data.scope !== 'rm2' || data.groupId !== groupId || !Array.isArray(data.routes)) {
         throw new Error('Invalid RM2 group routes response');
     }

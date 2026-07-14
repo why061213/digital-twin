@@ -112,6 +112,7 @@ function DashboardPage() {
         diagnostics: rm2Diagnostics,
         loadGroup: loadRm2Group,
         refreshRm2,
+        handleSnapshotChanged,
     } = useRm2RoadController({
         roadMapRef: roadMap2Ref,
         view,
@@ -192,6 +193,7 @@ function DashboardPage() {
         onWarehouseUpdate: handleWarehouseUpdate,
         onWarehouseFocus: handleWarehouseFocus,
         onCameraControl: handleCameraControl,
+        onRouteSnapshotChanged: handleSnapshotChanged,
     });
 
     useEffect(() => {

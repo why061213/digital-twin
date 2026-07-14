@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { RouteSnapshotChangedMessage } from '../services/renderRouteApi';
 
 type CityRaiseMessage = {
     type: 'city_raise';
@@ -99,6 +100,7 @@ type UseDashboardRealtimeOptions = {
     onWarehouseUpdate?: (cityName: string, action: string, displayData: Record<string, any>) => void;
     onWarehouseFocus?: (cityName: string, panels: WarehouseFocusPanel[], style?: WarehouseFocusStyle) => void;
     onCameraControl?: (cityNames: string[], mode: 'overview' | 'focus') => void;
+    onRouteSnapshotChanged?: (message: RouteSnapshotChangedMessage) => void;
 };
 
 const WS_TOKEN = String(import.meta.env.VITE_WS_TOKEN || 'jushen-screen-token');
@@ -248,6 +250,10 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
             if (message.type === 'camera_control' && optionsRef.current.onCameraControl) {
                 const { cityNames, mode } = message as any;
                 optionsRef.current.onCameraControl(cityNames, mode);
+                return;
+            }
+            if (message.type === 'route_snapshot_changed' && optionsRef.current.onRouteSnapshotChanged) {
+                optionsRef.current.onRouteSnapshotChanged(message as RouteSnapshotChangedMessage);
                 return;
             }
         };

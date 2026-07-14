@@ -8,6 +8,7 @@ import {
     type RenderRouteDTO,
     type Rm2GroupDTO,
     type Rm2GroupsDiagnostics,
+    type RouteSnapshotChangedMessage,
 } from '../services/renderRouteApi';
 import type { ViewMode } from '../types';
 
@@ -41,100 +42,99 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
     const activeGroupIdRef = useRef<string | null>(null);
     const groupRequestRef = useRef<AbortController | null>(null);
     const routeRequestRef = useRef<AbortController | null>(null);
-    /** 请求代次：每次同步递增，旧响应直接丢弃 */
-    const requestGenerationRef = useRef(0);
-    /** 当前快照版本 */
+    const groupsGenerationRef = useRef(0);
+    const routeGenerationRef = useRef(0);
     const snapshotVersionRef = useRef<string>('');
-    /** 按 version:groupId 缓存路线 */
     const groupRoutesCacheRef = useRef<Map<string, RenderRouteDTO[]>>(new Map());
-    /** groupId → 组信息速查 */
     const groupsByIdRef = useRef<Map<string, Rm2GroupDTO>>(new Map());
+    const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const cacheKey = (version: string, gid: string) => `${version}:${gid}`;
+
+    /** 渲染路线到地图 */
+    const renderRoutes = useCallback((routes: RenderRouteDTO[]) => {
+        const roadMap = roadMapRef.current;
+        if (!roadMap) return;
+        roadMap.clearRoads();
+        const accepted = routes.map(adaptRenderRoute).filter((r): r is NonNullable<typeof r> => r !== null);
+        accepted.forEach((route) => {
+            roadMap.addRoadPath(route.lineId, route.coordinates, {
+                plate: route.plate, cargo: route.cargo, from: route.from, to: route.to,
+                status: route.status, speedKmh: route.speedKmh,
+                routeLengthKm: route.routeLengthKm, orderId: route.orderId, pathKey: route.pathKey,
+            });
+            roadMap.updateTruckPosition(route.lineId, route.coordinates[0], {});
+        });
+    }, [roadMapRef]);
 
     const loadGroup = useCallback(async (groupId: string) => {
         routeRequestRef.current?.abort();
         const request = new AbortController();
         routeRequestRef.current = request;
+        const gen = ++routeGenerationRef.current;
         activeGroupIdRef.current = groupId;
         setActiveGroupId(groupId);
 
-        const gen = requestGenerationRef.current;
         const version = snapshotVersionRef.current;
         const cachedKey = cacheKey(version, groupId);
         const cached = groupRoutesCacheRef.current.get(cachedKey);
 
         if (cached) {
-            if (gen !== requestGenerationRef.current) return;
-            const accepted = cached.map(adaptRenderRoute).filter((r): r is NonNullable<typeof r> => r !== null);
-            const roadMap = roadMapRef.current;
-            if (roadMap) {
-                roadMap.clearRoads();
-                accepted.forEach((route) => {
-                    roadMap.addRoadPath(route.lineId, route.coordinates, {
-                        plate: route.plate, cargo: route.cargo, from: route.from, to: route.to,
-                        status: route.status, speedKmh: route.speedKmh,
-                        routeLengthKm: route.routeLengthKm, orderId: route.orderId, pathKey: route.pathKey,
-                    });
-                    roadMap.updateTruckPosition(route.lineId, route.coordinates[0], {});
-                });
-            }
+            if (gen !== routeGenerationRef.current) return;
+            renderRoutes(cached);
             return;
         }
 
         setIsLoading(true);
         try {
             const response = sourceRef.current === 'backend'
-                ? await fetchRm2GroupRoutes(groupId, request.signal)
-                : { routes: FIXTURE_ROUTES.filter((route) => route.groupId === groupId), snapshotVersion: version };
+                ? await fetchRm2GroupRoutes(groupId, version, request.signal)
+                : { routes: FIXTURE_ROUTES.filter((r) => r.groupId === groupId), snapshotVersion: version, mismatch: false };
             if (request.signal.aborted) return;
-            if (gen !== requestGenerationRef.current) return;
+            if (gen !== routeGenerationRef.current) return;
 
-            const accepted = response.routes.map(adaptRenderRoute).filter((r): r is NonNullable<typeof r> => r !== null);
+            // 版本不一致 → 清除缓存，触发 groups 重新同步
+            if (response.mismatch) {
+                console.warn('[RM2 mismatch]', { groupId, serverVersion: response.snapshotVersion });
+                groupRoutesCacheRef.current.clear();
+                snapshotVersionRef.current = response.snapshotVersion;
+                // 调度重新获取 groups
+                setTimeout(() => {
+                    if (routeGenerationRef.current === gen) refreshRm2();
+                }, 100);
+                return;
+            }
 
-            // 缓存
             if (response.snapshotVersion) {
                 groupRoutesCacheRef.current.set(cacheKey(response.snapshotVersion, groupId), response.routes);
             }
 
-            console.info('[RM2 render]', { groupId, receivedRoutes: response.routes.length, acceptedRoutes: accepted.length });
-            const roadMap = roadMapRef.current;
-            if (!roadMap) return;
-            roadMap.clearRoads();
-            accepted.forEach((route) => {
-                roadMap.addRoadPath(route.lineId, route.coordinates, {
-                    plate: route.plate, cargo: route.cargo, from: route.from, to: route.to,
-                    status: route.status, speedKmh: route.speedKmh,
-                    routeLengthKm: route.routeLengthKm, orderId: route.orderId, pathKey: route.pathKey,
-                });
-                roadMap.updateTruckPosition(route.lineId, route.coordinates[0], {});
-            });
+            console.info('[RM2 render]', { groupId, routes: response.routes.length });
+            renderRoutes(response.routes);
         } catch (error) {
             if ((error as DOMException).name !== 'AbortError') console.warn('RM2 group load failed', { groupId, error });
         } finally {
-            if (!request.signal.aborted && gen === requestGenerationRef.current) setIsLoading(false);
+            if (!request.signal.aborted && gen === routeGenerationRef.current) setIsLoading(false);
         }
-    }, [roadMapRef]);
+    }, [renderRoutes]);
 
     const refreshRm2 = useCallback(async () => {
         groupRequestRef.current?.abort();
         const request = new AbortController();
         groupRequestRef.current = request;
-        const gen = ++requestGenerationRef.current;
+        const gen = ++groupsGenerationRef.current;
         setIsLoading(true);
         try {
             const response = await fetchRm2Groups(request.signal);
             if (request.signal.aborted) return;
-            if (gen !== requestGenerationRef.current) return;
+            if (gen !== groupsGenerationRef.current) return;
             sourceRef.current = 'backend';
 
-            // 版本变化 → 清除旧缓存
             if (response.snapshotVersion !== snapshotVersionRef.current) {
                 groupRoutesCacheRef.current.clear();
                 snapshotVersionRef.current = response.snapshotVersion;
             }
 
-            // 更新速查表
             const byId = new Map<string, Rm2GroupDTO>();
             response.groups.forEach((g) => byId.set(g.groupId, g));
             groupsByIdRef.current = byId;
@@ -146,7 +146,7 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             else roadMapRef.current?.clearRoads();
         } catch (error) {
             if (request.signal.aborted) return;
-            if (gen !== requestGenerationRef.current) return;
+            if (gen !== groupsGenerationRef.current) return;
             console.warn('RM2 API unavailable; using fixture fallback', error);
             sourceRef.current = 'fixture';
             setGroups(FIXTURE_GROUPS);
@@ -155,21 +155,35 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             if (preferred) await loadGroup(preferred.groupId);
             else roadMapRef.current?.clearRoads();
         } finally {
-            if (!request.signal.aborted && gen === requestGenerationRef.current) setIsLoading(false);
+            if (!request.signal.aborted && gen === groupsGenerationRef.current) setIsLoading(false);
         }
     }, [loadGroup, roadMapRef]);
+
+    /** 防抖刷新：200ms 内多次调用只执行一次 */
+    const scheduleRefresh = useCallback((delayMs = 200) => {
+        if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = setTimeout(() => void refreshRm2(), delayMs);
+    }, [refreshRm2]);
+
+    /** WebSocket 回调：收到 route_snapshot_changed → 防抖刷新 */
+    const handleSnapshotChanged = useCallback((msg: RouteSnapshotChangedMessage) => {
+        if (msg.scope !== 'rm2') return;
+        if (msg.snapshotVersion === snapshotVersionRef.current) return;
+        scheduleRefresh(200);
+    }, [scheduleRefresh]);
+
 
     useEffect(() => {
         if (view !== 'roadMap2' || !sceneReady || !roadMapRef.current) return;
         void refreshRm2();
-        if (!import.meta.env.DEV) return;
         const timer = window.setInterval(() => void refreshRm2(), 30_000);
         return () => {
             window.clearInterval(timer);
+            if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
             groupRequestRef.current?.abort();
             routeRequestRef.current?.abort();
         };
     }, [refreshRm2, roadMapRef, sceneReady, view]);
 
-    return { groups, activeGroupId, isLoading, diagnostics, loadGroup, refreshRm2 };
+    return { groups, activeGroupId, isLoading, diagnostics, loadGroup, refreshRm2, handleSnapshotChanged };
 }
