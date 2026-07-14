@@ -23,6 +23,7 @@ import {
 
 const ROAD_PATH_BUFFER_QUIET_MS = 650;
 const ROAD_PATH_BUFFER_MAX_WAIT_MS = 1600;
+const EMPTY_RM1_SNAPSHOT_RETRY_MS = 2_000;
 
 type UseRoadGroupsControllerOptions = {
     roadMapRef: RefObject<RoadMap3DHandle | null>;
@@ -594,6 +595,17 @@ export function useRoadGroupsController({
         }
         // void refreshRoadGroups(activeRoadGroupIdRef.current ?? undefined);
     }, [refreshRoadGroups, skipNextRoadMapRefreshRef, view]);
+
+    useEffect(() => {
+        if (view !== 'roadMap' || activeRoadGroupId !== null || roadGroups.length > 0) return;
+
+        console.info('[RM1 groups] empty snapshot; retrying until a group is available');
+        const timer = window.setInterval(() => {
+            void refreshRoadGroups();
+        }, EMPTY_RM1_SNAPSHOT_RETRY_MS);
+
+        return () => window.clearInterval(timer);
+    }, [activeRoadGroupId, refreshRoadGroups, roadGroups.length, view]);
 
     useEffect(() => {
         if (view !== 'roadMap') return;
