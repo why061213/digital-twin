@@ -52,7 +52,8 @@ export function roadGroupDisplayMs(routeCount: number) {
 }
 
 export const ROAD_GROUP_STRATEGIES: Array<{ value: RoadGroupStrategy; label: string; badge?: string }> = [
-    { value: 'business-priority', label: '综合', badge: '荐' },
+    { value: 'province-path', label: '省份路径', badge: '荐' },
+    { value: 'business-priority', label: '综合' },
     { value: 'by-order', label: '订单' },
     { value: 'by-path', label: '共路' },
     { value: 'by-route', label: '城市' },

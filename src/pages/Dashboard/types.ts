@@ -2,7 +2,7 @@ import type { RoadPathMessage, RouteOrder as RealtimeRouteOrder } from './hooks/
 
 export type ViewMode = 'warehouse' | 'chinaMap' | 'roadMap' | 'townRoadMap';
 export type LonLat = [number, number];
-export type RoadGroupStrategy = 'business-priority' | 'by-order' | 'by-path' | 'by-route';
+export type RoadGroupStrategy = 'province-path' | 'business-priority' | 'by-order' | 'by-path' | 'by-route';
 export type RouteOrder = RealtimeRouteOrder;
 
 export type ActiveRoute = RouteOrder & {

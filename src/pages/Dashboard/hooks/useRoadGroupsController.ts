@@ -13,6 +13,7 @@ import type {
 } from '../types';
 import {
     ROAD_GROUP_SWAP_DELAY_MS,
+    ROUTE_DISPLAY_MAX_COUNT,
     roadGroupDisplayMs,
 } from '../constants';
 import {
@@ -72,7 +73,7 @@ export function useRoadGroupsController({
     const pendingNextGroupIdRef = useRef<string | null>(null);
     const [roadGroups, setRoadGroups] = useState<RoadGroupSummary[]>([]);
     const [activeRoadGroupId, setActiveRoadGroupId] = useState<string | null>(null);
-    const [roadGroupStrategy, setRoadGroupStrategy] = useState<RoadGroupStrategy>('business-priority');
+    const [roadGroupStrategy, setRoadGroupStrategy] = useState<RoadGroupStrategy>('province-path');
     const [isLoadingRoadGroup, setIsLoadingRoadGroup] = useState(false);
     const [isRoadGroupFading, setIsRoadGroupFading] = useState(false);
     const [roadGroupAdvanceTick, setRoadGroupAdvanceTick] = useState(0);
@@ -252,11 +253,21 @@ export function useRoadGroupsController({
             setIsLoadingRoadGroup(true);
             try {
                 const data = await fetchRoadGroupRoutes(groupId, roadGroupStrategy);
+                const routeMessages = data.routes ?? [];
+                if (routeMessages.length > ROUTE_DISPLAY_MAX_COUNT) {
+                    console.error('[RoadMap] backend returned an oversized display page', {
+                        groupId,
+                        strategy: roadGroupStrategy,
+                        receivedCount: routeMessages.length,
+                        displayLimit: ROUTE_DISPLAY_MAX_COUNT,
+                    });
+                    return false;
+                }
                 const loadedGroupId = data.groupId || groupId;
                 // 注意：isSameGroup 必须在这之后定义，不能提前使用
                 const isSameGroup = activeRoadGroupIdRef.current === loadedGroupId;
                 const previousIds = new Set(activeRoutesRef.current.keys());
-                let routes = (data.routes ?? [])
+                let routes = routeMessages
                     .map(createActiveRoute)
                     .filter((route): route is ActiveRoute => Boolean(route));
                 const shouldAnimateGroupSwap =
