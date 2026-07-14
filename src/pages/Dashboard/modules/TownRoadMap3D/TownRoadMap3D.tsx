@@ -3,8 +3,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createLocalProjection, collectRenderProvinceAdcodes, collectTaskCoords, commandOrders, commandRenderProvinces, featureCoords, loadGeoJsonByRenderCommand } from './geo';
 import { MAP_LIFT, ROUTE_LIFT } from './constants';
-import { buildRouteFromTasks } from './townRouteRenderer';
+import { buildRouteFromTasks, progressOnRoad, updateOrderVisuals } from './townRouteRenderer';
 
+import type { TownRoadState } from './townRouteRenderer';
 import type { LonLat, TownAnimationStage, TownBoundaryLayers, TownRoadMap3DHandle, TownRoadRenderCommand, TownTransportTask } from './types';
 
 type TownRoadMap3DProps = {
@@ -154,6 +155,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
     const raycasterRef = useRef(new THREE.Raycaster());
     const pointerRef = useRef(new THREE.Vector2());
     const interactiveObjectsRef = useRef<THREE.Object3D[]>([]);
+    const renderedRoadsRef = useRef<TownRoadState[]>([]);
     const [hoverInfo, setHoverInfo] = useState<TownHoverInfo | null>(null);
 
     onVisualReadyRef.current = onVisualReady;
@@ -178,6 +180,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
             routesGroupRef.current = null;
         }
         interactiveObjectsRef.current = [];
+        renderedRoadsRef.current = [];
         setHoverInfo(null);
     }, []);
 
@@ -331,6 +334,7 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
             r.orders.forEach(l => l.vehicles.forEach(v => { interactiveObjects.push(v.bar); allPoints.push(v.bar.position); }));
         });
         interactiveObjectsRef.current = interactiveObjects;
+        renderedRoadsRef.current = roads;
 
         // 把所有路线放到一个统一 group 里
         const group = new THREE.Group();
@@ -490,6 +494,44 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
         ]);
     }, [setTransportTasks]);
 
+    const updateTruckPosition = useCallback((lineId: string, position: LonLat, meta?: { speedKmh?: number; status?: string; updatedAt?: string }) => {
+        const projection = projectionRef.current;
+        if (!projection || !lineId || !Array.isArray(position) || position.length < 2) return;
+
+        const projected = mapPositionFactory(projection)(position, ROUTE_LIFT + 0.28);
+        if (!projected) return;
+
+        for (const road of renderedRoadsRef.current) {
+            if (!road.lineIds.has(lineId)) continue;
+
+            for (const lane of road.orders.values()) {
+                const vehicle = lane.vehicles.get(lineId);
+                if (!vehicle) continue;
+
+                const progress = progressOnRoad(road, projected);
+                vehicle.progress = progress;
+                vehicle.currentCoords = position;
+                vehicle.info = {
+                    ...vehicle.info,
+                    status: meta?.status ?? vehicle.info.status,
+                    rows: Array.isArray(vehicle.info.rows)
+                        ? (vehicle.info.rows as Array<[string, string]>).map(([label, value]) => {
+                            if (label === '当前经度') return [label, position[0].toFixed(6)];
+                            if (label === '当前纬度') return [label, position[1].toFixed(6)];
+                            if (label === '时速' && typeof meta?.speedKmh === 'number') return [label, `${meta.speedKmh.toFixed(1)} km/h`];
+                            if (label === '状态' && meta?.status) return [label, meta.status];
+                            return [label, value];
+                        })
+                        : vehicle.info.rows,
+                    realtimeUpdatedAt: meta?.updatedAt ?? new Date().toISOString(),
+                    speedKmh: meta?.speedKmh,
+                    currentCoords: position,
+                };
+                updateOrderVisuals(road, ROUTE_LIFT + 0.28);
+                return;
+            }
+        }
+    }, [mapPositionFactory]);
     const startAnimationStage = useCallback((stage: TownAnimationStage) => {
         // 预留入口：后面具体动画可以在这里根据 stage.kind 调 camera、路线高亮、边高亮。
         // 当前阶段先只暴露入口，不改变地图状态，避免影响已调好的渲染链路。
@@ -513,8 +555,9 @@ const TownRoadMap3D = forwardRef<TownRoadMap3DHandle, TownRoadMap3DProps>(({ onV
         setRenderCommand: renderCommand,
         startAnimationStage,
         playAnimationStage,
+        updateTruckPosition,
         clearRoutes: clearRenderedData,
-    }), [clearRenderedData, playAnimationStage, renderCommand, setRoute, setTransportTasks, startAnimationStage]);
+    }), [clearRenderedData, playAnimationStage, renderCommand, setRoute, setTransportTasks, startAnimationStage, updateTruckPosition]);
 
     useEffect(() => {
         const container = containerRef.current;

@@ -119,6 +119,7 @@ function DashboardPage() {
         loadTownRoadData,
         stopTownAnimationLoop,
         handleTownRoadRenderCommand,
+    handleTownTruckPosition,
     } = useTownRoadController({
         view,
         townRoadMapRef,
@@ -130,6 +131,10 @@ function DashboardPage() {
         requestViewChange('townRoadMap');
     }, [handleTownRoadRenderCommand, requestViewChange]);
 
+    const handleRealtimeTruckPosition = useCallback((message: Parameters<typeof handleTruckPosition>[0]) => {
+        handleTruckPosition(message);
+        handleTownTruckPosition(message);
+    }, [handleTownTruckPosition, handleTruckPosition]);
     const handleTownRoadMapVisualReady = useCallback(() => undefined, []);
 
     const handleRouteRaise = useCallback((_order: RouteOrder) => {
@@ -185,7 +190,7 @@ function DashboardPage() {
         onRouteRaise: handleRouteRaise,
         onRouteFall: finishRoute,
         onRoadPath: handleRoadPath,
-        onTruckPosition: handleTruckPosition,
+        onTruckPosition: handleRealtimeTruckPosition,
         onWarehouseUpdate: handleWarehouseUpdate,
         onWarehouseFocus: handleWarehouseFocus,
         onCameraControl: handleCameraControl,

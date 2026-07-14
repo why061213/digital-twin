@@ -246,6 +246,11 @@ export type TownRoadMap3DHandle = {
     startAnimationStage?: (stage: TownAnimationStage) => void;
     /** 预留动画播放入口：下一步按 stage.kind 分发镜头、路径、边和订单动画。 */
     playAnimationStage?: (stage: TownAnimationStage) => void;
+    updateTruckPosition?: (lineId: string, position: LonLat, meta?: {
+        speedKmh?: number;
+        status?: string;
+        updatedAt?: string;
+    }) => void;
     clearRoutes?: () => void;
 };
 

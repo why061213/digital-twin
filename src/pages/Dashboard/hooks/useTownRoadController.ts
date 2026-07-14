@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import type { ViewMode } from '../types';
+import type { TruckPositionMessage } from './useDashboardRealtime';
 import { fetchTownRoadRenderEnvelope } from '../services/townRoadApi';
+import { fetchTruckPosition } from '../services/roadApi';
+import { POSITION_QUERY_INTERVAL_MS, POSITION_RENDER_TICK_MS } from '../constants';
 import { townLog } from '../townRoadLogger';
 import {
     buildTownAnimationStages,
@@ -230,6 +233,8 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
     const loadingRef = useRef(false);
     const loadedOnceRef = useRef(false);
     const suppressTownWsUntilRef = useRef(0);
+    const townPositionRequestsRef = useRef<Set<string>>(new Set());
+    const townNextPositionQueryAtRef = useRef<Map<string, number>>(new Map());
     const animationQueueRef = useRef(new CircularAnimationQueue<TownAnimationStage>());
     const animationTimerRef = useRef<number | null>(null);
     const animationRunningRef = useRef(false);
@@ -460,6 +465,38 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         townLog('groupEnd');
     }, []);
 
+    const handleTownTruckPosition = useCallback((message: TruckPositionMessage, forceCalibration = false) => {
+        if (!message?.lineId || !Array.isArray(message.position) || message.position.length < 2) return;
+        const existing = orderMapRef.current.get(message.lineId);
+        if (!existing || existing.deleted || existing.status === '已取消' || existing.status === '已完成') return;
+
+        const updatedAt = new Date().toISOString();
+        const nextOrder: TownTransportOrder = {
+            ...existing,
+            status: message.status === 'finished' ? '已完成' : existing.status,
+            updatedAt,
+            vehicle: {
+                ...existing.vehicle,
+                currentCoords: message.position,
+                speedKmh: message.speedKmh,
+            },
+        };
+        orderMapRef.current.set(message.lineId, nextOrder);
+        townRoadMapRef.current?.updateTruckPosition?.(message.lineId, message.position, {
+            speedKmh: message.speedKmh,
+            status: nextOrder.status,
+            updatedAt,
+        });
+        townNextPositionQueryAtRef.current.set(message.lineId, performance.now() + POSITION_QUERY_INTERVAL_MS);
+
+        if (forceCalibration) {
+            townLog('debug', 'town truck position calibrated', {
+                lineId: message.lineId,
+                speedKmh: message.speedKmh,
+                progress: message.progress,
+            });
+        }
+    }, [townRoadMapRef]);
     const handleTownRoadRenderCommand = useCallback((payload: TownRoadRenderIncoming) => {
         const now = performance.now();
 
@@ -514,6 +551,31 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         }
     }, [applyTownRoadEnvelope]);
 
+    useEffect(() => {
+        if (view !== 'townRoadMap') return;
+
+        const timer = window.setInterval(() => {
+            const now = performance.now();
+            orderMapRef.current.forEach((order) => {
+                if (!order.lineId || order.deleted || order.status !== '运输中') return;
+                const nextAt = townNextPositionQueryAtRef.current.get(order.lineId) ?? 0;
+                if (now < nextAt || townPositionRequestsRef.current.has(order.lineId)) return;
+
+                townPositionRequestsRef.current.add(order.lineId);
+                townNextPositionQueryAtRef.current.set(order.lineId, now + POSITION_QUERY_INTERVAL_MS);
+                void fetchTruckPosition(order.lineId)
+                    .then((message) => handleTownTruckPosition(message, true))
+                    .catch((error) => {
+                        townLog('warn', 'town truck position poll failed', { lineId: order.lineId, error });
+                    })
+                    .finally(() => {
+                        townPositionRequestsRef.current.delete(order.lineId);
+                    });
+            });
+        }, POSITION_RENDER_TICK_MS);
+
+        return () => window.clearInterval(timer);
+    }, [handleTownTruckPosition, view]);
     const animationQueueSnapshot = useMemo(() => {
         // 从 current 开始展开，更接近后面实际播放顺序。
         return animationQueueRef.current.toSnapshot(true);
@@ -829,6 +891,7 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         loadTownRoadData,
         applyTownRoadEnvelope,
         handleTownRoadRenderCommand,
+        handleTownTruckPosition,
         reloadMockTownCommand,
         showTownCommandAt,
         showNextTownCommand,
