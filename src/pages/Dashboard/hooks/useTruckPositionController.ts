@@ -7,10 +7,12 @@ import {
 } from '../modules/RoadMap3D/utils';
 import type { ActiveRoute, ViewMode } from '../types';
 import type { RoadPathMessage, RouteOrder, TruckPositionMessage } from './useDashboardRealtime';
-import { fetchTruckPosition } from '../services/roadApi';
+import { fetchTruckPosition, fetchTruckPositions } from '../services/roadApi';
 import {
     POSITION_QUERY_INTERVAL_MS,
     POSITION_RENDER_TICK_MS,
+    POSITION_BATCH_POLL_MS,
+    POSITION_BACKGROUND_POLL_MS,
 } from '../constants';
 import {
     applyTruckPositionToRoute,
@@ -189,32 +191,58 @@ export function useTruckPositionController({
     );
 
     const prefetchRoutePositions = useCallback(async (routes: ActiveRoute[]) => {
-        await Promise.all(routes.map(async (route) => {
-            if (positionRequestsRef.current.has(route.lineId)) return;
-            positionRequestsRef.current.add(route.lineId);
-            try {
-                const message = await fetchTruckPosition(route.lineId);
-                if (message.status === 'finished') {
-                    completedRouteIdsRef.current.add(route.lineId);
+        const activeLineIds = routes
+            .filter((r) => !completedRouteIdsRef.current.has(r.lineId))
+            .map((r) => r.lineId);
+
+        if (activeLineIds.length === 0) return routes;
+
+        const startedAt = performance.now();
+        try {
+            const response = await fetchTruckPositions(activeLineIds);
+            const costMs = Math.round(performance.now() - startedAt);
+            console.info('[RoadMap] batch position prefetch', {
+                requestedLineCount: activeLineIds.length,
+                returnedCount: response.positions.length,
+                missingCount: response.missingLineIds.length,
+                staleCount: response.staleLineIds.length,
+                costMs,
+            });
+
+            const now = performance.now();
+            response.positions.forEach((item) => {
+                const route = activeRoutesRef.current.get(item.lineId);
+                if (!route || completedRouteIdsRef.current.has(item.lineId)) return;
+
+                if (item.status === 'finished') {
+                    completedRouteIdsRef.current.add(item.lineId);
                     return;
                 }
-                if (!message.position) return;
-                const now = performance.now();
+                if (!item.position) return;
+
+                const message: TruckPositionMessage = {
+                    type: 'truck_position',
+                    lineId: item.lineId,
+                    position: item.position,
+                    speedKmh: item.speedKmh,
+                    status: item.status ?? '运输中',
+                };
                 applyTruckPositionToRoute(route, message, now);
                 saveTruckPositionToCache({
-                    lineId: message.lineId,
-                    position: message.position,
+                    lineId: item.lineId,
+                    position: item.position,
                     status: message.status,
                     speedKmh: route.speedKmh,
                     updatedAt: new Date().toISOString(),
                 });
-            } catch (error) {
-                console.warn('Truck position prefetch failed', error);
+            });
+        } catch (error) {
+            console.warn('[RoadMap] batch position prefetch failed', error);
+            routes.forEach((route) => {
                 route.nextCalibrationAt = performance.now() + initialPositionQueryDelay(route.lineId);
-            } finally {
-                positionRequestsRef.current.delete(route.lineId);
-            }
-        }));
+            });
+        }
+
         return routes.filter((route) => !completedRouteIdsRef.current.has(route.lineId));
     }, []);
 
@@ -263,24 +291,53 @@ export function useTruckPositionController({
         [finishRoute, renderTruckPosition]
     );
 
-    const requestTruckPosition = useCallback(
-        async (lineId: string) => {
-            if (positionRequestsRef.current.has(lineId)) return;
-            positionRequestsRef.current.add(lineId);
+    const requestTruckPositionsBatch = useCallback(
+        async (lineIds: string[]) => {
+            const deduped = [...new Set(lineIds.filter((id) => !positionRequestsRef.current.has(id)))];
+            if (deduped.length === 0) return;
+
+            deduped.forEach((id) => positionRequestsRef.current.add(id));
             try {
-                handleTruckPosition(await fetchTruckPosition(lineId), true);
+                const response = await fetchTruckPositions(deduped);
+                const now = performance.now();
+                response.positions.forEach((item) => {
+                    if (item.status === 'finished') {
+                        finishRoute(item.lineId);
+                        return;
+                    }
+                    if (!item.position) return;
+                    const route = activeRoutesRef.current.get(item.lineId);
+                    if (!route) return;
+                    applyTruckPositionToRoute(route, {
+                        type: 'truck_position',
+                        lineId: item.lineId,
+                        position: item.position,
+                        speedKmh: item.speedKmh,
+                        status: item.status ?? '运输中',
+                    } as TruckPositionMessage, now);
+                    saveTruckPositionToCache({
+                        lineId: item.lineId,
+                        position: item.position,
+                        status: item.status ?? '运输中',
+                        speedKmh: route.speedKmh,
+                        updatedAt: new Date().toISOString(),
+                    });
+                    renderTruckPosition(route, now);
+                });
             } catch (error) {
-                console.warn('Truck position request failed', error);
-                const route = activeRoutesRef.current.get(lineId);
-                if (route) {
-                    route.arrivalCheckRequested = false;
-                    route.nextCalibrationAt = performance.now() + POSITION_QUERY_INTERVAL_MS;
-                }
+                console.warn('[RoadMap] batch position request failed', error);
+                deduped.forEach((lineId) => {
+                    const route = activeRoutesRef.current.get(lineId);
+                    if (route) {
+                        route.arrivalCheckRequested = false;
+                        route.nextCalibrationAt = performance.now() + POSITION_QUERY_INTERVAL_MS;
+                    }
+                });
             } finally {
-                positionRequestsRef.current.delete(lineId);
+                deduped.forEach((id) => positionRequestsRef.current.delete(id));
             }
         },
-        [handleTruckPosition]
+        [finishRoute, renderTruckPosition]
     );
 
     useEffect(() => {
@@ -299,26 +356,17 @@ export function useTruckPositionController({
 
     useEffect(() => {
         // 关键：只有 RoadMap 正在显示时，才更新车辆位置和 routeOrders。
-        // 否则 ChinaMap 聚焦时，DashboardPage 会被这个定时器高频刷新，导致两侧仓库面板闪动。
         if (view !== 'roadMap') return;
 
-        const timer = window.setInterval(() => {
+        let batchTimer: ReturnType<typeof setInterval> | null = null;
+
+        // 本地渲染 tick（500ms）：插值动画 + 路线进度
+        const renderTimer = window.setInterval(() => {
             const now = performance.now();
             const progressUpdates = new Map<string, ReturnType<typeof routeProgressPatch>>();
             activeRoutesRef.current.forEach((route) => {
                 renderTruckPosition(route, now);
                 progressUpdates.set(route.lineId, routeProgressPatch(route, now));
-                const reachedPredictedEnd = route.pathLength > 0 && predictedDistance(route, now) >= route.pathLength - 0.0001;
-                if (reachedPredictedEnd && !route.arrivalCheckRequested) {
-                    route.arrivalCheckRequested = true;
-                    route.nextCalibrationAt = now;
-                    void requestTruckPosition(route.lineId);
-                    return;
-                }
-
-                if (now >= route.nextCalibrationAt) {
-                    void requestTruckPosition(route.lineId);
-                }
             });
             if (progressUpdates.size > 0) {
                 setRouteOrders((prev) => {
@@ -336,8 +384,56 @@ export function useTruckPositionController({
             }
         }, POSITION_RENDER_TICK_MS);
 
-        return () => window.clearInterval(timer);
-    }, [renderTruckPosition, requestTruckPosition, view]);
+        // 批量位置校准 tick：收集需要校准的线路，一次批量请求
+        const pollBatch = () => {
+            if (document.visibilityState !== 'visible') {
+                if (batchTimer) {
+                    clearInterval(batchTimer);
+                    batchTimer = setInterval(pollBatch, POSITION_BACKGROUND_POLL_MS);
+                }
+                return;
+            }
+
+            const now = performance.now();
+            const needCalibration: string[] = [];
+            activeRoutesRef.current.forEach((route) => {
+                const reachedPredictedEnd = route.pathLength > 0
+                    && predictedDistance(route, now) >= route.pathLength - 0.0001;
+                if (reachedPredictedEnd && !route.arrivalCheckRequested) {
+                    route.arrivalCheckRequested = true;
+                    route.nextCalibrationAt = now;
+                    needCalibration.push(route.lineId);
+                } else if (now >= route.nextCalibrationAt) {
+                    needCalibration.push(route.lineId);
+                }
+            });
+
+            if (needCalibration.length > 0) {
+                void requestTruckPositionsBatch(needCalibration);
+            }
+        };
+
+        batchTimer = setInterval(pollBatch, POSITION_BATCH_POLL_MS);
+        pollBatch(); // 首次立即同步
+
+        const onVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                if (batchTimer) clearInterval(batchTimer);
+                batchTimer = setInterval(pollBatch, POSITION_BATCH_POLL_MS);
+                pollBatch();
+            } else {
+                if (batchTimer) clearInterval(batchTimer);
+                batchTimer = setInterval(pollBatch, POSITION_BACKGROUND_POLL_MS);
+            }
+        };
+        document.addEventListener('visibilitychange', onVisibilityChange);
+
+        return () => {
+            window.clearInterval(renderTimer);
+            if (batchTimer) clearInterval(batchTimer);
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+        };
+    }, [renderTruckPosition, requestTruckPositionsBatch, view]);
 
     return {
         routeOrders,
