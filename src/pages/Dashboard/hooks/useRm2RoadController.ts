@@ -41,6 +41,8 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
     const activeGroupIdRef = useRef<string | null>(null);
     const groupRequestRef = useRef<AbortController | null>(null);
     const routeRequestRef = useRef<AbortController | null>(null);
+    /** 请求代次：每次同步递增，旧响应直接丢弃 */
+    const requestGenerationRef = useRef(0);
     /** 当前快照版本 */
     const snapshotVersionRef = useRef<string>('');
     /** 按 version:groupId 缓存路线 */
@@ -57,12 +59,13 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
         activeGroupIdRef.current = groupId;
         setActiveGroupId(groupId);
 
-        // 检查缓存：版本+组ID 都匹配才复用
+        const gen = requestGenerationRef.current;
         const version = snapshotVersionRef.current;
         const cachedKey = cacheKey(version, groupId);
         const cached = groupRoutesCacheRef.current.get(cachedKey);
 
         if (cached) {
+            if (gen !== requestGenerationRef.current) return;
             const accepted = cached.map(adaptRenderRoute).filter((r): r is NonNullable<typeof r> => r !== null);
             const roadMap = roadMapRef.current;
             if (roadMap) {
@@ -85,6 +88,7 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
                 ? await fetchRm2GroupRoutes(groupId, request.signal)
                 : { routes: FIXTURE_ROUTES.filter((route) => route.groupId === groupId), snapshotVersion: version };
             if (request.signal.aborted) return;
+            if (gen !== requestGenerationRef.current) return;
 
             const accepted = response.routes.map(adaptRenderRoute).filter((r): r is NonNullable<typeof r> => r !== null);
 
@@ -108,7 +112,7 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
         } catch (error) {
             if ((error as DOMException).name !== 'AbortError') console.warn('RM2 group load failed', { groupId, error });
         } finally {
-            if (!request.signal.aborted) setIsLoading(false);
+            if (!request.signal.aborted && gen === requestGenerationRef.current) setIsLoading(false);
         }
     }, [roadMapRef]);
 
@@ -116,10 +120,12 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
         groupRequestRef.current?.abort();
         const request = new AbortController();
         groupRequestRef.current = request;
+        const gen = ++requestGenerationRef.current;
         setIsLoading(true);
         try {
             const response = await fetchRm2Groups(request.signal);
             if (request.signal.aborted) return;
+            if (gen !== requestGenerationRef.current) return;
             sourceRef.current = 'backend';
 
             // 版本变化 → 清除旧缓存
@@ -140,6 +146,7 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             else roadMapRef.current?.clearRoads();
         } catch (error) {
             if (request.signal.aborted) return;
+            if (gen !== requestGenerationRef.current) return;
             console.warn('RM2 API unavailable; using fixture fallback', error);
             sourceRef.current = 'fixture';
             setGroups(FIXTURE_GROUPS);
@@ -148,7 +155,7 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             if (preferred) await loadGroup(preferred.groupId);
             else roadMapRef.current?.clearRoads();
         } finally {
-            if (!request.signal.aborted) setIsLoading(false);
+            if (!request.signal.aborted && gen === requestGenerationRef.current) setIsLoading(false);
         }
     }, [loadGroup, roadMapRef]);
 
