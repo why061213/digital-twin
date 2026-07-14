@@ -3,8 +3,8 @@ import type { RefObject } from 'react';
 import type { ViewMode } from '../types';
 import type { TruckPositionMessage } from './useDashboardRealtime';
 import { fetchTownRoadRenderEnvelope } from '../services/townRoadApi';
-import { fetchTruckPosition, fetchTruckPositions } from '../services/roadApi';
-import { POSITION_QUERY_INTERVAL_MS, POSITION_RENDER_TICK_MS, POSITION_BATCH_POLL_MS, POSITION_BACKGROUND_POLL_MS } from '../constants';
+import { fetchTruckPositions } from '../services/roadApi';
+import { POSITION_QUERY_INTERVAL_MS, POSITION_RENDER_TICK_MS, POSITION_BATCH_POLL_MS, POSITION_BATCH_MIN_INTERVAL_MS } from '../constants';
 import { townLog } from '../townRoadLogger';
 import {
     buildTownAnimationStages,
@@ -662,26 +662,25 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
     useEffect(() => {
         if (view !== 'townRoadMap') return;
 
-        let batchPositionController: AbortController | null = null;
+        let batchController: AbortController | null = null;
         let batchTimer: ReturnType<typeof setInterval> | null = null;
+        let batchSeq = 0;
+        let lastBatchAt = 0;
 
         const pollBatchPositions = () => {
-            // 页面不可见时降低频率
-            if (document.visibilityState !== 'visible') {
-                if (batchTimer) {
-                    clearInterval(batchTimer);
-                    batchTimer = setInterval(pollBatchPositions, POSITION_BACKGROUND_POLL_MS);
-                }
+            // hidden → 不轮询，abort 并停止
+            if (document.visibilityState === 'hidden') {
+                if (batchTimer) { clearInterval(batchTimer); batchTimer = null; }
+                if (batchController) { batchController.abort(); batchController = null; }
                 return;
             }
 
-            // single-flight：已有进行中的请求则跳过
-            if (batchPositionController) {
-                townLog('debug', 'batch position poll skipped: previous request in flight');
-                return;
-            }
+            // 距上次请求太近 → 跳过
+            if (performance.now() - lastBatchAt < POSITION_BATCH_MIN_INTERVAL_MS) return;
 
-            // 收集当前阶段需要查询的 lineId
+            // single-flight
+            if (batchController) return;
+
             const currentStage = animationQueueRef.current.current;
             const stageLineIds = currentStage?.payload?.orderLineIds ?? [];
             if (stageLineIds.length === 0) return;
@@ -692,66 +691,70 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
                 const status = (order.status ?? '').trim();
                 return status === '运输中' || status.includes('运输');
             });
-
             if (activeLineIds.length === 0) return;
 
             const controller = new AbortController();
-            batchPositionController = controller;
-            const startedAt = performance.now();
+            batchController = controller;
+            const seq = ++batchSeq;
+            const stageId = currentStage?.id ?? '';
+            lastBatchAt = performance.now();
+            const startedAt = lastBatchAt;
 
             void fetchTruckPositions(activeLineIds, { signal: controller.signal })
                 .then((response) => {
+                    if (controller.signal.aborted) return;
+                    if (batchController !== controller) return;
+                    if (seq !== batchSeq) return;
+
+                    const currentStageNow = animationQueueRef.current.current;
+                    if (currentStageNow?.id !== stageId) {
+                        townLog('debug', 'batch position response discarded: stage changed', {
+                            requestStageId: stageId, currentStageId: currentStageNow?.id,
+                        });
+                        return;
+                    }
+
                     const costMs = Math.round(performance.now() - startedAt);
                     townLog('info', 'batch position poll', {
-                        view: 'townRoadMap',
-                        stageId: currentStage?.id,
+                        view: 'townRoadMap', stageId,
                         requestedLineCount: activeLineIds.length,
                         returnedCount: response.positions.length,
                         missingCount: response.missingLineIds.length,
                         staleCount: response.staleLineIds.length,
-                        costMs,
-                        aborted: false,
+                        costMs, aborted: false,
                     });
 
+                    const stageLineIdSet = new Set(stageLineIds);
                     response.positions.forEach((item) => {
+                        if (!stageLineIdSet.has(item.lineId)) return;
                         if (item.position && item.position.length >= 2) {
                             handleTownTruckPosition({
-                                lineId: item.lineId,
-                                position: item.position,
-                                speedKmh: item.speedKmh,
-                                status: item.status ?? '运输中',
+                                lineId: item.lineId, position: item.position,
+                                speedKmh: item.speedKmh, status: item.status ?? '运输中',
                             } as TruckPositionMessage, true);
                         }
                     });
                 })
                 .catch((error) => {
-                    if (error instanceof DOMException && error.name === 'AbortError') {
-                        townLog('debug', 'batch position poll aborted');
-                        return;
-                    }
+                    if (error instanceof DOMException && error.name === 'AbortError') return;
                     townLog('warn', 'batch position poll failed', { error });
                 })
                 .finally(() => {
-                    if (batchPositionController === controller) {
-                        batchPositionController = null;
-                    }
+                    if (batchController === controller) batchController = null;
                 });
         };
 
-        // 首次同步一次
         pollBatchPositions();
-        // 定期批量轮询
         batchTimer = setInterval(pollBatchPositions, POSITION_BATCH_POLL_MS);
 
-        // 可见性变化时恢复前台频率
         const onVisibilityChange = () => {
             if (document.visibilityState === 'visible') {
                 if (batchTimer) clearInterval(batchTimer);
                 batchTimer = setInterval(pollBatchPositions, POSITION_BATCH_POLL_MS);
                 pollBatchPositions();
             } else {
-                if (batchTimer) clearInterval(batchTimer);
-                batchTimer = setInterval(pollBatchPositions, POSITION_BACKGROUND_POLL_MS);
+                if (batchTimer) { clearInterval(batchTimer); batchTimer = null; }
+                if (batchController) { batchController.abort(); batchController = null; }
             }
         };
         document.addEventListener('visibilitychange', onVisibilityChange);
@@ -759,10 +762,7 @@ export function useTownRoadController({ view, townRoadMapRef }: UseTownRoadContr
         return () => {
             document.removeEventListener('visibilitychange', onVisibilityChange);
             if (batchTimer) clearInterval(batchTimer);
-            if (batchPositionController) {
-                batchPositionController.abort();
-                batchPositionController = null;
-            }
+            if (batchController) { batchController.abort(); batchController = null; }
         };
     }, [handleTownTruckPosition, view]);
     const animationQueueSnapshot = useMemo(() => {

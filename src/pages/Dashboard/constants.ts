@@ -31,10 +31,14 @@ export const POSITION_RENDER_TICK_MS = readPositiveEnv('VITE_TRUCK_POSITION_REND
 /** 批量位置查询间隔（真实环境 60 秒，测试环境可调低） */
 export const POSITION_BATCH_POLL_MS = readPositiveEnv('VITE_POSITION_BATCH_POLL_MS',
     SIMULATION_PROFILE === 'real' ? 60_000 : 30_000);
-/** 页面后台时批量位置查询间隔 */
-export const POSITION_BACKGROUND_POLL_MS = readPositiveEnv('VITE_POSITION_BACKGROUND_POLL_MS', 300_000);
-/** 路线组切换前预取时间窗口 */
-export const POSITION_GROUP_PRELOAD_MS = readPositiveEnv('VITE_POSITION_GROUP_PRELOAD_MS', 5_000);
+/** WebSocket 正常时 REST 兜底间隔（2~5 分钟） */
+export const POSITION_WS_FALLBACK_POLL_MS = readPositiveEnv('VITE_POSITION_WS_FALLBACK_POLL_MS', 180_000);
+/** WebSocket 超时未收到消息视为断开（毫秒） */
+export const WS_POSITION_TIMEOUT_MS = readPositiveEnv('VITE_WS_POSITION_TIMEOUT_MS', 90_000);
+/** 批量请求最小间隔：避免 prefetch 后立即 poll */
+export const POSITION_BATCH_MIN_INTERVAL_MS = readPositiveEnv('VITE_POSITION_BATCH_MIN_INTERVAL_MS', 10_000);
+/** 路线组最大可见线路数 */
+export const ROUTE_DISPLAY_MAX_COUNT = readPositiveEnv('VITE_ROUTE_DISPLAY_MAX_COUNT', 12);
 export const MAP_VIEW_TRANSITION_MS = readPositiveEnv('VITE_MAP_VIEW_TRANSITION_MS', DEFAULT_MAP_VIEW_TRANSITION_MS);
 export const MAP_VIEW_RELEASE_DELAY_MS = Math.max(220, Math.round(MAP_VIEW_TRANSITION_MS * 0.45));
 export const ROAD_GROUP_TRANSITION_MS = readPositiveEnv('VITE_ROAD_GROUP_TRANSITION_MS', DEFAULT_ROAD_GROUP_TRANSITION_MS);

@@ -7,12 +7,14 @@ import {
 } from '../modules/RoadMap3D/utils';
 import type { ActiveRoute, ViewMode } from '../types';
 import type { RoadPathMessage, RouteOrder, TruckPositionMessage } from './useDashboardRealtime';
-import { fetchTruckPosition, fetchTruckPositions } from '../services/roadApi';
+import { fetchTruckPositions } from '../services/roadApi';
 import {
     POSITION_QUERY_INTERVAL_MS,
     POSITION_RENDER_TICK_MS,
     POSITION_BATCH_POLL_MS,
-    POSITION_BACKGROUND_POLL_MS,
+    POSITION_WS_FALLBACK_POLL_MS,
+    WS_POSITION_TIMEOUT_MS,
+    POSITION_BATCH_MIN_INTERVAL_MS,
 } from '../constants';
 import {
     applyTruckPositionToRoute,
@@ -31,6 +33,12 @@ import {
 type UseTruckPositionControllerOptions = {
     roadMapRef: RefObject<RoadMap3DHandle | null>;
     view: ViewMode;
+    /** 当前活跃路线组 ID */
+    activeRoadGroupId: string | null;
+    /** 当前活跃路线组包含的 lineId 列表 */
+    activeRoadGroupLineIds: string[];
+    /** WebSocket 连接状态：最近一次收到 truck_position 的时间戳（毫秒），null 表示从未收到 */
+    wsLastPositionAt: number | null;
 };
 
 type UseTruckPositionControllerResult = {
@@ -48,15 +56,31 @@ type UseTruckPositionControllerResult = {
     renderTruckPosition: (route: ActiveRoute, now: number) => void;
 };
 
+// ---------- single-flight 状态 ----------
+type BatchRequestState = {
+    controller: AbortController;
+    scopeId: string;
+    sequence: number;
+};
+
 export function useTruckPositionController({
     roadMapRef,
     view,
+    activeRoadGroupId,
+    activeRoadGroupLineIds,
+    wsLastPositionAt,
 }: UseTruckPositionControllerOptions): UseTruckPositionControllerResult {
     const [routeOrders, setRouteOrders] = useState<RouteOrder[]>([]);
     const activeRoutesRef = useRef<Map<string, ActiveRoute>>(new Map());
     const routeOrdersRef = useRef<RouteOrder[]>([]);
-    const positionRequestsRef = useRef<Set<string>>(new Set());
     const completedRouteIdsRef = useRef<Set<string>>(new Set());
+
+    // single-flight：同一时间最多一个批量请求
+    const batchRequestRef = useRef<BatchRequestState | null>(null);
+    // 请求序列号
+    const batchSequenceRef = useRef(0);
+    // 上次批量请求时间（避免 prefetch 后立即 poll）
+    const lastBatchAtRef = useRef(0);
 
     useEffect(() => {
         routeOrdersRef.current = routeOrders;
@@ -190,35 +214,58 @@ export function useTruckPositionController({
         [renderTruckPosition, syncRoadRoute]
     );
 
-    const prefetchRoutePositions = useCallback(async (routes: ActiveRoute[]) => {
-        const activeLineIds = routes
-            .filter((r) => !completedRouteIdsRef.current.has(r.lineId))
-            .map((r) => r.lineId);
+    // ---------- 请求协调器：prefetch 和 poll 共用 ----------
+    const executeBatchRequest = useCallback(async (
+        lineIds: string[],
+        scopeId: string,
+    ) => {
+        const state = batchRequestRef.current;
 
-        if (activeLineIds.length === 0) return routes;
+        // 同一 scope 已有请求进行中 → 跳过
+        if (state && state.scopeId === scopeId) {
+            return;
+        }
 
-        const startedAt = performance.now();
+        // 不同 scope → abort 旧请求
+        if (state) {
+            state.controller.abort();
+            batchRequestRef.current = null;
+        }
+
+        if (lineIds.length === 0) return;
+
+        const sequence = ++batchSequenceRef.current;
+        const controller = new AbortController();
+        batchRequestRef.current = { controller, scopeId, sequence };
+
+        lastBatchAtRef.current = performance.now();
+
         try {
-            const response = await fetchTruckPositions(activeLineIds);
-            const costMs = Math.round(performance.now() - startedAt);
-            console.info('[RoadMap] batch position prefetch', {
-                requestedLineCount: activeLineIds.length,
-                returnedCount: response.positions.length,
-                missingCount: response.missingLineIds.length,
-                staleCount: response.staleLineIds.length,
-                costMs,
-            });
-
+            const response = await fetchTruckPositions(lineIds, { signal: controller.signal });
             const now = performance.now();
-            response.positions.forEach((item) => {
-                const route = activeRoutesRef.current.get(item.lineId);
-                if (!route || completedRouteIdsRef.current.has(item.lineId)) return;
 
+            // 响应落地校验
+            if (controller.signal.aborted) return;
+            if (batchRequestRef.current?.sequence !== sequence) return;
+            if (scopeId !== activeRoadGroupId) return;
+
+            const activeGroupSet = new Set(activeRoadGroupLineIds);
+            const unexpectedLineIds: string[] = [];
+
+            response.positions.forEach((item) => {
+                if (!lineIds.includes(item.lineId)) return; // 不在请求范围内
+                if (!activeGroupSet.has(item.lineId)) {
+                    unexpectedLineIds.push(item.lineId);
+                    return;
+                }
                 if (item.status === 'finished') {
                     completedRouteIdsRef.current.add(item.lineId);
                     return;
                 }
                 if (!item.position) return;
+
+                const route = activeRoutesRef.current.get(item.lineId);
+                if (!route) return;
 
                 const message: TruckPositionMessage = {
                     type: 'truck_position',
@@ -236,22 +283,56 @@ export function useTruckPositionController({
                     updatedAt: new Date().toISOString(),
                 });
             });
+
+            if (unexpectedLineIds.length > 0 && import.meta.env.DEV) {
+                console.error('[RoadMap] unexpected lineIds in batch response', {
+                    activeRoadGroupId: scopeId,
+                    activeGroupLineCount: activeGroupSet.size,
+                    requestedLineCount: lineIds.length,
+                    unexpectedLineIds,
+                });
+            }
         } catch (error) {
-            console.warn('[RoadMap] batch position prefetch failed', error);
-            routes.forEach((route) => {
-                route.nextCalibrationAt = performance.now() + initialPositionQueryDelay(route.lineId);
-            });
+            if (error instanceof DOMException && error.name === 'AbortError') return;
+            console.warn('[RoadMap] batch position request failed', error);
+        } finally {
+            if (batchRequestRef.current?.controller === controller) {
+                batchRequestRef.current = null;
+            }
         }
+    }, [activeRoadGroupId, activeRoadGroupLineIds]);
+
+    // ---------- prefetch：路线组首次加载调用 ----------
+    const prefetchRoutePositions = useCallback(async (routes: ActiveRoute[]) => {
+        const activeLineIds = routes
+            .filter((r) => !completedRouteIdsRef.current.has(r.lineId))
+            .map((r) => r.lineId);
+
+        if (activeLineIds.length === 0) return routes;
+        if (!activeRoadGroupId) return routes;
+
+        // 只请求属于当前组的 lineId
+        const groupSet = new Set(activeRoadGroupLineIds);
+        const groupLineIds = activeLineIds.filter((id) => groupSet.has(id));
+
+        console.info('[RoadMap] prefetch positions', {
+            activeRoadGroupId,
+            activeGroupLineCount: groupSet.size,
+            requestedLineCount: groupLineIds.length,
+            unexpectedLineIds: activeLineIds.filter((id) => !groupSet.has(id)),
+        });
+
+        await executeBatchRequest(groupLineIds, activeRoadGroupId);
 
         return routes.filter((route) => !completedRouteIdsRef.current.has(route.lineId));
-    }, []);
+    }, [activeRoadGroupId, activeRoadGroupLineIds, executeBatchRequest]);
 
     const finishRoute = useCallback((lineId: string) => {
         completedRouteIdsRef.current.add(lineId);
         activeRoutesRef.current.delete(lineId);
         roadMapRef.current?.removeRoadPath(lineId);
         setRouteOrders((prev) =>
-            prev.map((item) => (item.lineId === lineId ? {...item, status: '已完成'} : item))
+            prev.map((item) => (item.lineId === lineId ? { ...item, status: '已完成' } : item))
         );
     }, [roadMapRef]);
 
@@ -291,55 +372,28 @@ export function useTruckPositionController({
         [finishRoute, renderTruckPosition]
     );
 
-    const requestTruckPositionsBatch = useCallback(
-        async (lineIds: string[]) => {
-            const deduped = [...new Set(lineIds.filter((id) => !positionRequestsRef.current.has(id)))];
-            if (deduped.length === 0) return;
+    // ========== Effects ==========
 
-            deduped.forEach((id) => positionRequestsRef.current.add(id));
-            try {
-                const response = await fetchTruckPositions(deduped);
-                const now = performance.now();
-                response.positions.forEach((item) => {
-                    if (item.status === 'finished') {
-                        finishRoute(item.lineId);
-                        return;
-                    }
-                    if (!item.position) return;
-                    const route = activeRoutesRef.current.get(item.lineId);
-                    if (!route) return;
-                    applyTruckPositionToRoute(route, {
-                        type: 'truck_position',
-                        lineId: item.lineId,
-                        position: item.position,
-                        speedKmh: item.speedKmh,
-                        status: item.status ?? '运输中',
-                    } as TruckPositionMessage, now);
-                    saveTruckPositionToCache({
-                        lineId: item.lineId,
-                        position: item.position,
-                        status: item.status ?? '运输中',
-                        speedKmh: route.speedKmh,
-                        updatedAt: new Date().toISOString(),
-                    });
-                    renderTruckPosition(route, now);
-                });
-            } catch (error) {
-                console.warn('[RoadMap] batch position request failed', error);
-                deduped.forEach((lineId) => {
-                    const route = activeRoutesRef.current.get(lineId);
-                    if (route) {
-                        route.arrivalCheckRequested = false;
-                        route.nextCalibrationAt = performance.now() + POSITION_QUERY_INTERVAL_MS;
-                    }
-                });
-            } finally {
-                deduped.forEach((id) => positionRequestsRef.current.delete(id));
+    // 离开 roadMap 或 groupId 变化 → abort 旧请求
+    useEffect(() => {
+        if (view !== 'roadMap') {
+            if (batchRequestRef.current) {
+                batchRequestRef.current.controller.abort();
+                batchRequestRef.current = null;
             }
-        },
-        [finishRoute, renderTruckPosition]
-    );
+        }
+    }, [view]);
 
+    // activeRoadGroupId 变化 → abort 旧请求
+    useEffect(() => {
+        const state = batchRequestRef.current;
+        if (state && state.scopeId !== activeRoadGroupId) {
+            state.controller.abort();
+            batchRequestRef.current = null;
+        }
+    }, [activeRoadGroupId]);
+
+    // 页面重绘 effect（切换回 roadMap 时重放）
     useEffect(() => {
         if (view !== 'roadMap') return;
         const replayTimer = window.setTimeout(() => {
@@ -350,18 +404,18 @@ export function useTruckPositionController({
                 renderTruckPosition(route, now);
             });
         }, 0);
-
         return () => window.clearTimeout(replayTimer);
     }, [renderTruckPosition, roadMapRef, syncRoadRoute, view]);
 
+    // 本地渲染 + 批量位置同步
     useEffect(() => {
-        // 关键：只有 RoadMap 正在显示时，才更新车辆位置和 routeOrders。
         if (view !== 'roadMap') return;
 
-        let batchTimer: ReturnType<typeof setInterval> | null = null;
+        let renderTimer: ReturnType<typeof setInterval> | null = null;
+        let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-        // 本地渲染 tick（500ms）：插值动画 + 路线进度
-        const renderTimer = window.setInterval(() => {
+        // 本地渲染 tick（500ms）
+        renderTimer = window.setInterval(() => {
             const now = performance.now();
             const progressUpdates = new Map<string, ReturnType<typeof routeProgressPatch>>();
             activeRoutesRef.current.forEach((route) => {
@@ -375,7 +429,7 @@ export function useTruckPositionController({
                         const update = progressUpdates.get(item.lineId);
                         if (!update) return item;
                         changed = true;
-                        return {...item, ...update};
+                        return { ...item, ...update };
                     });
                     if (!changed) return prev;
                     routeOrdersRef.current = next;
@@ -384,56 +438,81 @@ export function useTruckPositionController({
             }
         }, POSITION_RENDER_TICK_MS);
 
-        // 批量位置校准 tick：收集需要校准的线路，一次批量请求
-        const pollBatch = () => {
-            if (document.visibilityState !== 'visible') {
-                if (batchTimer) {
-                    clearInterval(batchTimer);
-                    batchTimer = setInterval(pollBatch, POSITION_BACKGROUND_POLL_MS);
+        // 批量位置同步
+        const startPolling = (intervalMs: number) => {
+            if (pollTimer) clearInterval(pollTimer);
+            pollTimer = window.setInterval(() => {
+                // hidden → 不轮询，清除 timer
+                if (document.visibilityState === 'hidden') {
+                    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+                    if (batchRequestRef.current) {
+                        batchRequestRef.current.controller.abort();
+                        batchRequestRef.current = null;
+                    }
+                    return;
                 }
-                return;
-            }
 
-            const now = performance.now();
-            const needCalibration: string[] = [];
-            activeRoutesRef.current.forEach((route) => {
-                const reachedPredictedEnd = route.pathLength > 0
-                    && predictedDistance(route, now) >= route.pathLength - 0.0001;
-                if (reachedPredictedEnd && !route.arrivalCheckRequested) {
-                    route.arrivalCheckRequested = true;
-                    route.nextCalibrationAt = now;
-                    needCalibration.push(route.lineId);
-                } else if (now >= route.nextCalibrationAt) {
-                    needCalibration.push(route.lineId);
-                }
-            });
+                // 上次请求距现在太近 → 跳过
+                if (performance.now() - lastBatchAtRef.current < POSITION_BATCH_MIN_INTERVAL_MS) return;
 
-            if (needCalibration.length > 0) {
-                void requestTruckPositionsBatch(needCalibration);
-            }
+                const scopeId = activeRoadGroupId;
+                if (!scopeId) return;
+
+                const groupSet = new Set(activeRoadGroupLineIds);
+                const needCalibration = activeRoadGroupLineIds.filter((id) => {
+                    const route = activeRoutesRef.current.get(id);
+                    if (!route || completedRouteIdsRef.current.has(id)) return false;
+                    return performance.now() >= route.nextCalibrationAt;
+                });
+
+                console.info('[RoadMap] batch poll', {
+                    activeRoadGroupId: scopeId,
+                    activeRouteCount: activeRoutesRef.current.size,
+                    activeGroupLineCount: groupSet.size,
+                    requestedLineCount: needCalibration.length,
+                    unexpectedLineIds: [] as string[],
+                });
+
+                void executeBatchRequest(needCalibration, scopeId);
+            }, intervalMs);
         };
 
-        batchTimer = setInterval(pollBatch, POSITION_BATCH_POLL_MS);
-        pollBatch(); // 首次立即同步
+        // WebSocket 自适应：根据最近收到消息的时间选择频率
+        const isWsActive = wsLastPositionAt !== null
+            && (performance.now() - wsLastPositionAt) < WS_POSITION_TIMEOUT_MS;
+        startPolling(isWsActive ? POSITION_WS_FALLBACK_POLL_MS : POSITION_BATCH_POLL_MS);
 
+        // 前台 → 立即同步一次
         const onVisibilityChange = () => {
             if (document.visibilityState === 'visible') {
-                if (batchTimer) clearInterval(batchTimer);
-                batchTimer = setInterval(pollBatch, POSITION_BATCH_POLL_MS);
-                pollBatch();
+                const scopeId = activeRoadGroupId;
+                if (!scopeId) return;
+                const isWsActive = wsLastPositionAt !== null
+                    && (performance.now() - wsLastPositionAt) < WS_POSITION_TIMEOUT_MS;
+                startPolling(isWsActive ? POSITION_WS_FALLBACK_POLL_MS : POSITION_BATCH_POLL_MS);
+                // 立即同步
+                void executeBatchRequest(activeRoadGroupLineIds, scopeId);
             } else {
-                if (batchTimer) clearInterval(batchTimer);
-                batchTimer = setInterval(pollBatch, POSITION_BACKGROUND_POLL_MS);
+                // hidden：停止轮询 + abort
+                if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+                if (batchRequestRef.current) {
+                    batchRequestRef.current.controller.abort();
+                    batchRequestRef.current = null;
+                }
             }
         };
         document.addEventListener('visibilitychange', onVisibilityChange);
 
         return () => {
             window.clearInterval(renderTimer);
-            if (batchTimer) clearInterval(batchTimer);
+            if (pollTimer) clearInterval(pollTimer);
             document.removeEventListener('visibilitychange', onVisibilityChange);
+            if (batchRequestRef.current) {
+                batchRequestRef.current.controller.abort();
+                batchRequestRef.current = null;
+            }
         };
-    }, [renderTruckPosition, requestTruckPositionsBatch, view]);
+    }, [view, activeRoadGroupId, activeRoadGroupLineIds, wsLastPositionAt, executeBatchRequest, renderTruckPosition]);
 
     return {
         routeOrders,

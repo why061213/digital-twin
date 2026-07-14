@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MainLayout from '@/components/Layout/MainLayout';
 import Header from '@/components/Layout/Header';
 import type { ChinaMap3DHandle } from './modules/ChinaMap3D';
@@ -71,6 +71,8 @@ function DashboardPage() {
     } = useDashboardViewTransition({
         onViewCommitted: handleViewCommitted,
     });
+    const wsLastPositionAtRef = useRef<number | null>(null);
+
     const {
         routeOrders,
         setRouteOrders,
@@ -87,6 +89,9 @@ function DashboardPage() {
     } = useTruckPositionController({
         roadMapRef,
         view,
+        activeRoadGroupId,
+        activeRoadGroupLineIds: useMemo(() => [...activeRoutesRef.current.keys()], [activeRoutesRef]),
+        wsLastPositionAt: wsLastPositionAtRef.current,
     });
     const {
         roadGroups,
@@ -132,6 +137,7 @@ function DashboardPage() {
     }, [handleTownRoadRenderCommand, requestViewChange]);
 
     const handleRealtimeTruckPosition = useCallback((message: Parameters<typeof handleTruckPosition>[0]) => {
+        wsLastPositionAtRef.current = performance.now();
         handleTruckPosition(message);
         handleTownTruckPosition(message);
     }, [handleTownTruckPosition, handleTruckPosition]);
