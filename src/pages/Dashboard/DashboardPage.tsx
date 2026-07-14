@@ -11,7 +11,6 @@ import { useRoadGroupsController } from './hooks/useRoadGroupsController';
 import { useTruckPositionController } from './hooks/useTruckPositionController';
 import { useRm2RoadController } from './hooks/useRm2RoadController';
 import { useWarehouseController } from './hooks/useWarehouseController';
-import type { RouteOrder } from './hooks/useDashboardRealtime';
 import type { ViewMode } from './types';
 import { DispatchButtons } from './components/DispatchButtons';
 import { DashboardCenterPanel } from './components/DashboardCenterPanel';
@@ -33,6 +32,9 @@ function DashboardPage() {
     const roadMapRef = useRef<RoadMap3D1Handle>(null);
     const roadMap2Ref = useRef<RoadMap3D2Handle>(null);
     const skipNextRoadMapRefreshRef = useRef(false);
+    const pendingRoadMapRefreshGroupIdRef = useRef<string | null | undefined>(undefined);
+    const roadGroupFinishedHandlerRef = useRef<(lineId: string) => void>(() => {});
+    const bulkRoadGroupRefreshTimerRef = useRef<number | null>(null);
     const requestViewChange = useCallback((nextView: ViewMode) => {
         if (view === nextView) return;
         setIsRoadMapVisualReady(false);
@@ -42,6 +44,9 @@ function DashboardPage() {
     const handleChinaMapVisualReady = useCallback(() => {}, []);
     const handleRoadMapVisualReady = useCallback(() => setIsRoadMapVisualReady(true), []);
     const handleRoadMap2VisualReady = useCallback(() => setIsRoadMap2VisualReady(true), []);
+    const handleRoadGroupRouteFinished = useCallback((lineId: string) => {
+        roadGroupFinishedHandlerRef.current(lineId);
+    }, []);
     const {
         warehouseFocus,
         handleCityRaise,
@@ -69,6 +74,7 @@ function DashboardPage() {
     } = useTruckPositionController({
         roadMapRef,
         view,
+        onRouteFinished: handleRoadGroupRouteFinished,
     });
     const {
         roadGroups,
@@ -80,6 +86,7 @@ function DashboardPage() {
         loadRoadGroup,
         refreshRoadGroups,
         handleRoadPath,
+        handleRoadGroupRouteFinished: advanceCompletedRoadGroup,
         resetRoadGroupStrategy,
     } = useRoadGroupsController({
         roadMapRef,
@@ -95,6 +102,9 @@ function DashboardPage() {
         renderTruckPosition,
         setRouteOrders,
     });
+    useEffect(() => {
+        roadGroupFinishedHandlerRef.current = advanceCompletedRoadGroup;
+    }, [advanceCompletedRoadGroup]);
     const {
         groups: rm2Groups,
         activeGroupId: activeRm2GroupId,
@@ -107,47 +117,70 @@ function DashboardPage() {
         view,
         sceneReady: isRoadMap2VisualReady,
     });
-    const handleRouteRaise = useCallback((_order: RouteOrder) => {
+    const handleRouteRaise = useCallback(() => {
         // 城市飞线事件由 ChinaMap3D 处理；道路级地图只加载后端分组后的路线。
     }, []);
 
     const requestDispatch = useCallback(async () => {
         if (isDispatching) return;
         setIsDispatching(true);
-        requestViewChange('roadMap');
         try {
             const route = await dispatchRoute();
-            await refreshRoadGroups(activeRoadGroupIdRef.current ?? route.groupId);
+            const preferredGroupId = route.groupId ?? undefined;
+            if (view === 'roadMap' && isRoadMapVisualReady) {
+                await refreshRoadGroups(preferredGroupId);
+            } else {
+                pendingRoadMapRefreshGroupIdRef.current = preferredGroupId;
+                requestViewChange('roadMap');
+            }
         } catch (error) {
             console.warn('Route dispatch failed', error);
         } finally {
             setIsDispatching(false);
         }
-    }, [isDispatching, refreshRoadGroups, requestViewChange]);
+    }, [isDispatching, isRoadMapVisualReady, refreshRoadGroups, requestViewChange, view]);
 
     const requestBulkDispatch = useCallback(async () => {
         if (isDispatching) return;
         setIsDispatching(true);
         try {
             await dispatchBulkRoutes(24);
-            // 大宗订单只是向后端追加一批路线；只有当前已经在道路地图时才刷新显示，不主动切换视图。
-            if (view === 'roadMap') {
+            if (bulkRoadGroupRefreshTimerRef.current !== null) {
+                window.clearTimeout(bulkRoadGroupRefreshTimerRef.current);
             }
+            bulkRoadGroupRefreshTimerRef.current = window.setTimeout(() => {
+                bulkRoadGroupRefreshTimerRef.current = null;
+                if (view === 'roadMap' && isRoadMapVisualReady) {
+                    void refreshRoadGroups(activeRoadGroupIdRef.current ?? undefined);
+                    return;
+                }
+                pendingRoadMapRefreshGroupIdRef.current = activeRoadGroupIdRef.current ?? undefined;
+                requestViewChange('roadMap');
+            }, 180);
         } catch (error) {
             console.warn('Bulk route dispatch failed', error);
         } finally {
             setIsDispatching(false);
         }
-    }, [isDispatching]);
+    }, [activeRoadGroupIdRef, isDispatching, isRoadMapVisualReady, refreshRoadGroups, requestViewChange, view]);
 
 
     const requestRoadMapSnapshot = useCallback(async () => {
+        const pendingGroupId = pendingRoadMapRefreshGroupIdRef.current;
+        pendingRoadMapRefreshGroupIdRef.current = undefined;
         try {
-            await refreshRoadGroups(activeRoadGroupIdRef.current ?? undefined);
+            await refreshRoadGroups(pendingGroupId ?? activeRoadGroupIdRef.current ?? undefined);
         } catch (error) {
             console.warn('Road map prepare failed', error);
         }
     }, [activeRoadGroupIdRef, refreshRoadGroups]);
+
+    useEffect(() => () => {
+        if (bulkRoadGroupRefreshTimerRef.current !== null) {
+            window.clearTimeout(bulkRoadGroupRefreshTimerRef.current);
+            bulkRoadGroupRefreshTimerRef.current = null;
+        }
+    }, []);
 
     useDashboardRealtime({
         onCityRaise: handleCityRaise,

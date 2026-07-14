@@ -29,6 +29,7 @@ import {
 type UseTruckPositionControllerOptions = {
     roadMapRef: RefObject<RoadMap3DHandle | null>;
     view: ViewMode;
+    onRouteFinished?: (lineId: string) => void;
 };
 
 type UseTruckPositionControllerResult = {
@@ -49,6 +50,7 @@ type UseTruckPositionControllerResult = {
 export function useTruckPositionController({
     roadMapRef,
     view,
+    onRouteFinished,
 }: UseTruckPositionControllerOptions): UseTruckPositionControllerResult {
     const [routeOrders, setRouteOrders] = useState<RouteOrder[]>([]);
     const activeRoutesRef = useRef<Map<string, ActiveRoute>>(new Map());
@@ -217,13 +219,15 @@ export function useTruckPositionController({
     }, []);
 
     const finishRoute = useCallback((lineId: string) => {
+        const alreadyFinished = completedRouteIdsRef.current.has(lineId);
         completedRouteIdsRef.current.add(lineId);
         activeRoutesRef.current.delete(lineId);
         roadMapRef.current?.removeRoadPath(lineId);
         setRouteOrders((prev) =>
             prev.map((item) => (item.lineId === lineId ? {...item, status: '已完成'} : item))
         );
-    }, [roadMapRef]);
+        if (!alreadyFinished) onRouteFinished?.(lineId);
+    }, [onRouteFinished, roadMapRef]);
 
     const handleTruckPosition = useCallback(
         (message: TruckPositionMessage, forceCalibration = false) => {
