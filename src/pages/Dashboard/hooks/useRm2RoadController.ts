@@ -147,13 +147,17 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
         } catch (error) {
             if (request.signal.aborted) return;
             if (gen !== groupsGenerationRef.current) return;
-            console.warn('RM2 API unavailable; using fixture fallback', error);
-            sourceRef.current = 'fixture';
-            setGroups(FIXTURE_GROUPS);
-            setDiagnostics(FIXTURE_DIAGNOSTICS);
-            const preferred = FIXTURE_GROUPS.find((g) => g.groupId === activeGroupIdRef.current) ?? FIXTURE_GROUPS[0];
-            if (preferred) await loadGroup(preferred.groupId);
-            else roadMapRef.current?.clearRoads();
+            console.warn('RM2 API unavailable', error);
+            // 生产环境保留最后一次成功的数据，Dev 环境且无数据时用 fixture
+            if (import.meta.env.DEV && groupsByIdRef.current.size === 0) {
+                sourceRef.current = 'fixture';
+                setGroups(FIXTURE_GROUPS);
+                setDiagnostics(FIXTURE_DIAGNOSTICS);
+                const preferred = FIXTURE_GROUPS.find((g) => g.groupId === activeGroupIdRef.current) ?? FIXTURE_GROUPS[0];
+                if (preferred) await loadGroup(preferred.groupId);
+                else roadMapRef.current?.clearRoads();
+            }
+            // 生产环境：不清空地图，保留上次成功画面
         } finally {
             if (!request.signal.aborted && gen === groupsGenerationRef.current) setIsLoading(false);
         }
