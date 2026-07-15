@@ -10,7 +10,6 @@ import { useDashboardRealtime } from './hooks/useDashboardRealtime';
 import { useRoadGroupsController } from './hooks/useRoadGroupsController';
 import { useTruckPositionController } from './hooks/useTruckPositionController';
 import { useRm2RoadController } from './hooks/useRm2RoadController';
-import { useRm2PlaybackController } from './hooks/useRm2PlaybackController';
 import { useWarehouseController } from './hooks/useWarehouseController';
 import type { ViewMode } from './types';
 import { DispatchButtons } from './components/DispatchButtons';
@@ -121,10 +120,6 @@ function DashboardPage() {
         sceneReady: isRoadMap2VisualReady,
     });
     const {
-        status: playbackStatus,
-        currentLabel: playbackLabel,
-        currentRoutes: playbackRoutes,
-    } = useRm2PlaybackController({
         roadMapRef: roadMap2Ref,
         view,
         sceneReady: isRoadMap2VisualReady,
@@ -267,7 +262,6 @@ function DashboardPage() {
             onRefresh={() => void refreshRm2()}
         />
     );
-    const rm2PlaybackBar = view === 'roadMap2' && playbackStatus === 'playing' && (
         <div style={{
             position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
             background: 'rgba(0,0,0,0.8)', color: '#0f0', padding: '10px 24px',
@@ -275,8 +269,6 @@ function DashboardPage() {
             display: 'flex', gap: 16, alignItems: 'center', pointerEvents: 'none',
         }}>
             <span>▶</span>
-            <span>{playbackLabel}</span>
-            <span style={{ color: '#aaa' }}>{playbackRoutes.length} 条路线</span>
         </div>
     );
 
@@ -335,7 +327,6 @@ function DashboardPage() {
                     {roadGroupQueue}
                     {rm2GroupQueue}
                     {rm2DiagnosticsPanel}
-                    {rm2PlaybackBar}
                     {roadStrategyTabs}
                     {viewButtons}
                     {dispatchControls}
