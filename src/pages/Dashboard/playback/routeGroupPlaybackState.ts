@@ -61,6 +61,17 @@ export function dispatchPlaybackEvent<TGroup extends RouteGroupSnapshot, TRoute>
 
         case 'SNAPSHOT_RECEIVED': {
             const activeGroupId = selectGroupId(state, event.groups, event.preferredGroupId);
+            const keepsVisibleGroup = activeGroupId !== null
+                && activeGroupId === state.activeGroupId
+                && (state.phase === 'showing' || state.phase === 'transitioning');
+            if (keepsVisibleGroup) {
+                return {
+                    ...state,
+                    snapshotVersion: event.snapshotVersion,
+                    groups: event.groups,
+                    error: null,
+                };
+            }
             const generation = state.transitionGeneration + 1;
             if (!activeGroupId) {
                 return {
@@ -95,9 +106,20 @@ export function dispatchPlaybackEvent<TGroup extends RouteGroupSnapshot, TRoute>
             if (state.phase !== 'loading-group' || !isActiveGeneration(state, event.groupId, event.generation)) return state;
             return { ...state, phase: 'showing', activeRoutes: event.routes, isFading: false, error: null };
 
+        case 'GROUP_RETRY':
+            if (state.phase !== 'loading-group' || !isActiveGeneration(state, event.groupId, event.generation)) return state;
+            return {
+                ...state,
+                transitionGeneration: state.transitionGeneration + 1,
+                error: null,
+            };
+
         case 'GROUP_TIMEOUT':
         case 'GROUP_COMPLETED':
-            if (state.phase !== 'showing' || event.generation !== state.transitionGeneration) return state;
+        case 'GROUP_FAILED':
+            if ((event.type === 'GROUP_FAILED' && state.phase !== 'loading-group')
+                || (event.type !== 'GROUP_FAILED' && state.phase !== 'showing')
+                || event.generation !== state.transitionGeneration) return state;
             return {
                 ...state,
                 phase: 'transitioning',

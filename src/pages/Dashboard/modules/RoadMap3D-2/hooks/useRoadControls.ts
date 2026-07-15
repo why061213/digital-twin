@@ -284,6 +284,26 @@ export function useRoadControls(
         refs.selectedRoadIdRef.current = null;
     }, [clearRoad, refs]);
 
+    const setRoadsOpacity = useCallback((opacity: number) => {
+        const multiplier = clamp01(opacity);
+        refs.roadsMapRef.current.forEach((road) => {
+            road.group.traverse((object) => {
+                if (!(object instanceof THREE.Mesh)) return;
+                const materials = Array.isArray(object.material) ? object.material : [object.material];
+                materials.forEach((material) => {
+                    if (!material) return;
+                    const baseOpacity = typeof material.userData.baseRoadOpacity === 'number'
+                        ? material.userData.baseRoadOpacity
+                        : material.opacity;
+                    material.userData.baseRoadOpacity = baseOpacity;
+                    material.transparent = true;
+                    material.opacity = baseOpacity * multiplier;
+                    material.needsUpdate = true;
+                });
+            });
+        });
+    }, [refs.roadsMapRef]);
+
     const ensureOrderLane = useCallback((road: RoadState, orderId: string) => {
         let lane = road.orders.get(orderId);
         if (lane) return lane;
@@ -540,6 +560,7 @@ export function useRoadControls(
         addRoadPath,
         removeRoadPath,
         clearRoads,
+        setRoadsOpacity,
         setRoadPath,
         updateTruckPosition,
         refreshAllPositions,

@@ -16,6 +16,8 @@ import type {
 } from './types';
 
 const DEFAULT_TRANSITION_DURATION_MS = 500;
+const DEFAULT_MAX_LOAD_RETRIES = 2;
+const DEFAULT_RETRY_DELAY_MS = 800;
 
 export type RouteGroupSnapshotResponse<TGroup extends RouteGroupSnapshot> = {
     snapshotVersion: string;
@@ -33,6 +35,8 @@ export type RouteGroupPlaybackControllerOptions<TGroup extends RouteGroupSnapsho
     isRouteComplete: (route: TRoute) => boolean;
     getDisplayDuration: (group: TGroup, routes: readonly TRoute[]) => number;
     transitionDurationMs?: number;
+    maxLoadRetries?: number;
+    retryDelayMs?: number;
 };
 
 export type RouteGroupPlaybackController<TGroup extends RouteGroupSnapshot, TRoute> = {
@@ -61,6 +65,8 @@ export function useRouteGroupPlaybackController<TGroup extends RouteGroupSnapsho
         isRouteComplete,
         getDisplayDuration,
         transitionDurationMs = DEFAULT_TRANSITION_DURATION_MS,
+        maxLoadRetries = DEFAULT_MAX_LOAD_RETRIES,
+        retryDelayMs = DEFAULT_RETRY_DELAY_MS,
     } = options;
     const [state, reactDispatch] = useReducer(
         reducePlaybackEvent<TGroup, TRoute>,
@@ -72,6 +78,18 @@ export function useRouteGroupPlaybackController<TGroup extends RouteGroupSnapsho
     const snapshotAbortRef = useRef<AbortController | null>(null);
     const routesAbortRef = useRef<AbortController | null>(null);
     const completedRoutesRef = useRef<Set<TRoute>>(new Set());
+    const loadRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const loadRetryAttemptsRef = useRef<Map<string, number>>(new Map());
+    const getDisplayDurationRef = useRef(getDisplayDuration);
+    const isRouteCompleteRef = useRef(isRouteComplete);
+
+    useEffect(() => {
+        getDisplayDurationRef.current = getDisplayDuration;
+    }, [getDisplayDuration]);
+
+    useEffect(() => {
+        isRouteCompleteRef.current = isRouteComplete;
+    }, [isRouteComplete]);
 
     const dispatchPlaybackEvent = useCallback((event: RouteGroupPlaybackEvent<TGroup, TRoute>) => {
         stateRef.current = reducePlaybackEvent(stateRef.current, event);
@@ -133,6 +151,10 @@ export function useRouteGroupPlaybackController<TGroup extends RouteGroupSnapsho
     const pause = useCallback(() => {
         snapshotAbortRef.current?.abort();
         routesAbortRef.current?.abort();
+        if (loadRetryTimerRef.current) {
+            window.clearTimeout(loadRetryTimerRef.current);
+            loadRetryTimerRef.current = null;
+        }
         completedRoutesRef.current.clear();
         void clearRenderedGroup();
         dispatchPlaybackEvent({ type: 'LEAVE_RM2' });
@@ -173,31 +195,42 @@ export function useRouteGroupPlaybackController<TGroup extends RouteGroupSnapsho
                 if (request.signal.aborted || !isCurrentLoad(groupId, generation)) return;
 
                 completedRoutesRef.current.clear();
+                loadRetryAttemptsRef.current.delete(groupId);
                 dispatchPlaybackEvent({ type: 'GROUP_RENDERED', groupId, routes, generation });
+                if (routes.length > 0 && routes.every((route) => isRouteCompleteRef.current(route))) {
+                    dispatchPlaybackEvent({ type: 'GROUP_COMPLETED', generation });
+                }
             } catch (error) {
                 if ((error as DOMException).name === 'AbortError') return;
-                dispatchPlaybackEvent({
-                    type: 'ERROR',
-                    message: error instanceof Error ? error.message : 'Route group load failed',
-                    generation,
-                });
+                const attempts = (loadRetryAttemptsRef.current.get(groupId) ?? 0) + 1;
+                loadRetryAttemptsRef.current.set(groupId, attempts);
+                if (attempts <= maxLoadRetries) {
+                    if (loadRetryTimerRef.current) window.clearTimeout(loadRetryTimerRef.current);
+                    loadRetryTimerRef.current = window.setTimeout(() => {
+                        loadRetryTimerRef.current = null;
+                        dispatchPlaybackEvent({ type: 'GROUP_RETRY', groupId, generation });
+                    }, Math.max(0, retryDelayMs));
+                    return;
+                }
+                console.warn('[route group playback] retry limit reached', { groupId, attempts, error });
+                dispatchPlaybackEvent({ type: 'GROUP_FAILED', generation });
             }
         })();
 
         return () => request.abort();
-    }, [dispatchPlaybackEvent, fetchGroupRoutes, isCurrentLoad, prepareSceneForGroup, refreshSnapshot, replaceRenderedGroup, state.activeGroupId, state.groups, state.isSceneReady, state.phase, state.transitionGeneration]);
+    }, [dispatchPlaybackEvent, fetchGroupRoutes, isCurrentLoad, maxLoadRetries, prepareSceneForGroup, refreshSnapshot, replaceRenderedGroup, retryDelayMs, state.activeGroupId, state.groups, state.isSceneReady, state.phase, state.transitionGeneration]);
 
     useEffect(() => {
         if (state.phase !== 'showing' || !state.activeGroupId) return;
-        const group = state.groups.find((item) => item.groupId === state.activeGroupId);
+        const group = stateRef.current.groups.find((item) => item.groupId === state.activeGroupId);
         if (!group) return;
-        const duration = Math.max(0, getDisplayDuration(group, state.activeRoutes));
+        const duration = Math.max(0, getDisplayDurationRef.current(group, state.activeRoutes));
         const generation = state.transitionGeneration;
         const timer = window.setTimeout(() => {
             dispatchPlaybackEvent({ type: 'GROUP_TIMEOUT', generation });
         }, duration);
         return () => window.clearTimeout(timer);
-    }, [dispatchPlaybackEvent, getDisplayDuration, state.activeGroupId, state.activeRoutes, state.groups, state.phase, state.transitionGeneration]);
+    }, [dispatchPlaybackEvent, state.activeGroupId, state.activeRoutes, state.phase, state.transitionGeneration]);
 
     useEffect(() => {
         if (state.phase !== 'transitioning') return;
@@ -205,6 +238,7 @@ export function useRouteGroupPlaybackController<TGroup extends RouteGroupSnapsho
         const timer = window.setTimeout(() => {
             const nextGroupId = getNext(ringRef.current)?.groupId;
             if (nextGroupId) {
+                setCurrent(ringRef.current, nextGroupId);
                 dispatchPlaybackEvent({ type: 'TRANSITION_FINISHED', nextGroupId, generation });
             } else {
                 void refreshSnapshot();
@@ -216,6 +250,7 @@ export function useRouteGroupPlaybackController<TGroup extends RouteGroupSnapsho
     useEffect(() => () => {
         snapshotAbortRef.current?.abort();
         routesAbortRef.current?.abort();
+        if (loadRetryTimerRef.current) window.clearTimeout(loadRetryTimerRef.current);
     }, []);
 
     return {

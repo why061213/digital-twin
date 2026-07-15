@@ -5,6 +5,7 @@ export type RoadMap3DHandle = {
     addRoadPath: (id: string, coords: [number, number][], info?: RoadObjectInfo) => void;
     removeRoadPath: (id: string) => void;
     clearRoads: () => void;
+    setRoadsOpacity: (opacity: number) => void;
     updateTruckPosition: (lineId: string, position: [number, number], info?: RoadObjectInfo) => void;
     refreshAllPositions: () => void;
 };

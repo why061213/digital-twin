@@ -1,0 +1,192 @@
+import type { RefObject } from 'react';
+import type { RoadMap3DHandle } from '../modules/RoadMap3D-2';
+import type { RoadObjectInfo } from '../modules/RoadMap3D-2/types';
+import {
+    adaptRenderRoute,
+    type RenderRouteDTO,
+    type Rm2GroupDTO,
+} from '../services/renderRouteApi';
+
+const FADE_DURATION_MS = 180;
+
+export type Rm2PreparedRoute = {
+    lineId: string;
+    pathKey: string;
+    coordinates: [number, number][];
+    initialPosition: [number, number];
+    info: RoadObjectInfo;
+};
+
+export type Rm2PreparedGroup = {
+    groupId: string;
+    mapKey: string;
+    routes: Rm2PreparedRoute[];
+    pathLineIds: Map<string, string[]>;
+    bounds: { minLng: number; maxLng: number; minLat: number; maxLat: number } | null;
+    rejectedLineIds: string[];
+};
+
+function nextFrame() {
+    return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+}
+
+function routeInfo(route: RenderRouteDTO): RoadObjectInfo {
+    return {
+        plate: route.plate,
+        cargo: route.cargo,
+        from: route.from,
+        to: route.to,
+        status: route.status,
+        speedKmh: route.speedKmh,
+        routeLengthKm: route.routeLengthKm,
+        orderId: route.orderId,
+        pathKey: route.pathKey,
+    };
+}
+
+function calculateBounds(routes: readonly Rm2PreparedRoute[]) {
+    if (routes.length === 0) return null;
+
+    let minLng = Number.POSITIVE_INFINITY;
+    let maxLng = Number.NEGATIVE_INFINITY;
+    let minLat = Number.POSITIVE_INFINITY;
+    let maxLat = Number.NEGATIVE_INFINITY;
+    routes.forEach((route) => route.coordinates.forEach(([lng, lat]) => {
+        minLng = Math.min(minLng, lng);
+        maxLng = Math.max(maxLng, lng);
+        minLat = Math.min(minLat, lat);
+        maxLat = Math.max(maxLat, lat);
+    }));
+    return { minLng, maxLng, minLat, maxLat };
+}
+
+export function createRm2SceneAdapter(
+    roadMapRef: RefObject<RoadMap3DHandle | null>,
+) {
+    let fadeFrame = 0;
+    let fadeResolve: ((completed: boolean) => void) | null = null;
+    let transitionGeneration = 0;
+    let currentOpacity = 1;
+
+    const stopFade = () => {
+        if (fadeFrame) window.cancelAnimationFrame(fadeFrame);
+        fadeFrame = 0;
+        fadeResolve?.(false);
+        fadeResolve = null;
+    };
+
+    const fadeRoadsTo = (targetOpacity: number, generation: number) => new Promise<boolean>((resolve) => {
+        const roadMap = roadMapRef.current;
+        if (!roadMap) {
+            resolve(false);
+            return;
+        }
+
+        stopFade();
+        const start = performance.now();
+        const initialOpacity = currentOpacity;
+        roadMap.setRoadsOpacity(initialOpacity);
+        fadeResolve = resolve;
+        const tick = (now: number) => {
+            if (generation !== transitionGeneration) {
+                fadeResolve = null;
+                resolve(false);
+                return;
+            }
+            const progress = Math.min(1, (now - start) / FADE_DURATION_MS);
+            currentOpacity = initialOpacity + (targetOpacity - initialOpacity) * progress;
+            roadMap.setRoadsOpacity(currentOpacity);
+            if (progress < 1) {
+                fadeFrame = window.requestAnimationFrame(tick);
+                return;
+            }
+            fadeFrame = 0;
+            fadeResolve = null;
+            resolve(true);
+        };
+        fadeFrame = window.requestAnimationFrame(tick);
+    });
+
+    return {
+        async prepareSceneForGroup(group: Rm2GroupDTO) {
+            if (!roadMapRef.current) throw new Error('RM2 scene is not ready');
+
+            // RM2 底图由场景初始化统一加载；等一个绘制帧确保不在切换中的旧场景上操作。
+            await nextFrame();
+            if (!roadMapRef.current) throw new Error(`RM2 scene was disposed while preparing ${group.groupId}`);
+        },
+
+        async prepareRoutes(group: Rm2GroupDTO, routes: readonly RenderRouteDTO[]): Promise<Rm2PreparedGroup> {
+            const pathLineIds = new Map<string, string[]>();
+            const rejectedLineIds: string[] = [];
+            const preparedRoutes: Rm2PreparedRoute[] = [];
+            const seenLineIds = new Set<string>();
+
+            routes.forEach((rawRoute) => {
+                if (!adaptRenderRoute(rawRoute)
+                    || rawRoute.groupId !== group.groupId
+                    || seenLineIds.has(rawRoute.lineId)) {
+                    rejectedLineIds.push(rawRoute.lineId);
+                    return;
+                }
+
+                seenLineIds.add(rawRoute.lineId);
+                const lineIds = pathLineIds.get(rawRoute.pathKey) ?? [];
+                lineIds.push(rawRoute.lineId);
+                pathLineIds.set(rawRoute.pathKey, lineIds);
+                preparedRoutes.push({
+                    lineId: rawRoute.lineId,
+                    pathKey: rawRoute.pathKey,
+                    coordinates: rawRoute.coordinates,
+                    initialPosition: rawRoute.coordinates[0],
+                    info: routeInfo(rawRoute),
+                });
+            });
+
+            return {
+                groupId: group.groupId,
+                mapKey: group.mapKey,
+                routes: preparedRoutes,
+                pathLineIds,
+                bounds: calculateBounds(preparedRoutes),
+                rejectedLineIds,
+            };
+        },
+
+        async replaceRenderedGroup(prepared: Rm2PreparedGroup) {
+            const roadMap = roadMapRef.current;
+            if (!roadMap) throw new Error('RM2 scene is not ready for replacement');
+            const generation = ++transitionGeneration;
+
+            // 此处才移除旧组：请求、校验和新组描述都已完成，避免等待网络时出现黑屏。
+            if (!await fadeRoadsTo(0, generation) || generation !== transitionGeneration || !roadMapRef.current) return;
+            roadMap.clearRoads();
+
+            prepared.routes.forEach((route) => {
+                if (generation !== transitionGeneration) return;
+                roadMap.addRoadPath(route.lineId, route.coordinates, route.info);
+                roadMap.updateTruckPosition(route.lineId, route.initialPosition, route.info);
+            });
+            if (generation !== transitionGeneration) return;
+
+            roadMap.setRoadsOpacity(0);
+            currentOpacity = 0;
+            if (!await fadeRoadsTo(1, generation) || generation !== transitionGeneration) return;
+            console.info('[RM2 scene replace]', {
+                groupId: prepared.groupId,
+                mapKey: prepared.mapKey,
+                routeCount: prepared.routes.length,
+                sharedPathCount: prepared.pathLineIds.size,
+                bounds: prepared.bounds,
+                rejectedLineIds: prepared.rejectedLineIds,
+            });
+        },
+
+        clearRenderedGroup() {
+            transitionGeneration += 1;
+            stopFade();
+            currentOpacity = 1;
+            roadMapRef.current?.clearRoads();
+        },
+    };
+}
