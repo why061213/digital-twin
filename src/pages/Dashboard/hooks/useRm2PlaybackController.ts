@@ -229,6 +229,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
             })), {
                 groupId: node.id,
                 snapshotVersion: snapshotVersionRef.current || null,
+                initialPositions: response.positions,
             });
             if (!isActiveGeneration(generation)) return;
 

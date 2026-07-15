@@ -28,6 +28,7 @@ type RouteSeed = {
 type GroupContext = {
     groupId: string;
     snapshotVersion: string | null;
+    initialPositions?: TruckPositionMessage[];
 };
 
 type Options = {
@@ -182,7 +183,7 @@ export function useVehicleMotionController(options: Options) {
         });
         activeRoutesRef.current = next;
         completedRouteIdsRef.current.clear();
-        const positions = await options.fetchPositions(Array.from(next.keys()));
+        const positions = context?.initialPositions ?? await options.fetchPositions(Array.from(next.keys()));
         let accepted = 0;
         let wrongScope = 0;
         let inactiveLine = 0;
@@ -203,6 +204,7 @@ export function useVehicleMotionController(options: Options) {
         });
         console.info('[RM2 motion] initial position batch', {
             groupId: activeGroupIdRef.current,
+            source: context?.initialPositions ? 'routes-response' : 'positions-query',
             requestedLineIds: [...next.keys()],
             received: positions.length,
             accepted,

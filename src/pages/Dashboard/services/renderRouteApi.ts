@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '../constants';
-import type { RoadPathMessage } from '../hooks/useDashboardRealtime';
+import type { RoadPathMessage, TruckPositionMessage } from '../hooks/useDashboardRealtime';
 
 export type RenderRouteDTO = {
     lineId: string;
@@ -57,6 +57,7 @@ export type Rm2GroupRoutesResponse = {
     groupId: string;
     coordinateSystem: string;
     routes: RenderRouteDTO[];
+    positions: TruckPositionMessage[];
     rejected: unknown[];
     receivedRouteCount: number;
     /** 版本不一致时后端返回 mismatch:true + 空 routes */
@@ -182,6 +183,7 @@ export async function fetchRm2GroupRoutes(
             groupId,
             coordinateSystem: 'GCJ02',
             routes: [],
+            positions: [],
             rejected: [],
             receivedRouteCount: 0,
             mismatch: true,
@@ -193,12 +195,20 @@ export async function fetchRm2GroupRoutes(
     }
 
     const invalidCount = data.routes.filter((route) => !isRenderRoute(route)).length;
+    const positions = Array.isArray(data.positions)
+        ? data.positions.filter((position): position is TruckPositionMessage => (
+            isRecord(position)
+            && typeof position.lineId === 'string'
+            && Array.isArray(position.position)
+        ))
+        : [];
     return {
         snapshotVersion: typeof data.snapshotVersion === 'string' ? data.snapshotVersion : '',
         scope: 'rm2',
         groupId,
         coordinateSystem: typeof data.coordinateSystem === 'string' ? data.coordinateSystem : 'GCJ02',
         routes: data.routes.filter(isRenderRoute),
+        positions,
         rejected: [...(Array.isArray(data.rejected) ? data.rejected : []), ...Array(invalidCount).fill('client-invalid-route')],
         receivedRouteCount: data.routes.length,
     };
