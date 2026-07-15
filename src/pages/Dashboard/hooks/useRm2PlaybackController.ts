@@ -173,13 +173,20 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 return;
             }
 
-            const completed = completedLineIdsByGroupRef.current.get(node.id);
-            const routes = response.routes.filter((route) => !isCompletedRoute(route) && !completed?.has(route.lineId));
+            const completed = completedLineIdsByGroupRef.current.get(node.id) ?? new Set<string>();
+            response.routes.filter(isCompletedRoute).forEach((route) => completed.add(route.lineId));
+            if (completed.size > 0) completedLineIdsByGroupRef.current.set(node.id, completed);
+            const routes = response.routes.filter((route) => !isCompletedRoute(route) && !completed.has(route.lineId));
             if (routes.length === 0) {
                 const next = node.next;
                 if (next && next !== node) {
                     await playNodeRef.current(next);
                 } else {
+                    currentNodeRef.current = null;
+                    activeGroupIdRef.current = null;
+                    activeRouteLineIdsRef.current.clear();
+                    setActiveGroupId(null);
+                    roadMapRef.current?.clearRoads();
                     await refreshRm2();
                 }
                 return;
