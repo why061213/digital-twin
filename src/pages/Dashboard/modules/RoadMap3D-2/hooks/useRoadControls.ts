@@ -44,6 +44,10 @@ function trackKeyFor(id: string, coords: [number, number][], info: RoadObjectInf
     return coords.map(([lng, lat]) => `${lng.toFixed(4)},${lat.toFixed(4)}`).join('|') || id;
 }
 
+function orderKeyFor(lineId: string, info: RoadObjectInfo) {
+    return info.orderFamilyId ?? info.orderId ?? `order-${lineId}`;
+}
+
 function orderColor(orderId: string, index: number) {
     let hash = 0;
     for (const char of orderId) hash += char.charCodeAt(0);
@@ -112,7 +116,7 @@ function setVehicleBarTransform(road: RoadState, lane: OrderLaneState, vehicle: 
     const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
     const position = point
         .add(normal.clone().multiplyScalar(laneOffset))
-        .setY(TRUCK_LIFT + 0.05 + lane.laneIndex * 0.0035);
+        .setY(TRUCK_LIFT + 0.05);
 
     vehicle.bar.position.copy(position);
     vehicle.bar.rotation.y = -Math.atan2(normal.z, normal.x);
@@ -143,15 +147,26 @@ export function useRoadControls(
             road.renderedOrderCount = orderCount;
         }
 
-        Array.from(road.orders.values()).forEach((lane, laneIndex) => {
-            lane.laneIndex = laneIndex;
+        const lanes = Array.from(road.orders.values());
+        lanes.forEach((lane) => {
             const vehicles = Array.from(lane.vehicles.values());
             lane.maxProgress = Math.max(0, ...vehicles.map((vehicle) => vehicle.progress));
+        });
+        const progressLayerByLane = new Map(
+            [...lanes]
+                .sort((left, right) => left.maxProgress - right.maxProgress)
+                .map((lane, index) => [lane, index]),
+        );
+
+        lanes.forEach((lane, laneIndex) => {
+            lane.laneIndex = laneIndex;
+            const vehicles = Array.from(lane.vehicles.values());
             const leadVehicle = vehicles.reduce<VehicleBarState | null>((lead, vehicle) => {
                 if (!lead || vehicle.progress > lead.progress) return vehicle;
                 return lead;
             }, null);
-            lane.progressTube.position.y = 0.04 + laneIndex * 0.055;
+            lane.progressTube.position.y = 0.04;
+            lane.progressTube.renderOrder = 9 + (progressLayerByLane.get(lane) ?? laneIndex);
             drawTubeProgress(lane.progressTube, lane.maxProgress, road.tubularSegments, road.radialSegments);
             vehicles.forEach((vehicle, vehicleIndex) => {
                 const material = vehicle.bar.material as THREE.MeshBasicMaterial;
@@ -373,9 +388,7 @@ export function useRoadControls(
             if (!scene || coords.length < 2) return;
 
             const pathKey = trackKeyFor(id, coords, info);
-            // RM2 renders every vehicle on the same path as one convoy, regardless of order.
-            // The individual order remains on VehicleBarState.info for inspection panels/tooltips.
-            const orderId = `path-lane:${pathKey}`;
+            const orderId = orderKeyFor(id, info);
             const existing = refs.roadsMapRef.current.get(pathKey);
             if (existing) {
                 const lane = ensureOrderLane(existing, orderId);
@@ -536,7 +549,7 @@ export function useRoadControls(
 
         const road = refs.roadsMapRef.current.get(trackKey);
         if (!road) return;
-        const lane = ensureOrderLane(road, `path-lane:${road.pathKey}`);
+        const lane = ensureOrderLane(road, orderKeyFor(lineId, info));
         const vehicle = ensureVehicleBar(road, lane, lineId, info);
         vehicle.currentCoords = position;
         vehicle.info = { ...vehicle.info, ...info };
