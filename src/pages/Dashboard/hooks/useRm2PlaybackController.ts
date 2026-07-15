@@ -28,6 +28,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
     const calibrateRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const snapshotVersionRef = useRef('');
     const routesCacheRef = useRef<Map<string, RenderRouteDTO[]>>(new Map());
+    const retryCountRef = useRef(0);
 
     // 地图适配器
     const mapAdapter = useRef({
@@ -177,6 +178,22 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 return;
             }
             snapshotVersionRef.current = resp.snapshotVersion;
+            if (resp.groups.length === 0) {
+                if (retryCountRef.current >= 10) {
+                    console.warn('[RM2 playback] 重试 10 次仍无数据，停止');
+                    setStatus('idle');
+                    setCurrentLabel('暂无数据');
+                    return;
+                }
+                retryCountRef.current++;
+                console.info(`[RM2 playback] 暂无数据，触发后端处理 (${retryCountRef.current}/10)`);
+                setCurrentLabel('等待数据...');
+                try { await fetch(`${API_BASE}/api/road/town/provinces/raw`, { method: 'POST' }); } catch { /* ignore */ }
+                setTimeout(() => syncAndStart(), 1500);
+                return;
+            }
+            retryCountRef.current = 0; // 有数据了，重置
+            const emptyMap = new Map<string, RenderRouteDTO[]>();
             // 构建含空 routes 的链表
             const emptyMap = new Map<string, RenderRouteDTO[]>();
             resp.groups.forEach((g) => emptyMap.set(g.groupId, []));
