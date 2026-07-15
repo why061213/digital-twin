@@ -44,10 +44,6 @@ function trackKeyFor(id: string, coords: [number, number][], info: RoadObjectInf
     return coords.map(([lng, lat]) => `${lng.toFixed(4)},${lat.toFixed(4)}`).join('|') || id;
 }
 
-function orderKeyFor(lineId: string, info: RoadObjectInfo) {
-    return info.orderFamilyId ?? info.orderId ?? `order-${lineId}`;
-}
-
 function orderColor(orderId: string, index: number) {
     let hash = 0;
     for (const char of orderId) hash += char.charCodeAt(0);
@@ -377,7 +373,9 @@ export function useRoadControls(
             if (!scene || coords.length < 2) return;
 
             const pathKey = trackKeyFor(id, coords, info);
-            const orderId = orderKeyFor(id, info);
+            // RM2 renders every vehicle on the same path as one convoy, regardless of order.
+            // The individual order remains on VehicleBarState.info for inspection panels/tooltips.
+            const orderId = `path-lane:${pathKey}`;
             const existing = refs.roadsMapRef.current.get(pathKey);
             if (existing) {
                 const lane = ensureOrderLane(existing, orderId);
@@ -538,8 +536,7 @@ export function useRoadControls(
 
         const road = refs.roadsMapRef.current.get(trackKey);
         if (!road) return;
-        const orderId = orderKeyFor(lineId, info);
-        const lane = ensureOrderLane(road, orderId);
+        const lane = ensureOrderLane(road, `path-lane:${road.pathKey}`);
         const vehicle = ensureVehicleBar(road, lane, lineId, info);
         vehicle.currentCoords = position;
         vehicle.info = { ...vehicle.info, ...info };
