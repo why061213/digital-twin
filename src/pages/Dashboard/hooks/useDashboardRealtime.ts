@@ -48,6 +48,23 @@ export type TruckPositionMessage = {
     speedKmh?: number;
     progress?: number;
     status?: 'running' | 'finished' | string;
+    scope?: 'rm1' | 'rm2';
+    groupId?: string;
+    vehicleId?: string;
+    plate?: string;
+    source?: string;
+    stale?: boolean;
+    fetchedAt?: string;
+    speedQuality?: 'provider' | 'calculated' | 'fallback' | 'rejected';
+    sequence?: number;
+};
+
+export type VehiclePositionsMessage = {
+    type: 'vehicle_positions';
+    scope: 'rm1' | 'rm2';
+    serverTime: string;
+    snapshotVersion?: string;
+    positions: TruckPositionMessage[];
 };
 
 export type WarehouseFocusPanel = {
@@ -76,6 +93,7 @@ type DashboardMessage =
     | CityFallMessage
     | RoadPathMessage
     | TruckPositionMessage
+    | VehiclePositionsMessage
     | { type?: string; [key: string]: unknown };
 
 export type RouteOrder = {
@@ -97,6 +115,7 @@ type UseDashboardRealtimeOptions = {
     onRouteFall?: (lineId: string) => void;
     onRoadPath?: (message: RoadPathMessage) => void;
     onTruckPosition?: (message: TruckPositionMessage) => void;
+    onVehiclePositions?: (message: VehiclePositionsMessage) => void;
     onWarehouseUpdate?: (cityName: string, action: string, displayData: Record<string, any>) => void;
     onWarehouseFocus?: (cityName: string, panels: WarehouseFocusPanel[], style?: WarehouseFocusStyle) => void;
     onCameraControl?: (cityNames: string[], mode: 'overview' | 'focus') => void;
@@ -234,6 +253,12 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
 
             if (message.type === 'truck_position') {
                 optionsRef.current.onTruckPosition?.(message as TruckPositionMessage);
+                return;
+            }
+
+            if (message.type === 'vehicle_positions') {
+                optionsRef.current.onVehiclePositions?.(message as VehiclePositionsMessage);
+                return;
             }
 
             if (message.type === 'warehouse_update' && optionsRef.current.onWarehouseUpdate) {
