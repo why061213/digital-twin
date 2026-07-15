@@ -50,6 +50,7 @@ export type RouteGroupPlaybackEvent<TGroup extends RouteGroupSnapshot, TRoute> =
     }
     | { type: 'GROUP_LOAD_STARTED'; groupId: string; generation: number }
     | { type: 'GROUP_RENDERED'; groupId: string; routes: readonly TRoute[]; generation: number }
+    | { type: 'GROUP_EMPTY'; groupId: string; nextGroupId: string | null; generation: number }
     | { type: 'GROUP_RETRY'; groupId: string; generation: number }
     | { type: 'GROUP_FAILED'; generation: number }
     | { type: 'GROUP_TIMEOUT'; generation: number }

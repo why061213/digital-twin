@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import type { RoadMap3DHandle as RoadMap3D2Handle } from '../modules/RoadMap3D-2';
 import { createRm2SceneAdapter } from '../playback/rm2SceneAdapter';
 import { useRouteGroupPlaybackController } from '../playback/useRouteGroupPlaybackController';
+import { useVehicleMotionController } from './useVehicleMotionController';
+import { fetchVehiclePositions } from '../services/roadApi';
 import {
     fetchRm2GroupRoutes,
     fetchRm2Groups,
@@ -34,6 +36,10 @@ const FIXTURE_ROUTES: RenderRouteDTO[] = [
 const FIXTURE_DIAGNOSTICS: Rm2GroupsDiagnostics = { snapshotVersion: 'fixture-fallback', totalRoutes: FIXTURE_ROUTES.length, backendGroupCount: FIXTURE_GROUPS.length, acceptedGroupCount: FIXTURE_GROUPS.length, rejectedGroups: [] };
 type Options = { roadMapRef: RefObject<RoadMap3D2Handle | null>; view: ViewMode; sceneReady: boolean };
 
+function isCompletedRoute(route: RenderRouteDTO) {
+    return route.status === 'finished' || route.status.includes('完成');
+}
+
 export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) {
     const [diagnostics, setDiagnostics] = useState<Rm2GroupsDiagnostics | null>(null);
     const sourceRef = useRef<'backend' | 'fixture'>('backend');
@@ -41,6 +47,9 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
     const groupRoutesCacheRef = useRef<Map<string, RenderRouteDTO[]>>(new Map());
     const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const sceneAdapterRef = useRef<ReturnType<typeof createRm2SceneAdapter> | null>(null);
+    const motionLoadRef = useRef<(routes: Array<{ lineId: string; groupId: string; coordinates: [number, number][]; routeLengthKm?: number; speedKmh?: number | null; travelDurationMs?: number; status?: string }>) => Promise<void>>(async () => {});
+    const completedLineIdsByGroupRef = useRef<Map<string, Set<string>>>(new Map());
+    const playbackRef = useRef<{ activeGroupId: string | null; phase: string }>({ activeGroupId: null, phase: 'idle' });
 
     useEffect(() => {
         sceneAdapterRef.current = createRm2SceneAdapter(roadMapRef);
@@ -48,6 +57,34 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
     }, [roadMapRef]);
 
     const cacheKey = (version: string, gid: string) => `${version}:${gid}`;
+
+    const filterCompletedRoutes = useCallback((groupId: string, routes: readonly RenderRouteDTO[]) => {
+        const completedLineIds = completedLineIdsByGroupRef.current.get(groupId);
+        return routes.filter((route) => !isCompletedRoute(route) && !completedLineIds?.has(route.lineId));
+    }, []);
+
+    const rememberCompletedRoutes = useCallback((groupId: string, routes: readonly RenderRouteDTO[]) => {
+        const completed = routes.filter(isCompletedRoute);
+        if (completed.length === 0) return;
+        const completedLineIds = completedLineIdsByGroupRef.current.get(groupId) ?? new Set<string>();
+        completed.forEach((route) => completedLineIds.add(route.lineId));
+        completedLineIdsByGroupRef.current.set(groupId, completedLineIds);
+    }, []);
+
+    const filterCompletedGroups = useCallback((groups: readonly Rm2GroupDTO[]) => (
+        groups.flatMap((group) => {
+            const isCurrentlyPlaying = playbackRef.current.activeGroupId === group.groupId
+                && (playbackRef.current.phase === 'showing' || playbackRef.current.phase === 'transitioning');
+            if (isCurrentlyPlaying) return [group];
+
+            const completedLineIds = completedLineIdsByGroupRef.current.get(group.groupId);
+            if (!completedLineIds || completedLineIds.size === 0) return [group];
+
+            const orderLineIds = group.orderLineIds.filter((lineId) => !completedLineIds.has(lineId));
+            if (orderLineIds.length === 0) return [];
+            return [{ ...group, orderLineIds, count: orderLineIds.length }];
+        })
+    ), []);
 
     const fetchGroups = useCallback(async (signal?: AbortSignal) => {
         try {
@@ -57,24 +94,34 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
                 groupRoutesCacheRef.current.clear();
                 snapshotVersionRef.current = response.snapshotVersion;
             }
-            setDiagnostics(response.diagnostics);
-            return { snapshotVersion: response.snapshotVersion, groups: response.groups };
+            const groups = filterCompletedGroups(response.groups);
+            setDiagnostics({
+                ...response.diagnostics,
+                acceptedGroupCount: groups.length,
+            });
+            return { snapshotVersion: response.snapshotVersion, groups };
         } catch (error) {
             if (signal?.aborted) throw error;
             if (import.meta.env.DEV && snapshotVersionRef.current.length === 0) {
                 sourceRef.current = 'fixture';
                 snapshotVersionRef.current = FIXTURE_DIAGNOSTICS.snapshotVersion;
                 setDiagnostics(FIXTURE_DIAGNOSTICS);
-                return { snapshotVersion: FIXTURE_DIAGNOSTICS.snapshotVersion, groups: FIXTURE_GROUPS };
+                return {
+                    snapshotVersion: FIXTURE_DIAGNOSTICS.snapshotVersion,
+                    groups: filterCompletedGroups(FIXTURE_GROUPS),
+                };
             }
             throw error;
         }
-    }, []);
+    }, [filterCompletedGroups]);
 
     const fetchGroupRoutes = useCallback(async (groupId: string, signal?: AbortSignal) => {
         const version = snapshotVersionRef.current;
         const cached = groupRoutesCacheRef.current.get(cacheKey(version, groupId));
-        if (cached) return cached;
+        if (cached) {
+            rememberCompletedRoutes(groupId, cached);
+            return filterCompletedRoutes(groupId, cached);
+        }
 
         const response = sourceRef.current === 'backend'
             ? await fetchRm2GroupRoutes(groupId, version, signal)
@@ -92,8 +139,9 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
         if (response.snapshotVersion) {
             groupRoutesCacheRef.current.set(cacheKey(response.snapshotVersion, groupId), response.routes);
         }
-        return response.routes;
-    }, []);
+        rememberCompletedRoutes(groupId, response.routes);
+        return filterCompletedRoutes(groupId, response.routes);
+    }, [filterCompletedRoutes, rememberCompletedRoutes]);
 
     const prepareSceneForGroup = useCallback(async (group: Rm2GroupDTO) => {
         const adapter = sceneAdapterRef.current;
@@ -113,21 +161,29 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             rejectedLineIds: prepared.rejectedLineIds,
         });
         await adapter.replaceRenderedGroup(prepared);
+        await motionLoadRef.current(routes.map((route) => ({
+            lineId: route.lineId,
+            groupId: route.groupId,
+            coordinates: route.coordinates,
+            routeLengthKm: route.routeLengthKm,
+            speedKmh: route.speedKmh,
+            travelDurationMs: route.travelDurationMs,
+            status: route.status,
+        })));
     }, []);
 
     const clearRenderedGroup = useCallback(() => {
         sceneAdapterRef.current?.clearRenderedGroup();
     }, []);
 
-    const isRouteComplete = useCallback((route: RenderRouteDTO) => (
-        route.status === 'finished' || route.status.includes('完成')
-    ), []);
+    const isRouteComplete = useCallback(isCompletedRoute, []);
 
     const getDisplayDuration = useCallback((_group: Rm2GroupDTO, routes: readonly RenderRouteDTO[]) => (
         Math.min(28_000, 10_000 + routes.length * 650)
     ), []);
 
     const {
+        snapshotVersion,
         groups,
         activeGroupId,
         phase: playbackPhase,
@@ -151,6 +207,47 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
         retryDelayMs: 800,
         transitionDurationMs: 500,
     });
+
+    useEffect(() => {
+        playbackRef.current = { activeGroupId, phase: playbackPhase };
+    }, [activeGroupId, playbackPhase]);
+
+    const mapAdapter = useMemo(() => ({
+        updateVehicle: (lineId: string, position: [number, number], info: { speedKmh: number | null; status: string }) => {
+            roadMapRef.current?.updateTruckPosition(lineId, position, {
+                speedKmh: info.speedKmh,
+                status: info.status,
+            });
+        },
+        removeVehicle: (lineId: string) => roadMapRef.current?.removeRoadPath(lineId),
+    }), [roadMapRef]);
+
+    const activeRoutesRef = useRef<Map<string, RenderRouteDTO>>(new Map());
+
+    const motion = useVehicleMotionController({
+        scope: 'rm2',
+        viewActive: view === 'roadMap2' && sceneReady,
+        activeGroupId,
+        snapshotVersion,
+        mapAdapter,
+        fetchPositions: fetchVehiclePositions,
+        onRouteFinished: (lineId) => {
+            const route = activeRoutesRef.current.get(lineId);
+            if (!route) return;
+            const completedLineIds = completedLineIdsByGroupRef.current.get(route.groupId) ?? new Set<string>();
+            completedLineIds.add(lineId);
+            completedLineIdsByGroupRef.current.set(route.groupId, completedLineIds);
+            groupRoutesCacheRef.current.delete(cacheKey(snapshotVersionRef.current, route.groupId));
+            markRouteFinished(route);
+        },
+    });
+
+    useEffect(() => {
+        motionLoadRef.current = async (routes) => {
+            activeRoutesRef.current = new Map(routes.map((route) => [route.lineId, route as RenderRouteDTO]));
+            await motion.loadGroup(routes);
+        };
+    }, [motion.loadGroup]);
 
     const scheduleRefresh = useCallback((delayMs = 200) => {
         if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current);
@@ -191,6 +288,7 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
         refreshRm2: refreshSnapshot,
         handleSnapshotChanged,
         markRouteFinished,
+        handleVehiclePositions: motion.handlePositionFrame,
         playbackPhase,
         isFading,
     };

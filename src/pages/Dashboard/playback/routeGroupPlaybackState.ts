@@ -106,6 +106,32 @@ export function dispatchPlaybackEvent<TGroup extends RouteGroupSnapshot, TRoute>
             if (state.phase !== 'loading-group' || !isActiveGeneration(state, event.groupId, event.generation)) return state;
             return { ...state, phase: 'showing', activeRoutes: event.routes, isFading: false, error: null };
 
+        case 'GROUP_EMPTY': {
+            if (state.phase !== 'loading-group' || !isActiveGeneration(state, event.groupId, event.generation)) return state;
+            const groups = state.groups.filter((group) => group.groupId !== event.groupId);
+            if (!event.nextGroupId || !hasGroup(groups, event.nextGroupId)) {
+                return {
+                    ...state,
+                    phase: 'syncing',
+                    groups,
+                    activeGroupId: null,
+                    activeRoutes: [],
+                    transitionGeneration: state.transitionGeneration + 1,
+                    isFading: false,
+                };
+            }
+            return {
+                ...state,
+                phase: state.isSceneReady ? 'loading-group' : 'preparing-scene',
+                groups,
+                activeGroupId: event.nextGroupId,
+                activeRoutes: [],
+                transitionGeneration: state.transitionGeneration + 1,
+                isFading: false,
+                error: null,
+            };
+        }
+
         case 'GROUP_RETRY':
             if (state.phase !== 'loading-group' || !isActiveGeneration(state, event.groupId, event.generation)) return state;
             return {

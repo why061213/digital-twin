@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef } from 'react';
 import {
     createRing,
     getNext,
+    removeNode,
     setCurrent,
     syncRing,
 } from './routeGroupRing';
@@ -40,6 +41,7 @@ export type RouteGroupPlaybackControllerOptions<TGroup extends RouteGroupSnapsho
 };
 
 export type RouteGroupPlaybackController<TGroup extends RouteGroupSnapshot, TRoute> = {
+    snapshotVersion: string | null;
     groups: readonly TGroup[];
     activeGroupId: string | null;
     activeRoutes: readonly TRoute[];
@@ -191,6 +193,21 @@ export function useRouteGroupPlaybackController<TGroup extends RouteGroupSnapsho
                 if (request.signal.aborted || !isCurrentLoad(groupId, generation)) return;
                 const routes = await fetchGroupRoutes(groupId, request.signal);
                 if (request.signal.aborted || !isCurrentLoad(groupId, generation)) return;
+                if (routes.length === 0) {
+                    const nextGroupId = getNext(ringRef.current)?.groupId ?? null;
+                    removeNode(ringRef.current, groupId);
+                    const playableNextGroupId = nextGroupId && nextGroupId !== groupId
+                        && setCurrent(ringRef.current, nextGroupId)
+                        ? nextGroupId
+                        : null;
+                    dispatchPlaybackEvent({
+                        type: 'GROUP_EMPTY',
+                        groupId,
+                        nextGroupId: playableNextGroupId,
+                        generation,
+                    });
+                    return;
+                }
                 await replaceRenderedGroup(group, routes);
                 if (request.signal.aborted || !isCurrentLoad(groupId, generation)) return;
 
@@ -254,6 +271,7 @@ export function useRouteGroupPlaybackController<TGroup extends RouteGroupSnapsho
     }, []);
 
     return {
+        snapshotVersion: state.snapshotVersion,
         groups: state.groups,
         activeGroupId: state.activeGroupId,
         activeRoutes: state.activeRoutes,
