@@ -26,6 +26,11 @@ type RouteSeed = {
     status?: string;
 };
 
+type GroupContext = {
+    groupId: string;
+    snapshotVersion: string | null;
+};
+
 type Options = {
     scope: 'rm1' | 'rm2';
     viewActive: boolean;
@@ -54,9 +59,9 @@ export function useVehicleMotionController(options: Options) {
 
     const applyPosition = useCallback((message: TruckPositionMessage) => {
         const route = activeRoutesRef.current.get(message.lineId);
-        if (!route) return;
+        if (!route) return false;
         if (message.status === 'finished') {
-            if (completedRouteIdsRef.current.has(message.lineId)) return;
+            if (completedRouteIdsRef.current.has(message.lineId)) return false;
             completedRouteIdsRef.current.add(message.lineId);
             if (options.preserveFinishedVehicle) {
                 route.status = 'finished';
@@ -68,15 +73,25 @@ export function useVehicleMotionController(options: Options) {
                 options.mapAdapter.removeVehicle(message.lineId);
             }
             options.onRouteFinished?.(message.lineId);
-            return;
+            return true;
         }
-        if (!message.position) return;
+        if (!message.position) return false;
         const projected = projectDistanceOnPath(route.coordinates, message.position);
         const projectedPosition = predictedPosition({ ...route, calibratedDistance: projected, calibratedAt: performance.now() }, performance.now());
         const dx = projectedPosition[0] - message.position[0];
         const dy = projectedPosition[1] - message.position[1];
-        if (Math.hypot(dx, dy) * 111 > OFF_ROUTE_THRESHOLD_KM) return;
+        const distanceFromRouteKm = Math.hypot(dx, dy) * 111;
+        if (distanceFromRouteKm > OFF_ROUTE_THRESHOLD_KM) {
+            console.info('[RM2 motion] ignored off-route position', {
+                lineId: message.lineId,
+                distanceFromRouteKm: Number(distanceFromRouteKm.toFixed(3)),
+                thresholdKm: OFF_ROUTE_THRESHOLD_KM,
+                source: message.source,
+            });
+            return false;
+        }
         applyTruckPositionToRoute(route, message, performance.now());
+        return true;
     }, [options]);
 
     const verifyPredictedArrivals = useCallback(async (lineIds: string[]) => {
@@ -123,15 +138,48 @@ export function useVehicleMotionController(options: Options) {
 
     const handlePositionFrame = useCallback((frame: VehiclePositionsMessage) => {
         if (frame.scope !== options.scope || !options.viewActive) return;
-        if (snapshotVersionRef.current && frame.snapshotVersion && frame.snapshotVersion !== snapshotVersionRef.current) return;
+        if (snapshotVersionRef.current && frame.snapshotVersion && frame.snapshotVersion !== snapshotVersionRef.current) {
+            console.info('[RM2 motion] ignored stale position frame', {
+                expectedSnapshotVersion: snapshotVersionRef.current,
+                receivedSnapshotVersion: frame.snapshotVersion,
+                positionCount: frame.positions.length,
+            });
+            return;
+        }
+        let accepted = 0;
+        let wrongGroup = 0;
+        let unknownLine = 0;
         frame.positions.forEach((position) => {
-            if (position.groupId !== activeGroupIdRef.current || !activeRoutesRef.current.has(position.lineId)) return;
+            if (!activeRoutesRef.current.has(position.lineId)) {
+                unknownLine += 1;
+                return;
+            }
+            if (position.groupId !== activeGroupIdRef.current) {
+                wrongGroup += 1;
+                return;
+            }
             positionBufferRef.current.set(position.lineId, position);
+            accepted += 1;
         });
+        if (accepted === 0 && frame.positions.length > 0) {
+            console.info('[RM2 motion] ignored position frame', {
+                activeGroupId: activeGroupIdRef.current,
+                receivedLineIds: frame.positions.map((position) => position.lineId),
+                receivedGroupIds: [...new Set(frame.positions.map((position) => position.groupId ?? ''))],
+                wrongGroup,
+                unknownLine,
+            });
+        }
         if (flushTimerRef.current === null) flushTimerRef.current = window.setTimeout(flush, WS_FLUSH_MS);
     }, [flush, options.scope, options.viewActive]);
 
-    const loadGroup = useCallback(async (routes: RouteSeed[]) => {
+    const loadGroup = useCallback(async (routes: RouteSeed[], context?: GroupContext) => {
+        // React state is intentionally asynchronous. Update these guards before the
+        // batch request so its first response belongs to the group being rendered.
+        if (context) {
+            activeGroupIdRef.current = context.groupId;
+            snapshotVersionRef.current = context.snapshotVersion;
+        }
         const now = performance.now();
         const next = new Map<string, ActiveRoute>();
         routes.forEach((seed) => {
@@ -149,13 +197,31 @@ export function useVehicleMotionController(options: Options) {
         activeRoutesRef.current = next;
         completedRouteIdsRef.current.clear();
         const positions = await options.fetchPositions(Array.from(next.keys()));
+        let accepted = 0;
+        let wrongScope = 0;
+        let inactiveLine = 0;
         positions.forEach((position) => {
             const route = next.get(position.lineId);
-            if (!route
-                || position.scope !== options.scope
-                || position.groupId !== activeGroupIdRef.current
-                || (snapshotVersionRef.current && position.snapshotVersion && position.snapshotVersion !== snapshotVersionRef.current)) return;
-            applyPosition(position);
+            if (!route) {
+                inactiveLine += 1;
+                return;
+            }
+            if (position.scope !== options.scope) {
+                wrongScope += 1;
+                return;
+            }
+            // This REST request was made exclusively for `next`. A snapshot may
+            // change while it is in flight; accepting its current coordinates is
+            // safer than leaving every truck at the synthetic route origin.
+            if (applyPosition(position)) accepted += 1;
+        });
+        console.info('[RM2 motion] initial position batch', {
+            groupId: activeGroupIdRef.current,
+            requestedLineIds: [...next.keys()],
+            received: positions.length,
+            accepted,
+            wrongScope,
+            inactiveLine,
         });
     }, [applyPosition, options]);
 

@@ -45,7 +45,8 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
     const activeRouteLineIdsRef = useRef<Set<string>>(new Set());
     const completedLineIdsByGroupRef = useRef<Map<string, Set<string>>>(new Map());
     const timerRef = useRef<number | null>(null);
-    const requestRef = useRef<AbortController | null>(null);
+    const groupsRequestRef = useRef<AbortController | null>(null);
+    const groupRequestRef = useRef<AbortController | null>(null);
     const generationRef = useRef(0);
     const playNodeRef = useRef<(node: ChainNode) => Promise<void>>(async () => {});
 
@@ -104,9 +105,9 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
     }, []);
 
     const refreshRm2 = useCallback(async () => {
-        requestRef.current?.abort();
+        groupsRequestRef.current?.abort();
         const request = new AbortController();
-        requestRef.current = request;
+        groupsRequestRef.current = request;
         try {
             const response = await fetchRm2Groups(request.signal);
             if (request.signal.aborted) return;
@@ -155,9 +156,9 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
 
     const playNode = useCallback(async (node: ChainNode) => {
         stopTimer();
-        requestRef.current?.abort();
+        groupRequestRef.current?.abort();
         const request = new AbortController();
-        requestRef.current = request;
+        groupRequestRef.current = request;
         const generation = generationRef.current + 1;
         generationRef.current = generation;
         currentNodeRef.current = node;
@@ -225,7 +226,10 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 speedKmh: route.speedKmh,
                 travelDurationMs: route.travelDurationMs,
                 status: route.status,
-            })));
+            })), {
+                groupId: node.id,
+                snapshotVersion: snapshotVersionRef.current || null,
+            });
             if (!isActiveGeneration(generation)) return;
 
             const durationMs = node.durationMs ?? 15_000;
@@ -263,7 +267,8 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
     useEffect(() => {
         if (view !== 'roadMap2' || !sceneReady) {
             generationRef.current += 1;
-            requestRef.current?.abort();
+            groupsRequestRef.current?.abort();
+            groupRequestRef.current?.abort();
             stopTimer();
             return;
         }
@@ -273,13 +278,15 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         return () => {
             window.clearInterval(timer);
             generationRef.current += 1;
-            requestRef.current?.abort();
+            groupsRequestRef.current?.abort();
+            groupRequestRef.current?.abort();
             stopTimer();
         };
     }, [refreshRm2, sceneReady, stopTimer, view]);
 
     useEffect(() => () => {
-        requestRef.current?.abort();
+        groupsRequestRef.current?.abort();
+        groupRequestRef.current?.abort();
         stopTimer();
     }, [stopTimer]);
 
