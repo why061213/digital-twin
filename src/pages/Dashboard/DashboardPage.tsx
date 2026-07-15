@@ -9,7 +9,7 @@ import type { RoadGroupPanelState } from './modules/DashboardSidePanels';
 import { useDashboardRealtime } from './hooks/useDashboardRealtime';
 import { useRoadGroupsController } from './hooks/useRoadGroupsController';
 import { useTruckPositionController } from './hooks/useTruckPositionController';
-import { useRm2RoadController } from './hooks/useRm2RoadController';
+import { useRm2PlaybackController } from './hooks/useRm2PlaybackController';
 import { useWarehouseController } from './hooks/useWarehouseController';
 import type { ViewMode } from './types';
 import { DispatchButtons } from './components/DispatchButtons';
@@ -114,12 +114,7 @@ function DashboardPage() {
         refreshRm2,
         handleSnapshotChanged,
         handleVehiclePositions: handleRm2VehiclePositions,
-    } = useRm2RoadController({
-        roadMapRef: roadMap2Ref,
-        view,
-        sceneReady: isRoadMap2VisualReady,
-    });
-    const {
+    } = useRm2PlaybackController({
         roadMapRef: roadMap2Ref,
         view,
         sceneReady: isRoadMap2VisualReady,
@@ -262,16 +257,6 @@ function DashboardPage() {
             onRefresh={() => void refreshRm2()}
         />
     );
-        <div style={{
-            position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-            background: 'rgba(0,0,0,0.8)', color: '#0f0', padding: '10px 24px',
-            borderRadius: 8, fontFamily: 'monospace', fontSize: 14, zIndex: 100,
-            display: 'flex', gap: 16, alignItems: 'center', pointerEvents: 'none',
-        }}>
-            <span>▶</span>
-        </div>
-    );
-
     const dispatchControls = view === 'roadMap' && (
         <DispatchButtons
             isDispatching={isDispatching}

@@ -27,6 +27,7 @@ type Options = {
     mapAdapter: MapAdapter;
     fetchPositions: (lineIds: string[]) => Promise<TruckPositionMessage[]>;
     onRouteFinished?: (lineId: string) => void;
+    preserveFinishedVehicle?: boolean;
 };
 
 const OFF_ROUTE_THRESHOLD_KM = 1.5;
@@ -47,9 +48,17 @@ export function useVehicleMotionController(options: Options) {
         const route = activeRoutesRef.current.get(message.lineId);
         if (!route || !message.position) return;
         if (message.status === 'finished') {
+            if (completedRouteIdsRef.current.has(message.lineId)) return;
             completedRouteIdsRef.current.add(message.lineId);
-            activeRoutesRef.current.delete(message.lineId);
-            options.mapAdapter.removeVehicle(message.lineId);
+            if (options.preserveFinishedVehicle) {
+                route.status = 'finished';
+                route.calibratedDistance = route.pathLength;
+                route.calibratedAt = performance.now();
+                route.pathSpeed = 0;
+            } else {
+                activeRoutesRef.current.delete(message.lineId);
+                options.mapAdapter.removeVehicle(message.lineId);
+            }
             options.onRouteFinished?.(message.lineId);
             return;
         }
