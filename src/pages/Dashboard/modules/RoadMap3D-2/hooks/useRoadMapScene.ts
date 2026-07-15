@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { loadCityGeoJson, projection } from '../geo';
+import { loadCityGeoJson, MAP_HORIZONTAL_SCALE, projection } from '../geo';
 import { useRoadMapRefs } from './useRoadMapRefs';
 import { useRoadControls } from './useRoadControls';
 import { useRoadSelection } from './useRoadSelection';
@@ -105,6 +105,8 @@ export function useRoadMapScene(
                     });
                     group.add(cityGroup);
                 });
+                // The source shapes live in local X/Y; after rotation those become scene X/Z.
+                group.scale.set(MAP_HORIZONTAL_SCALE, MAP_HORIZONTAL_SCALE, 1);
                 group.rotation.x = Math.PI / 2;
                 scene.add(group);
                 window.requestAnimationFrame(() => {

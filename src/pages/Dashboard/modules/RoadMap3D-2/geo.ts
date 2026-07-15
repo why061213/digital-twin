@@ -2,6 +2,9 @@ import { geoMercator } from 'd3-geo';
 import * as THREE from 'three';
 import { BASE_URL, DIRECT_CITY_ADCODES } from './constants';
 
+// RM2 deliberately exaggerates the ground plane while preserving vertical lift.
+export const MAP_HORIZONTAL_SCALE = 10;
+
 export const projection = geoMercator()
     .center([104.5, 35])
     .scale(80)
@@ -41,5 +44,5 @@ export async function loadCityGeoJson(): Promise<any> {
 export function mapPosition(coords: [number, number], lift = 0) {
     const p = projection(coords);
     if (!p) return null;
-    return new THREE.Vector3(-p[0], lift, -p[1]);
+    return new THREE.Vector3(-p[0] * MAP_HORIZONTAL_SCALE, lift, -p[1] * MAP_HORIZONTAL_SCALE);
 }
