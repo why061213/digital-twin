@@ -21,6 +21,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
     const [status, setStatus] = useState<'idle' | 'playing' | 'paused'>('idle');
     const [currentLabel, setCurrentLabel] = useState('');
     const [currentRoutes, setCurrentRoutes] = useState<RenderRouteDTO[]>([]);
+    const [autoPlay, setAutoPlay] = useState(false);
 
     const chainRef = useRef<ChainNode | null>(null);
     const currentNodeRef = useRef<ChainNode | null>(null);
@@ -63,10 +64,11 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         } catch { return []; }
     }, []);
 
-    // 运动控制器：帧循环预测 + 定时修正
+    // 运动控制器：帧循环预测 + 定时修正（只在播放中且有路线时激活）
+    const motionActive = status === 'playing' && currentRoutes.length > 0;
     const motion = useVehicleMotionController({
         scope: 'rm2',
-        viewActive: view === 'roadMap2' && sceneReady,
+        viewActive: view === 'roadMap2' && sceneReady && motionActive,
         activeGroupId: currentNodeRef.current?.id ?? null,
         snapshotVersion: snapshotVersionRef.current,
         mapAdapter: mapAdapter.current,
@@ -193,7 +195,6 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 return;
             }
             retryCountRef.current = 0; // 有数据了，重置
-            const emptyMap = new Map<string, RenderRouteDTO[]>();
             // 构建含空 routes 的链表
             const emptyMap = new Map<string, RenderRouteDTO[]>();
             resp.groups.forEach((g) => emptyMap.set(g.groupId, []));
@@ -213,17 +214,14 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         setCurrentRoutes([]);
     }, [stopTimer, stopCalibration]);
 
-    // WebSocket 快照更新
-    const handleSnapshotChanged = useCallback((msg: RouteSnapshotChangedMessage) => {
-        if (msg.scope !== 'rm2' || msg.snapshotVersion === snapshotVersionRef.current) return;
-        setTimeout(() => void syncAndStart(), 200);
-    }, [syncAndStart]);
-
     useEffect(() => {
-        if (view !== 'roadMap2' || !sceneReady) { stop(); return; }
+        if (view !== 'roadMap2' || !sceneReady || !autoPlay) { stop(); return; }
         syncAndStart();
         return () => { stop(); };
-    }, [view, sceneReady]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [view, sceneReady, autoPlay]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    return { status, currentLabel, currentRoutes, syncAndStart, stop, handleSnapshotChanged };
+    const startPlayback = useCallback(() => setAutoPlay(true), []);
+    const stopPlayback = useCallback(() => { setAutoPlay(false); stop(); }, [stop]);
+
+    return { status, currentLabel, currentRoutes, startPlayback, stopPlayback, autoPlay };
 }
