@@ -113,6 +113,7 @@ function DashboardPage() {
         loadGroup: loadRm2Group,
         refreshRm2,
         handleSnapshotChanged,
+        handleVehiclePositions: handleRm2VehiclePositions,
     } = useRm2RoadController({
         roadMapRef: roadMap2Ref,
         view,
@@ -189,7 +190,19 @@ function DashboardPage() {
         onRouteRaise: handleRouteRaise,
         onRouteFall: finishRoute,
         onRoadPath: handleRoadPath,
-        onTruckPosition: handleTruckPosition,
+        onTruckPosition: (message) => {
+            if (message.scope === 'rm2') {
+                handleRm2VehiclePositions({
+                    type: 'vehicle_positions',
+                    scope: 'rm2',
+                    serverTime: new Date().toISOString(),
+                    positions: [message],
+                });
+                return;
+            }
+            handleTruckPosition(message);
+        },
+        onVehiclePositions: handleRm2VehiclePositions,
         onWarehouseUpdate: handleWarehouseUpdate,
         onWarehouseFocus: handleWarehouseFocus,
         onCameraControl: handleCameraControl,

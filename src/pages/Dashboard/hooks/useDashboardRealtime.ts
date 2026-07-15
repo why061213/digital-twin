@@ -50,6 +50,7 @@ export type TruckPositionMessage = {
     status?: 'running' | 'finished' | string;
     scope?: 'rm1' | 'rm2';
     groupId?: string;
+    snapshotVersion?: string;
     vehicleId?: string;
     plate?: string;
     source?: string;

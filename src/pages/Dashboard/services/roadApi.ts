@@ -34,6 +34,27 @@ export async function fetchTruckPosition(lineId: string): Promise<TruckPositionM
     return await response.json() as TruckPositionMessage;
 }
 
+/** 当前展示组的低频批量校准；不穿透为逐车请求。 */
+export async function fetchVehiclePositions(lineIds: string[]): Promise<TruckPositionMessage[]> {
+    const uniqueLineIds = [...new Set(lineIds.filter(Boolean))];
+    if (uniqueLineIds.length === 0) return [];
+    const response = await fetch(`${API_BASE_URL}/road/vehicles/positions/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lineIds: uniqueLineIds }),
+    });
+    if (!response.ok) throw new Error(`Vehicle positions request failed: ${response.status}`);
+    const data = await response.json() as { positions?: unknown[] };
+    return (data.positions ?? []).filter((value): value is TruckPositionMessage => {
+        if (!value || typeof value !== 'object') return false;
+        const item = value as Partial<TruckPositionMessage>;
+        return typeof item.lineId === 'string'
+            && Array.isArray(item.position)
+            && item.position.length >= 2
+            && item.position.every((coordinate) => typeof coordinate === 'number' && Number.isFinite(coordinate));
+    });
+}
+
 export async function dispatchRoute(): Promise<RoadPathMessage> {
     const response = await fetch(`${API_BASE_URL}/road/dispatch`, { method: 'POST' });
     if (!response.ok) throw new Error(`Dispatch failed: ${response.status}`);
