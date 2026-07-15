@@ -74,7 +74,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         snapshotVersion,
         mapAdapter,
         fetchPositions: fetchVehiclePositions,
-        preserveFinishedVehicle: true,
+        preserveFinishedVehicle: false,
         onRouteFinished: (lineId) => {
             const groupId = activeGroupIdRef.current;
             if (!groupId) return;

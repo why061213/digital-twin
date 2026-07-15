@@ -48,8 +48,11 @@ export async function fetchVehiclePositions(lineIds: string[]): Promise<TruckPos
     return (data.positions ?? []).filter((value): value is TruckPositionMessage => {
         if (!value || typeof value !== 'object') return false;
         const item = value as Partial<TruckPositionMessage>;
-        return typeof item.lineId === 'string'
-            && Array.isArray(item.position)
+        if (typeof item.lineId !== 'string') return false;
+        // 已完成路线可能已经没有可返回的坐标，但完成状态本身必须交给运动层，
+        // 否则前端会把到站车辆一直留在道路上。
+        if (item.status === 'finished') return true;
+        return Array.isArray(item.position)
             && item.position.length >= 2
             && item.position.every((coordinate) => typeof coordinate === 'number' && Number.isFinite(coordinate));
     });

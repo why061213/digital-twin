@@ -2,7 +2,14 @@ import { useCallback, useEffect, useRef } from 'react';
 import type { ActiveRoute, LonLat } from '../types';
 import type { TruckPositionMessage, VehiclePositionsMessage } from './useDashboardRealtime';
 import { POSITION_RENDER_TICK_MS } from '../constants';
-import { applyTruckPositionToRoute, pathLength, pathLengthKm, predictedPosition, projectDistanceOnPath } from '../utils';
+import {
+    applyTruckPositionToRoute,
+    pathLength,
+    pathLengthKm,
+    predictedDistance,
+    predictedPosition,
+    projectDistanceOnPath,
+} from '../utils';
 
 type MapAdapter = {
     updateVehicle: (lineId: string, position: LonLat, info: { speedKmh: number | null; status: string }) => void;
@@ -32,6 +39,7 @@ type Options = {
 
 const OFF_ROUTE_THRESHOLD_KM = 1.5;
 const WS_FLUSH_MS = 300;
+const ARRIVAL_RECHECK_DELAY_MS = 5_000;
 
 export function useVehicleMotionController(options: Options) {
     const activeRoutesRef = useRef<Map<string, ActiveRoute>>(new Map());
@@ -46,7 +54,7 @@ export function useVehicleMotionController(options: Options) {
 
     const applyPosition = useCallback((message: TruckPositionMessage) => {
         const route = activeRoutesRef.current.get(message.lineId);
-        if (!route || !message.position) return;
+        if (!route) return;
         if (message.status === 'finished') {
             if (completedRouteIdsRef.current.has(message.lineId)) return;
             completedRouteIdsRef.current.add(message.lineId);
@@ -62,6 +70,7 @@ export function useVehicleMotionController(options: Options) {
             options.onRouteFinished?.(message.lineId);
             return;
         }
+        if (!message.position) return;
         const projected = projectDistanceOnPath(route.coordinates, message.position);
         const projectedPosition = predictedPosition({ ...route, calibratedDistance: projected, calibratedAt: performance.now() }, performance.now());
         const dx = projectedPosition[0] - message.position[0];
@@ -69,6 +78,41 @@ export function useVehicleMotionController(options: Options) {
         if (Math.hypot(dx, dy) * 111 > OFF_ROUTE_THRESHOLD_KM) return;
         applyTruckPositionToRoute(route, message, performance.now());
     }, [options]);
+
+    const verifyPredictedArrivals = useCallback(async (lineIds: string[]) => {
+        const candidates = [...new Set(lineIds)].filter((lineId) => {
+            const route = activeRoutesRef.current.get(lineId);
+            if (!route || route.arrivalCheckRequested) return false;
+            route.arrivalCheckRequested = true;
+            return true;
+        });
+        if (candidates.length === 0) return;
+
+        try {
+            const positions = await options.fetchPositions(candidates);
+            const returnedLineIds = new Set(positions.map((position) => position.lineId));
+            positions.forEach(applyPosition);
+
+            const retryAt = performance.now() + ARRIVAL_RECHECK_DELAY_MS;
+            candidates.forEach((lineId) => {
+                const route = activeRoutesRef.current.get(lineId);
+                if (!route) return;
+                // 非完成响应已经通过 applyTruckPositionToRoute 拉回可信进度；
+                // 空响应则稍后重试，避免每个渲染 tick 都重复请求。
+                if (!returnedLineIds.has(lineId)) route.nextCalibrationAt = retryAt;
+                route.arrivalCheckRequested = false;
+            });
+        } catch (error) {
+            console.warn('[vehicle motion] arrival verification failed', error);
+            const retryAt = performance.now() + ARRIVAL_RECHECK_DELAY_MS;
+            candidates.forEach((lineId) => {
+                const route = activeRoutesRef.current.get(lineId);
+                if (!route) return;
+                route.arrivalCheckRequested = false;
+                route.nextCalibrationAt = retryAt;
+            });
+        }
+    }, [applyPosition, options]);
 
     const flush = useCallback(() => {
         flushTimerRef.current = null;
@@ -119,12 +163,19 @@ export function useVehicleMotionController(options: Options) {
         if (!options.viewActive) return;
         const timer = window.setInterval(() => {
             const now = performance.now();
+            const arrivalCandidates: string[] = [];
             activeRoutesRef.current.forEach((route) => {
                 options.mapAdapter.updateVehicle(route.lineId, predictedPosition(route, now), { speedKmh: route.speedKmh, status: route.status });
+                const reachedPredictedEnd = route.pathLength > 0
+                    && predictedDistance(route, now) >= route.pathLength - 0.0001;
+                if (reachedPredictedEnd && !route.arrivalCheckRequested && now >= route.nextCalibrationAt) {
+                    arrivalCandidates.push(route.lineId);
+                }
             });
+            if (arrivalCandidates.length > 0) void verifyPredictedArrivals(arrivalCandidates);
         }, POSITION_RENDER_TICK_MS);
         return () => window.clearInterval(timer);
-    }, [options.mapAdapter, options.viewActive]);
+    }, [options.mapAdapter, options.viewActive, verifyPredictedArrivals]);
 
     useEffect(() => () => { if (flushTimerRef.current !== null) window.clearTimeout(flushTimerRef.current); }, []);
 
