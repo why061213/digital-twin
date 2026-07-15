@@ -8,7 +8,7 @@ import type { ViewMode, LonLat } from '../types';
 import type { TruckPositionMessage } from './useDashboardRealtime';
 import { useVehicleMotionController } from './useVehicleMotionController';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
 const CALIBRATION_INTERVAL_MS = 12_000; // 每 12 秒向后端拉一次真实位置修正
 
 type Options = {
@@ -123,19 +123,41 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
     }, []);
 
-    // 播放一个节点
-    const playNode = useCallback((node: ChainNode) => {
+    // 播放一个节点（routes 为空时按需拉取）
+    const playNode = useCallback(async (node: ChainNode) => {
         stopTimer();
+        stopCalibration();
 
         let leaf = node;
         while (leaf.child) leaf = leaf.child;
 
-        const routes = leaf.routes ?? [];
+        let routes = leaf.routes ?? [];
+        if (routes.length === 0 && leaf.id) {
+            try {
+                const cached = routesCacheRef.current.get(leaf.id);
+                if (cached && cached.length > 0) {
+                    routes = cached;
+                } else {
+                    const url = `${API_BASE}/api/road/rm2/groups/${encodeURIComponent(leaf.id)}/routes?snapshotVersion=${snapshotVersionRef.current}`;
+                    const rResp = await fetch(url);
+                    if (rResp.ok) {
+                        const rData = await rResp.json();
+                        if (rData.routes?.length > 0) {
+                            routes = rData.routes;
+                            routesCacheRef.current.set(leaf.id, routes);
+                        }
+                    }
+                }
+            } catch (e) { console.warn('Failed to load routes for', leaf.id, e); }
+        }
+
         currentNodeRef.current = leaf;
         setCurrentLabel(leaf.label);
         setCurrentRoutes(routes);
-        renderGroup(routes);
-        startCalibration();
+        if (routes.length > 0) {
+            renderGroup(routes);
+            startCalibration();
+        }
 
         const duration = leaf.durationMs ?? 15000;
         timerRef.current = setTimeout(() => {
@@ -143,9 +165,9 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
             if (next) playNode(next);
             else stop();
         }, duration);
-    }, [renderGroup, startCalibration, stopTimer]);
+    }, [renderGroup, startCalibration, stopTimer, stopCalibration]);
 
-    // 同步并开始
+    // 同步并开始（不预加载 routes，构建空链表后在第一个 playNode 中按需拉取）
     const syncAndStart = useCallback(async () => {
         setStatus('playing');
         try {
@@ -155,18 +177,10 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 return;
             }
             snapshotVersionRef.current = resp.snapshotVersion;
-
-            const routeMap = new Map<string, RenderRouteDTO[]>();
-            for (const g of resp.groups) {
-                try {
-                    const rResp = await fetch(`${API_BASE}/api/road/rm2/groups/${encodeURIComponent(g.groupId)}/routes?snapshotVersion=${resp.snapshotVersion}`);
-                    if (!rResp.ok) continue;
-                    const rData = await rResp.json();
-                    if (rData.routes) routeMap.set(g.groupId, rData.routes);
-                } catch { /* skip */ }
-            }
-            routesCacheRef.current = routeMap;
-            const chain = buildPlaybackChain(resp.groups, routeMap);
+            // 构建含空 routes 的链表
+            const emptyMap = new Map<string, RenderRouteDTO[]>();
+            resp.groups.forEach((g) => emptyMap.set(g.groupId, []));
+            const chain = buildPlaybackChain(resp.groups, emptyMap);
             chainRef.current = chain;
             if (chain?.child) playNode(chain.child);
         } catch (e) {
