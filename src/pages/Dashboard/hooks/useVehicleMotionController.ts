@@ -8,7 +8,6 @@ import {
     pathLengthKm,
     predictedDistance,
     predictedPosition,
-    projectDistanceOnPath,
 } from '../utils';
 
 type MapAdapter = {
@@ -42,7 +41,6 @@ type Options = {
     preserveFinishedVehicle?: boolean;
 };
 
-const OFF_ROUTE_THRESHOLD_KM = 1.5;
 const WS_FLUSH_MS = 300;
 const ARRIVAL_RECHECK_DELAY_MS = 5_000;
 
@@ -76,20 +74,8 @@ export function useVehicleMotionController(options: Options) {
             return true;
         }
         if (!message.position) return false;
-        const projected = projectDistanceOnPath(route.coordinates, message.position);
-        const projectedPosition = predictedPosition({ ...route, calibratedDistance: projected, calibratedAt: performance.now() }, performance.now());
-        const dx = projectedPosition[0] - message.position[0];
-        const dy = projectedPosition[1] - message.position[1];
-        const distanceFromRouteKm = Math.hypot(dx, dy) * 111;
-        if (distanceFromRouteKm > OFF_ROUTE_THRESHOLD_KM) {
-            console.info('[RM2 motion] ignored off-route position', {
-                lineId: message.lineId,
-                distanceFromRouteKm: Number(distanceFromRouteKm.toFixed(3)),
-                thresholdKm: OFF_ROUTE_THRESHOLD_KM,
-                source: message.source,
-            });
-            return false;
-        }
+        // 与 RM1 一致：真实定位统一投影到已渲染路径上。短途订单的提供方定位
+        // 可能离城市中心路线很远，但不应因此让车辆永远停留在模拟起点。
         applyTruckPositionToRoute(route, message, performance.now());
         return true;
     }, [options]);
