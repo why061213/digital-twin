@@ -10,6 +10,7 @@ import { useDashboardRealtime } from './hooks/useDashboardRealtime';
 import { useRoadGroupsController } from './hooks/useRoadGroupsController';
 import { useTruckPositionController } from './hooks/useTruckPositionController';
 import { useRm2RoadController } from './hooks/useRm2RoadController';
+import { useRm2PlaybackController } from './hooks/useRm2PlaybackController';
 import { useWarehouseController } from './hooks/useWarehouseController';
 import type { ViewMode } from './types';
 import { DispatchButtons } from './components/DispatchButtons';
@@ -119,6 +120,17 @@ function DashboardPage() {
         view,
         sceneReady: isRoadMap2VisualReady,
     });
+    const {
+        status: playbackStatus,
+        currentLabel: playbackLabel,
+        currentRoutes: playbackRoutes,
+        stop: stopPlayback,
+    } = useRm2PlaybackController({
+        roadMapRef: roadMap2Ref,
+        view,
+        sceneReady: isRoadMap2VisualReady,
+    });
+    const [isAutoPlay, setIsAutoPlay] = useState(true);
     const handleRouteRaise = useCallback(() => {
         // 城市飞线事件由 ChinaMap3D 处理；道路级地图只加载后端分组后的路线。
     }, []);
@@ -242,7 +254,7 @@ function DashboardPage() {
             onSelectGroup={(groupId) => void loadRoadGroup(groupId)}
         />
     );
-    const rm2GroupQueue = view === 'roadMap2' && rm2Groups.length > 0 && (
+    const rm2GroupQueue = view === 'roadMap2' && !isAutoPlay && rm2Groups.length > 0 && (
         <RoadGroupQueue
             groups={rm2Groups}
             activeGroupId={activeRm2GroupId}
@@ -256,6 +268,22 @@ function DashboardPage() {
             isLoading={isLoadingRm2Group}
             onRefresh={() => void refreshRm2()}
         />
+    );
+    const rm2PlaybackBar = view === 'roadMap2' && playbackStatus === 'playing' && (
+        <div style={{
+            position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
+            background: 'rgba(0,0,0,0.75)', color: '#0f0', padding: '6px 20px',
+            borderRadius: 8, fontFamily: 'monospace', fontSize: 13, zIndex: 100,
+            display: 'flex', gap: 16, alignItems: 'center',
+        }}>
+            <span>▶ 播放中</span>
+            <span>{playbackLabel}</span>
+            <span style={{ color: '#aaa' }}>{playbackRoutes.length} 条路线</span>
+            <button onClick={() => { stopPlayback(); setIsAutoPlay(false); }}
+                style={{ background: '#333', color: '#fff', border: 'none', padding: '2px 10px', borderRadius: 4, cursor: 'pointer' }}>
+                ⏹ 停止
+            </button>
+        </div>
     );
 
     const dispatchControls = view === 'roadMap' && (
@@ -313,6 +341,7 @@ function DashboardPage() {
                     {roadGroupQueue}
                     {rm2GroupQueue}
                     {rm2DiagnosticsPanel}
+                    {rm2PlaybackBar}
                     {roadStrategyTabs}
                     {viewButtons}
                     {dispatchControls}
