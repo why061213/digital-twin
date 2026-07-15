@@ -124,9 +124,6 @@ function DashboardPage() {
         status: playbackStatus,
         currentLabel: playbackLabel,
         currentRoutes: playbackRoutes,
-        startPlayback,
-        stopPlayback: stopAutoPlayback,
-        autoPlay: isAutoPlay,
     } = useRm2PlaybackController({
         roadMapRef: roadMap2Ref,
         view,
@@ -255,7 +252,7 @@ function DashboardPage() {
             onSelectGroup={(groupId) => void loadRoadGroup(groupId)}
         />
     );
-    const rm2GroupQueue = view === 'roadMap2' && !isAutoPlay && rm2Groups.length > 0 && (
+    const rm2GroupQueue = view === 'roadMap2' && rm2Groups.length > 0 && (
         <RoadGroupQueue
             groups={rm2Groups}
             activeGroupId={activeRm2GroupId}
@@ -270,32 +267,16 @@ function DashboardPage() {
             onRefresh={() => void refreshRm2()}
         />
     );
-    const rm2PlaybackBar = view === 'roadMap2' && (
+    const rm2PlaybackBar = view === 'roadMap2' && playbackStatus === 'playing' && (
         <div style={{
-            position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)',
-            background: 'rgba(0,0,0,0.75)', color: '#0f0', padding: '6px 20px',
-            borderRadius: 8, fontFamily: 'monospace', fontSize: 13, zIndex: 100,
-            display: 'flex', gap: 16, alignItems: 'center',
+            position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+            background: 'rgba(0,0,0,0.8)', color: '#0f0', padding: '10px 24px',
+            borderRadius: 8, fontFamily: 'monospace', fontSize: 14, zIndex: 100,
+            display: 'flex', gap: 16, alignItems: 'center', pointerEvents: 'none',
         }}>
-            {isAutoPlay && playbackStatus === 'playing' ? (
-                <>
-                    <span>▶ 播放中</span>
-                    <span>{playbackLabel}</span>
-                    <span style={{ color: '#aaa' }}>{playbackRoutes.length} 条路线</span>
-                    <button onClick={stopAutoPlayback}
-                        style={{ background: '#333', color: '#fff', border: 'none', padding: '2px 10px', borderRadius: 4, cursor: 'pointer' }}>
-                        ⏹ 停止
-                    </button>
-                </>
-            ) : (
-                <>
-                    <span>RM2 自动播放</span>
-                    <button onClick={startPlayback}
-                        style={{ background: '#0a0', color: '#fff', border: 'none', padding: '4px 16px', borderRadius: 4, cursor: 'pointer', fontWeight: 'bold' }}>
-                        ▶ 开始播放
-                    </button>
-                </>
-            )}
+            <span>▶</span>
+            <span>{playbackLabel}</span>
+            <span style={{ color: '#aaa' }}>{playbackRoutes.length} 条路线</span>
         </div>
     );
 

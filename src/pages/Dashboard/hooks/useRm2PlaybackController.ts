@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChainNode } from '../playback/chain';
 import { buildPlaybackChain } from '../playback/chain';
-import type { RenderRouteDTO, RouteSnapshotChangedMessage } from '../services/renderRouteApi';
+import type { RenderRouteDTO } from '../services/renderRouteApi';
 import { adaptRenderRoute, fetchRm2Groups } from '../services/renderRouteApi';
 import type { RoadMap3DHandle as RoadMap3D2Handle } from '../modules/RoadMap3D-2';
 import type { ViewMode, LonLat } from '../types';
@@ -9,219 +9,129 @@ import type { TruckPositionMessage } from './useDashboardRealtime';
 import { useVehicleMotionController } from './useVehicleMotionController';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
-const CALIBRATION_INTERVAL_MS = 12_000; // 每 12 秒向后端拉一次真实位置修正
+const CALIBRATION_INTERVAL_MS = 12_000;
 
-type Options = {
-    roadMapRef: React.RefObject<RoadMap3D2Handle | null>;
-    view: ViewMode;
-    sceneReady: boolean;
-};
+type Options = { roadMapRef: React.RefObject<RoadMap3D2Handle | null>; view: ViewMode; sceneReady: boolean };
 
 export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Options) {
-    const [status, setStatus] = useState<'idle' | 'playing' | 'paused'>('idle');
+    const [status, setStatus] = useState<'idle' | 'playing'>('idle');
     const [currentLabel, setCurrentLabel] = useState('');
     const [currentRoutes, setCurrentRoutes] = useState<RenderRouteDTO[]>([]);
-    const [autoPlay, setAutoPlay] = useState(false);
 
     const chainRef = useRef<ChainNode | null>(null);
     const currentNodeRef = useRef<ChainNode | null>(null);
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const calibrateRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const snapshotVersionRef = useRef('');
-    const routesCacheRef = useRef<Map<string, RenderRouteDTO[]>>(new Map());
-    const retryCountRef = useRef(0);
+    const retryRef = useRef(0);
 
-    // 地图适配器
     const mapAdapter = useRef({
-        updateVehicle: (lineId: string, position: LonLat, info: { speedKmh: number | null; status: string }) => {
-            roadMapRef.current?.updateTruckPosition(lineId, position, info);
+        updateVehicle: (lineId: string, pos: LonLat, info: { speedKmh: number | null; status: string }) => {
+            roadMapRef.current?.updateTruckPosition(lineId, pos, info);
         },
-        removeVehicle: (lineId: string) => {
-            roadMapRef.current?.removeRoadPath(lineId);
-        },
+        removeVehicle: (lineId: string) => { roadMapRef.current?.removeRoadPath(lineId); },
     });
 
-    // 位置查询回调：批量 POST 后端
     const fetchPositions = useCallback(async (lineIds: string[]): Promise<TruckPositionMessage[]> => {
         try {
             const res = await fetch(`${API_BASE}/api/road/vehicles/positions/query`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ lineIds }),
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lineIds }),
             });
             if (!res.ok) return [];
             const data = await res.json();
             return (data.positions as any[] ?? []).map((p: any) => ({
-                type: 'truck_position' as const,
-                lineId: p.lineId,
-                groupId: '',
-                position: p.position,
-                speedKmh: p.speedKmh ?? null,
-                status: p.status ?? '运输中',
-                scope: 'rm2' as const,
-                serverTime: data.serverTime,
+                type: 'truck_position' as const, lineId: p.lineId, groupId: '',
+                position: p.position, speedKmh: p.speedKmh ?? null,
+                status: p.status ?? '运输中', scope: 'rm2' as const, serverTime: data.serverTime,
             }));
         } catch { return []; }
     }, []);
 
-    // 运动控制器：帧循环预测 + 定时修正（只在播放中且有路线时激活）
     const motionActive = status === 'playing' && currentRoutes.length > 0;
     const motion = useVehicleMotionController({
-        scope: 'rm2',
-        viewActive: view === 'roadMap2' && sceneReady && motionActive,
+        scope: 'rm2', viewActive: view === 'roadMap2' && sceneReady && motionActive,
         activeGroupId: currentNodeRef.current?.id ?? null,
         snapshotVersion: snapshotVersionRef.current,
-        mapAdapter: mapAdapter.current,
-        fetchPositions,
+        mapAdapter: mapAdapter.current, fetchPositions,
     });
 
-    // 渲染路线到地图 + 启动预测
-    const renderGroup = useCallback(async (routes: RenderRouteDTO[]) => {
-        const map = roadMapRef.current;
-        if (!map) return;
-        map.clearRoads();
-        const accepted = routes.map(adaptRenderRoute).filter((r): r is NonNullable<typeof r> => r !== null);
-        accepted.forEach((r) => {
-            map.addRoadPath(r.lineId, r.coordinates, {
-                plate: r.plate, cargo: r.cargo, from: r.from, to: r.to,
-                status: r.status, speedKmh: r.speedKmh,
-                routeLengthKm: r.routeLengthKm, orderId: r.orderId, pathKey: r.pathKey,
-            });
-        });
-        // 启动预测引擎
-        await motion.loadGroup(routes.map((r) => ({
-            lineId: r.lineId,
-            groupId: r.groupId,
-            coordinates: r.coordinates as LonLat[],
-            routeLengthKm: r.routeLengthKm,
-            speedKmh: r.speedKmh,
-            travelDurationMs: r.travelDurationMs,
-            status: r.status,
-        })));
-    }, [roadMapRef, motion]);
+    const stopTimer = useCallback(() => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; } }, []);
+    const stopCalibration = useCallback(() => { if (calibrateRef.current) { clearInterval(calibrateRef.current); calibrateRef.current = null; } }, []);
 
-    // 定时修正：每 12s 拉一次后端位置
-    const startCalibration = useCallback(() => {
-        calibrateRef.current && clearInterval(calibrateRef.current);
-        calibrateRef.current = setInterval(async () => {
-            const node = currentNodeRef.current;
-            if (!node?.routes || node.routes.length === 0) return;
-            const positions = await fetchPositions(node.routes.map((r) => r.lineId));
-            positions.forEach((p) => {
-                motion.handlePositionFrame({
-                    type: 'vehicle_positions',
-                    scope: 'rm2',
-                    serverTime: new Date().toISOString(),
-                    positions: [p],
-                });
-            });
-        }, CALIBRATION_INTERVAL_MS);
-    }, [fetchPositions, motion]);
-
-    const stopCalibration = useCallback(() => {
-        if (calibrateRef.current) { clearInterval(calibrateRef.current); calibrateRef.current = null; }
-    }, []);
-
-    const stopTimer = useCallback(() => {
-        if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
-    }, []);
-
-    // 播放一个节点（routes 为空时按需拉取）
     const playNode = useCallback(async (node: ChainNode) => {
-        stopTimer();
-        stopCalibration();
-
+        stopTimer(); stopCalibration();
         let leaf = node;
         while (leaf.child) leaf = leaf.child;
 
-        let routes = leaf.routes ?? [];
-        if (routes.length === 0 && leaf.id) {
-            try {
-                const cached = routesCacheRef.current.get(leaf.id);
-                if (cached && cached.length > 0) {
-                    routes = cached;
-                } else {
-                    const url = `${API_BASE}/api/road/rm2/groups/${encodeURIComponent(leaf.id)}/routes?snapshotVersion=${snapshotVersionRef.current}`;
-                    const rResp = await fetch(url);
-                    if (rResp.ok) {
-                        const rData = await rResp.json();
-                        if (rData.routes?.length > 0) {
-                            routes = rData.routes;
-                            routesCacheRef.current.set(leaf.id, routes);
-                        }
-                    }
-                }
-            } catch (e) { console.warn('Failed to load routes for', leaf.id, e); }
-        }
-
+        const routes = leaf.routes ?? [];
         currentNodeRef.current = leaf;
         setCurrentLabel(leaf.label);
         setCurrentRoutes(routes);
+
         if (routes.length > 0) {
-            renderGroup(routes);
-            startCalibration();
+            const map = roadMapRef.current;
+            if (map) {
+                map.clearRoads();
+                const accepted = routes.map(adaptRenderRoute).filter((r): r is NonNullable<typeof r> => r !== null);
+                accepted.forEach((r) => map.addRoadPath(r.lineId, r.coordinates, {
+                    plate: r.plate, cargo: r.cargo, from: r.from, to: r.to,
+                    status: r.status, speedKmh: r.speedKmh,
+                    routeLengthKm: r.routeLengthKm, orderId: r.orderId, pathKey: r.pathKey,
+                }));
+            }
+            await motion.loadGroup(routes.map((r) => ({
+                lineId: r.lineId, groupId: r.groupId, coordinates: r.coordinates as LonLat[],
+                routeLengthKm: r.routeLengthKm, speedKmh: r.speedKmh,
+                travelDurationMs: r.travelDurationMs, status: r.status,
+            })));
+            calibrateRef.current && clearInterval(calibrateRef.current);
+            calibrateRef.current = setInterval(async () => {
+                const node = currentNodeRef.current;
+                if (!node?.routes || node.routes.length === 0) return;
+                const positions = await fetchPositions(node.routes.map((r) => r.lineId));
+                positions.forEach((p) => motion.handlePositionFrame({
+                    type: 'vehicle_positions', scope: 'rm2', serverTime: new Date().toISOString(), positions: [p],
+                }));
+            }, CALIBRATION_INTERVAL_MS);
         }
 
-        const duration = leaf.durationMs ?? 15000;
         timerRef.current = setTimeout(() => {
             const next = leaf.next;
             if (next) playNode(next);
             else stop();
-        }, duration);
-    }, [renderGroup, startCalibration, stopTimer, stopCalibration]);
+        }, leaf.durationMs ?? 15000);
+    }, [roadMapRef, motion, fetchPositions, stopTimer, stopCalibration]);
 
-    // 同步并开始（不预加载 routes，构建空链表后在第一个 playNode 中按需拉取）
+    const stop = useCallback(() => { stopTimer(); stopCalibration(); setStatus('idle'); setCurrentRoutes([]); }, [stopTimer, stopCalibration]);
+
     const syncAndStart = useCallback(async () => {
-        setStatus('playing');
         try {
             const resp = await fetchRm2Groups();
-            if (resp.snapshotVersion === snapshotVersionRef.current && chainRef.current) {
-                if (currentNodeRef.current) playNode(currentNodeRef.current);
-                return;
-            }
-            snapshotVersionRef.current = resp.snapshotVersion;
             if (resp.groups.length === 0) {
-                if (retryCountRef.current >= 10) {
-                    console.warn('[RM2 playback] 重试 10 次仍无数据，停止');
-                    setStatus('idle');
-                    setCurrentLabel('暂无数据');
-                    return;
-                }
-                retryCountRef.current++;
-                console.info(`[RM2 playback] 暂无数据，触发后端处理 (${retryCountRef.current}/10)`);
-                setCurrentLabel('等待数据...');
-                try { await fetch(`${API_BASE}/api/road/town/provinces/raw`, { method: 'POST' }); } catch { /* ignore */ }
-                setTimeout(() => syncAndStart(), 1500);
+                if (retryRef.current < 10) {
+                    retryRef.current++;
+                    setCurrentLabel('等待数据...');
+                    try { await fetch(`${API_BASE}/api/road/town/provinces/raw`, { method: 'POST' }); } catch { /* */ }
+                    setTimeout(() => syncAndStart(), 2000);
+                } else { setCurrentLabel('暂无数据'); setStatus('idle'); }
                 return;
             }
-            retryCountRef.current = 0; // 有数据了，重置
-            // 构建含空 routes 的链表
+            retryRef.current = 0;
+            if (resp.snapshotVersion === snapshotVersionRef.current && chainRef.current) return;
+            snapshotVersionRef.current = resp.snapshotVersion;
             const emptyMap = new Map<string, RenderRouteDTO[]>();
             resp.groups.forEach((g) => emptyMap.set(g.groupId, []));
-            const chain = buildPlaybackChain(resp.groups, emptyMap);
-            chainRef.current = chain;
-            if (chain?.child) playNode(chain.child);
-        } catch (e) {
-            console.warn('RM2 playback sync failed', e);
-            setStatus('idle');
-        }
+            chainRef.current = buildPlaybackChain(resp.groups, emptyMap);
+            setStatus('playing');
+            if (chainRef.current?.child) playNode(chainRef.current.child);
+        } catch (e) { console.warn('[RM2 playback]', e); setStatus('idle'); }
     }, [playNode]);
 
-    const stop = useCallback(() => {
-        stopTimer();
-        stopCalibration();
-        setStatus('idle');
-        setCurrentRoutes([]);
-    }, [stopTimer, stopCalibration]);
-
     useEffect(() => {
-        if (view !== 'roadMap2' || !sceneReady || !autoPlay) { stop(); return; }
+        if (view !== 'roadMap2' || !sceneReady) { stop(); return; }
         syncAndStart();
         return () => { stop(); };
-    }, [view, sceneReady, autoPlay]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [view, sceneReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const startPlayback = useCallback(() => setAutoPlay(true), []);
-    const stopPlayback = useCallback(() => { setAutoPlay(false); stop(); }, [stop]);
-
-    return { status, currentLabel, currentRoutes, startPlayback, stopPlayback, autoPlay };
+    return { status, currentLabel, currentRoutes };
 }
