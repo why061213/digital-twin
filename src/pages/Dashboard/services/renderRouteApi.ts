@@ -4,6 +4,7 @@ import type { RoadPathMessage, TruckPositionMessage } from '../hooks/useDashboar
 export type RenderRouteDTO = {
     lineId: string;
     orderId?: string;
+    businessLineId: string;
     plate?: string;
     vehicleId?: string;
     from: string;
@@ -31,6 +32,9 @@ export type Rm2GroupDTO = {
     index: number;
     count: number;
     orderLineIds: string[];
+    vehicleLineIds: string[];
+    vehicleLineIdsByOrderLineId: Record<string, string[]>;
+    vehicleCount: number;
     mapKey: string;
     fromProvinceKey: string;
     toProvinceKey: string;
@@ -63,6 +67,7 @@ export type Rm2GroupsResponse = {
     scope: 'rm2';
     groupSize: number;
     totalRoutes: number;
+    totalVehicles: number;
     groups: Rm2GroupDTO[];
     diagnostics: Rm2GroupsDiagnostics;
     mismatch?: boolean;
@@ -132,6 +137,10 @@ function groupRejectReason(value: unknown): string | null {
     if (typeof value.count !== 'number' || !Number.isFinite(value.count)) return `${value.groupId}: invalid count`;
     const lineIds = (value as Record<string, unknown>).orderLineIds ?? (value as Record<string, unknown>).lineIds;
     if (!Array.isArray(lineIds) || !lineIds.every((lineId: unknown) => typeof lineId === 'string')) return `${value.groupId}: invalid orderLineIds`;
+    if (!Array.isArray(value.vehicleLineIds) || !value.vehicleLineIds.every((lineId: unknown) => typeof lineId === 'string')) return `${value.groupId}: invalid vehicleLineIds`;
+    if (!isRecord(value.vehicleLineIdsByOrderLineId)) return `${value.groupId}: invalid vehicleLineIdsByOrderLineId`;
+    if (!Object.values(value.vehicleLineIdsByOrderLineId).every((ids) => Array.isArray(ids) && ids.every((id) => typeof id === 'string'))) return `${value.groupId}: invalid vehicle line mapping`;
+    if (typeof value.vehicleCount !== 'number' || !Number.isFinite(value.vehicleCount)) return `${value.groupId}: invalid vehicleCount`;
     if (typeof value.mapKey !== 'string' || value.mapKey.length === 0) return `${value.groupId}: missing mapKey`;
     if (typeof value.fromProvinceKey !== 'string' || value.fromProvinceKey.length === 0) return `${value.groupId}: missing fromProvinceKey`;
     if (typeof value.toProvinceKey !== 'string' || value.toProvinceKey.length === 0) return `${value.groupId}: missing toProvinceKey`;
@@ -149,6 +158,8 @@ function isRenderRoute(value: unknown): value is RenderRouteDTO {
     return value.scope === 'rm2'
         && typeof value.lineId === 'string'
         && value.lineId.length > 0
+        && typeof value.businessLineId === 'string'
+        && value.businessLineId.length > 0
         && typeof value.groupId === 'string'
         && typeof value.pathKey === 'string'
         && typeof value.from === 'string'
@@ -231,6 +242,7 @@ export async function fetchRm2Groups(
         scope: 'rm2',
         groupSize: typeof data.groupSize === 'number' ? data.groupSize : 3,
         totalRoutes,
+        totalVehicles: typeof data.totalVehicles === 'number' ? data.totalVehicles : 0,
         groups,
         diagnostics,
         mismatch: data.mismatch === true,
@@ -295,6 +307,7 @@ export function adaptRenderRoute(route: RenderRouteDTO): RoadPathMessage | null 
         lineId: route.lineId,
         groupId: route.groupId,
         orderId: route.orderId,
+        orderFamilyId: route.businessLineId,
         pathKey: route.pathKey,
         plate: route.plate,
         vehicleId: route.vehicleId,

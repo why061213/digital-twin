@@ -16,13 +16,13 @@ import {
 import type { ViewMode } from '../types';
 
 const FIXTURE_GROUPS: Rm2GroupDTO[] = [
-    { groupId: 'rm2-fixture-fs-gz', groupName: '佛山 - 广州', index: 0, count: 2, orderLineIds: ['rm2-fs-gz-01', 'rm2-fs-gz-02'], mapKey: '440000', fromProvinceKey: '440000', toProvinceKey: '440000', directionKey: '440000:440000', pageIndex: 1 },
-    { groupId: 'rm2-fixture-dg-sz', groupName: '东莞 - 深圳', index: 1, count: 2, orderLineIds: ['rm2-dg-sz-01', 'rm2-dg-sz-02'], mapKey: '440000', fromProvinceKey: '440000', toProvinceKey: '440000', directionKey: '440000:440000', pageIndex: 2 },
-    { groupId: 'rm2-fixture-zs-zh', groupName: '中山 - 珠海', index: 2, count: 1, orderLineIds: ['rm2-zs-zh-01'], mapKey: '440000', fromProvinceKey: '440000', toProvinceKey: '440000', directionKey: '440000:440000', pageIndex: 3 },
+    { groupId: 'rm2-fixture-fs-gz', groupName: '佛山 - 广州', index: 0, count: 1, orderLineIds: ['RM2-FS-GZ::line-0'], vehicleLineIds: ['rm2-fs-gz-01', 'rm2-fs-gz-02'], vehicleLineIdsByOrderLineId: { 'RM2-FS-GZ::line-0': ['rm2-fs-gz-01', 'rm2-fs-gz-02'] }, vehicleCount: 2, mapKey: '440000', fromProvinceKey: '440000', toProvinceKey: '440000', directionKey: '440000:440000', pageIndex: 1 },
+    { groupId: 'rm2-fixture-dg-sz', groupName: '东莞 - 深圳', index: 1, count: 1, orderLineIds: ['RM2-DG-SZ::line-0'], vehicleLineIds: ['rm2-dg-sz-01', 'rm2-dg-sz-02'], vehicleLineIdsByOrderLineId: { 'RM2-DG-SZ::line-0': ['rm2-dg-sz-01', 'rm2-dg-sz-02'] }, vehicleCount: 2, mapKey: '440000', fromProvinceKey: '440000', toProvinceKey: '440000', directionKey: '440000:440000', pageIndex: 2 },
+    { groupId: 'rm2-fixture-zs-zh', groupName: '中山 - 珠海', index: 2, count: 1, orderLineIds: ['RM2-ZS-ZH::line-0'], vehicleLineIds: ['rm2-zs-zh-01'], vehicleLineIdsByOrderLineId: { 'RM2-ZS-ZH::line-0': ['rm2-zs-zh-01'] }, vehicleCount: 1, mapKey: '440000', fromProvinceKey: '440000', toProvinceKey: '440000', directionKey: '440000:440000', pageIndex: 3 },
 ];
 
 function fixtureRoute(lineId: string, orderId: string, plate: string, cargo: string, from: string, to: string, groupId: string, pathKey: string, coordinates: [number, number][]): RenderRouteDTO {
-    return { lineId, orderId, plate, cargo, from, to, groupId, pathKey, coordinates, fromCoords: coordinates[0], toCoords: coordinates[coordinates.length - 1], routeLengthKm: 36, speedKmh: 42, status: '运输中', travelDurationMs: 2_712_000, scope: 'rm2', role: 'primary', coordinateSystem: 'GCJ02', routeSignature: `${lineId}-fixture` };
+    return { lineId, orderId, businessLineId: `${orderId}::line-0`, plate, cargo, from, to, groupId, pathKey, coordinates, fromCoords: coordinates[0], toCoords: coordinates[coordinates.length - 1], routeLengthKm: 36, speedKmh: 42, status: '运输中', travelDurationMs: 2_712_000, scope: 'rm2', role: 'primary', coordinateSystem: 'GCJ02', routeSignature: `${lineId}-fixture` };
 }
 
 const FIXTURE_ROUTES: RenderRouteDTO[] = [
@@ -38,6 +38,27 @@ type Options = { roadMapRef: RefObject<RoadMap3D2Handle | null>; view: ViewMode;
 
 function isCompletedRoute(route: RenderRouteDTO) {
     return route.status === 'finished' || route.status.includes('完成');
+}
+
+function withoutCompletedVehicles(group: Rm2GroupDTO, completed: ReadonlySet<string>) {
+    const vehicleLineIdsByOrderLineId = Object.fromEntries(
+        Object.entries(group.vehicleLineIdsByOrderLineId)
+            .map(([businessLineId, vehicleLineIds]) => [
+                businessLineId,
+                vehicleLineIds.filter((lineId) => !completed.has(lineId)),
+            ] as const)
+            .filter(([, vehicleLineIds]) => vehicleLineIds.length > 0),
+    );
+    const orderLineIds = Object.keys(vehicleLineIdsByOrderLineId);
+    const vehicleLineIds = Object.values(vehicleLineIdsByOrderLineId).flat();
+    return orderLineIds.length === 0 ? null : {
+        ...group,
+        count: orderLineIds.length,
+        orderLineIds,
+        vehicleLineIds,
+        vehicleLineIdsByOrderLineId,
+        vehicleCount: vehicleLineIds.length,
+    };
 }
 
 export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) {
@@ -80,9 +101,8 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             const completedLineIds = completedLineIdsByGroupRef.current.get(group.groupId);
             if (!completedLineIds || completedLineIds.size === 0) return [group];
 
-            const orderLineIds = group.orderLineIds.filter((lineId) => !completedLineIds.has(lineId));
-            if (orderLineIds.length === 0) return [];
-            return [{ ...group, orderLineIds, count: orderLineIds.length }];
+            const filtered = withoutCompletedVehicles(group, completedLineIds);
+            return filtered ? [filtered] : [];
         })
     ), []);
 

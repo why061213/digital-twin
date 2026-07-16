@@ -26,6 +26,27 @@ function isCompletedRoute(route: RenderRouteDTO) {
     return route.status === 'finished' || route.status.includes('完成');
 }
 
+function withoutCompletedVehicles(group: Rm2GroupDTO, completed: ReadonlySet<string>) {
+    const vehicleLineIdsByOrderLineId = Object.fromEntries(
+        Object.entries(group.vehicleLineIdsByOrderLineId)
+            .map(([businessLineId, vehicleLineIds]) => [
+                businessLineId,
+                vehicleLineIds.filter((lineId) => !completed.has(lineId)),
+            ] as const)
+            .filter(([, vehicleLineIds]) => vehicleLineIds.length > 0),
+    );
+    const orderLineIds = Object.keys(vehicleLineIdsByOrderLineId);
+    const vehicleLineIds = Object.values(vehicleLineIdsByOrderLineId).flat();
+    return orderLineIds.length === 0 ? null : {
+        ...group,
+        count: orderLineIds.length,
+        orderLineIds,
+        vehicleLineIds,
+        vehicleLineIdsByOrderLineId,
+        vehicleCount: vehicleLineIds.length,
+    };
+}
+
 function waitForPaint() {
     return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 }
@@ -121,8 +142,8 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 const completed = completedLineIdsByGroupRef.current.get(group.groupId);
                 const keepsVisibleGroup = group.groupId === visibleGroupId;
                 if (!completed || completed.size === 0 || keepsVisibleGroup) return [group];
-                const orderLineIds = group.orderLineIds.filter((lineId) => !completed.has(lineId));
-                return orderLineIds.length === 0 ? [] : [{ ...group, orderLineIds, count: orderLineIds.length }];
+                const filtered = withoutCompletedVehicles(group, completed);
+                return filtered ? [filtered] : [];
             });
             const playableGroupIds = new Set(filteredGroups.map((group) => group.groupId));
             let fallbackGroupId: string | null = null;
