@@ -65,7 +65,8 @@ export function useRoadMapScene(
                 if (disposed) return;
                 const group = new THREE.Group();
                 geoJson.features.forEach((feature: any) => {
-                    const { geometry } = feature;
+                    const { geometry, properties } = feature;
+                    const isDistrict = properties?.level === 'district';
                     let rings: number[][][] = [];
                     if (geometry.type === 'Polygon') rings = [geometry.coordinates[0]];
                     else if (geometry.type === 'MultiPolygon') rings = geometry.coordinates.map((p: any) => p[0]);
@@ -81,11 +82,11 @@ export function useRoadMapScene(
                             else shape.lineTo(-x, -y);
                         });
 
-                        const geom = new THREE.ExtrudeGeometry(shape, { depth: 0.5, bevelEnabled: false });
+                        const geom = new THREE.ExtrudeGeometry(shape, { depth: isDistrict ? 0.15 : 0.5, bevelEnabled: false });
                         const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
-                            color: '#2f465e',
-                            emissive: '#0b2234',
-                            emissiveIntensity: 0.12,
+                            color: isDistrict ? '#1a2a3a' : '#2f465e',
+                            emissive: isDistrict ? '#061018' : '#0b2234',
+                            emissiveIntensity: isDistrict ? 0.06 : 0.12,
                             roughness: 0.65,
                             metalness: 0.18,
                             side: THREE.DoubleSide,

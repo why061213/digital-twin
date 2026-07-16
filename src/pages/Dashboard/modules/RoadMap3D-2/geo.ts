@@ -32,13 +32,29 @@ export async function loadCityGeoJson(): Promise<any> {
                 const resp = await fetch(`${BASE_URL}${adcode}_full.json`);
                 const data = await resp.json();
                 if (data.features) cityFeatures.push(...data.features);
-            } catch {
-                // ignore
-            }
+            } catch { /* ignore */ }
         })
     );
 
-    return { type: 'FeatureCollection', features: [...municipalityFeatures, ...cityFeatures] };
+    // 加载区县数据：对每个城市，加载其区县级 GeoJSON
+    const districtFeatures: any[] = [];
+    const cityAdcodes = cityFeatures
+        .map((f) => f.properties.adcode)
+        .filter((code: number) => code && !DIRECT_CITY_ADCODES.includes(code));
+    await Promise.all(
+        cityAdcodes.map(async (adcode: number) => {
+            try {
+                const resp = await fetch(`${BASE_URL}${adcode}_full.json`);
+                const data = await resp.json();
+                if (data.features) districtFeatures.push(...data.features);
+            } catch { /* ignore */ }
+        })
+    );
+
+    return {
+        type: 'FeatureCollection',
+        features: [...municipalityFeatures, ...cityFeatures, ...districtFeatures],
+    };
 }
 
 export function mapPosition(coords: [number, number], lift = 0) {
