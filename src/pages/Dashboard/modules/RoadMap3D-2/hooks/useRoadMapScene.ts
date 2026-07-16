@@ -81,6 +81,8 @@ export function useRoadMapScene(
                     const isDistrict = boundaryLevel === 'district';
                     const hasDistrictFill = boundaryLevel === 'city'
                         && districtParentAdcodes.has(Number(properties?.adcode));
+                    const usesDistrictSurface = isDistrict
+                        || (boundaryLevel === 'city' && !hasDistrictFill);
                     let rings: number[][][] = [];
                     if (geometry.type === 'Polygon') rings = [geometry.coordinates[0]];
                     else if (geometry.type === 'MultiPolygon') rings = geometry.coordinates.map((p: any) => p[0]);
@@ -155,17 +157,20 @@ export function useRoadMapScene(
                             else shape.lineTo(-x, -y);
                         });
 
-                        const geom = new THREE.ExtrudeGeometry(shape, { depth: isDistrict ? 0.1 : 0.16, bevelEnabled: false });
+                        const geom = new THREE.ExtrudeGeometry(shape, {
+                            depth: usesDistrictSurface ? 0.1 : 0.16,
+                            bevelEnabled: false,
+                        });
                         const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
-                            color: isDistrict ? '#1b3042' : '#29465f',
-                            emissive: isDistrict ? '#07131c' : '#0b2234',
-                            emissiveIntensity: isDistrict ? 0.05 : 0.1,
+                            color: usesDistrictSurface ? '#1b3042' : '#29465f',
+                            emissive: usesDistrictSurface ? '#07131c' : '#0b2234',
+                            emissiveIntensity: usesDistrictSurface ? 0.05 : 0.1,
                             roughness: 0.82,
                             metalness: 0.05,
                             side: THREE.DoubleSide,
                         }));
-                        mesh.position.z = isDistrict ? -0.012 : 0;
-                        mesh.renderOrder = isDistrict ? 2 : 1;
+                        mesh.position.z = usesDistrictSurface ? -0.012 : 0;
+                        mesh.renderOrder = usesDistrictSurface ? 2 : 1;
                         cityGroup.add(mesh);
                     });
                     group.add(cityGroup);
