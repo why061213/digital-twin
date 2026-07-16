@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { buildPlaybackChain, type ChainNode } from '../playback/chain';
 import type { RoadMap3DHandle as RoadMap3D2Handle } from '../modules/RoadMap3D-2';
-import { fetchVehiclePositions } from '../services/roadApi';
 import {
     adaptRenderRoute,
     fetchRm2GroupRoutes,
@@ -12,9 +11,9 @@ import {
     type Rm2GroupsDiagnostics,
     type RouteSnapshotChangedMessage,
 } from '../services/renderRouteApi';
-import type { ViewMode } from '../types';
+import type { ActiveRoute, ViewMode } from '../types';
 import type { VehiclePositionsMessage } from './useDashboardRealtime';
-import { useVehicleMotionController } from './useVehicleMotionController';
+import { useTruckPositionController } from './useTruckPositionController';
 
 type Options = {
     roadMapRef: RefObject<RoadMap3D2Handle | null>;
@@ -35,9 +34,6 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
     const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [diagnostics, setDiagnostics] = useState<Rm2GroupsDiagnostics | null>(null);
-    const [snapshotVersion, setSnapshotVersion] = useState<string | null>(null);
-
-    const groupsRef = useRef<Rm2GroupDTO[]>([]);
     const snapshotVersionRef = useRef('');
     const chainRef = useRef<ChainNode | null>(null);
     const currentNodeRef = useRef<ChainNode | null>(null);
@@ -61,35 +57,36 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         generation === generationRef.current && view === 'roadMap2' && sceneReady
     ), [sceneReady, view]);
 
-    const mapAdapter = useMemo(() => ({
-        updateVehicle: (lineId: string, position: [number, number], info: { speedKmh: number | null; status: string }) => {
-            roadMapRef.current?.updateTruckPosition(lineId, position, info);
-        },
-        removeVehicle: (lineId: string) => roadMapRef.current?.removeRoadPath(lineId),
-    }), [roadMapRef]);
+    const handleMotionRouteFinished = useCallback((lineId: string) => {
+        const groupId = activeGroupIdRef.current;
+        if (!groupId) return;
+        const completed = completedLineIdsByGroupRef.current.get(groupId) ?? new Set<string>();
+        completed.add(lineId);
+        completedLineIdsByGroupRef.current.set(groupId, completed);
+        const activeLineIds = activeRouteLineIdsRef.current;
+        if (activeLineIds.size > 0 && [...activeLineIds].every((id) => completed.has(id))) {
+            stopTimer();
+            const next = currentNodeRef.current?.next;
+            if (next) void playNodeRef.current(next);
+        }
+    }, [stopTimer]);
 
-    const motion = useVehicleMotionController({
-        scope: 'rm2',
-        viewActive: view === 'roadMap2' && sceneReady && activeGroupId !== null,
-        activeGroupId,
-        snapshotVersion,
-        mapAdapter,
-        fetchPositions: fetchVehiclePositions,
-        preserveFinishedVehicle: false,
+    const {
+        activeRoutesRef,
+        completedRouteIdsRef,
+        createActiveRoute,
+        showRoutes,
+        hydrateRoutePositions,
+        handleTruckPosition,
+        syncRoadRoute,
+        renderTruckPosition,
+        setRouteOrders,
+    } = useTruckPositionController({
+        roadMapRef,
+        view,
+        activeView: 'roadMap2',
         onRouteFinished: (lineId) => {
-            const groupId = activeGroupIdRef.current;
-            if (!groupId) return;
-            const completed = completedLineIdsByGroupRef.current.get(groupId) ?? new Set<string>();
-            completed.add(lineId);
-            completedLineIdsByGroupRef.current.set(groupId, completed);
-            const activeLineIds = activeRouteLineIdsRef.current;
-            if (activeLineIds.size > 0 && [...activeLineIds].every((id) => completed.has(id))) {
-                stopTimer();
-                const next = currentNodeRef.current?.next;
-                if (next && next !== currentNodeRef.current) {
-                    void playNodeRef.current(next);
-                }
-            }
+            handleMotionRouteFinished(lineId);
         },
     });
 
@@ -122,8 +119,6 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
             });
 
             snapshotVersionRef.current = response.snapshotVersion;
-            setSnapshotVersion(response.snapshotVersion);
-            groupsRef.current = filteredGroups;
             setGroups(filteredGroups);
             setDiagnostics({ ...response.diagnostics, acceptedGroupCount: filteredGroups.length });
             chainRef.current = buildPlaybackChain(filteredGroups);
@@ -132,6 +127,8 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 currentNodeRef.current = null;
                 activeGroupIdRef.current = null;
                 setActiveGroupId(null);
+                activeRoutesRef.current.clear();
+                setRouteOrders([]);
                 roadMapRef.current?.clearRoads();
                 return;
             }
@@ -144,6 +141,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
             const currentNode = findNode(visibleGroupId);
             if (currentNode) {
                 currentNodeRef.current = currentNode;
+                void playNodeRef.current(currentNode);
             } else {
                 void playNodeRef.current(chainRef.current.child);
             }
@@ -152,7 +150,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 console.warn('[RM2 playback] groups refresh failed', error);
             }
         }
-    }, [findNode, roadMapRef]);
+    }, [activeRoutesRef, findNode, roadMapRef, setRouteOrders]);
 
     const playNode = useCallback(async (node: ChainNode) => {
         stopTimer();
@@ -161,6 +159,8 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         groupRequestRef.current = request;
         const generation = generationRef.current + 1;
         generationRef.current = generation;
+        const previousGroupId = activeGroupIdRef.current;
+        const previousLineIds = new Set(activeRoutesRef.current.keys());
         currentNodeRef.current = node;
         activeGroupIdRef.current = node.id;
         setActiveGroupId(node.id);
@@ -176,6 +176,9 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
 
             const completed = completedLineIdsByGroupRef.current.get(node.id) ?? new Set<string>();
             response.routes.filter(isCompletedRoute).forEach((route) => completed.add(route.lineId));
+            response.positions
+                .filter((position) => position.status === 'finished')
+                .forEach((position) => completed.add(position.lineId));
             if (completed.size > 0) completedLineIdsByGroupRef.current.set(node.id, completed);
             const routes = response.routes.filter((route) => !isCompletedRoute(route) && !completed.has(route.lineId));
             if (routes.length === 0) {
@@ -187,6 +190,8 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                     activeGroupIdRef.current = null;
                     activeRouteLineIdsRef.current.clear();
                     setActiveGroupId(null);
+                    activeRoutesRef.current.clear();
+                    setRouteOrders([]);
                     roadMapRef.current?.clearRoads();
                     await refreshRm2();
                 }
@@ -199,38 +204,38 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 if (next && next !== node) await playNodeRef.current(next);
                 return;
             }
-            const acceptedLineIds = new Set(accepted.map((route) => route.lineId));
-            const playableRoutes = routes.filter((route) => acceptedLineIds.has(route.lineId));
+            accepted.forEach((route) => completedRouteIdsRef.current.delete(route.lineId));
+            let activeRoutes = accepted
+                .map(createActiveRoute)
+                .filter((route): route is ActiveRoute => route !== null);
+            activeRoutes = hydrateRoutePositions(activeRoutes, response.positions);
+            if (activeRoutes.length === 0) {
+                const next = node.next;
+                if (next && next !== node) await playNodeRef.current(next);
+                else await refreshRm2();
+                return;
+            }
 
-            roadMapRef.current?.clearRoads();
-            activeRouteLineIdsRef.current = new Set(playableRoutes.map((route) => route.lineId));
-            accepted.forEach((route) => roadMapRef.current?.addRoadPath(route.lineId, route.coordinates, {
-                plate: route.plate,
-                cargo: route.cargo,
-                from: route.from,
-                to: route.to,
-                status: route.status,
-                speedKmh: route.speedKmh,
-                routeLengthKm: route.routeLengthKm,
-                orderId: route.orderId,
-                pathKey: route.pathKey,
-            }));
+            activeRoutesRef.current = new Map(activeRoutes.map((route) => [route.lineId, route]));
+            activeRouteLineIdsRef.current = new Set(activeRoutes.map((route) => route.lineId));
+            setRouteOrders(activeRoutes);
+
+            if (previousGroupId !== node.id) {
+                roadMapRef.current?.clearRoads();
+                showRoutes(activeRoutes);
+            } else {
+                const nextLineIds = new Set(activeRoutes.map((route) => route.lineId));
+                previousLineIds.forEach((lineId) => {
+                    if (!nextLineIds.has(lineId)) roadMapRef.current?.removeRoadPath(lineId);
+                });
+                const now = performance.now();
+                activeRoutes.forEach((route) => {
+                    if (!previousLineIds.has(route.lineId)) syncRoadRoute(route);
+                    renderTruckPosition(route, now);
+                });
+            }
 
             await waitForPaint();
-            if (!isActiveGeneration(generation)) return;
-            await motion.loadGroup(playableRoutes.map((route) => ({
-                lineId: route.lineId,
-                groupId: route.groupId,
-                coordinates: route.coordinates,
-                routeLengthKm: route.routeLengthKm,
-                speedKmh: route.speedKmh,
-                travelDurationMs: route.travelDurationMs,
-                status: route.status,
-            })), {
-                groupId: node.id,
-                snapshotVersion: snapshotVersionRef.current || null,
-                initialPositions: response.positions,
-            });
             if (!isActiveGeneration(generation)) return;
 
             const durationMs = node.durationMs ?? 15_000;
@@ -248,7 +253,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         } finally {
             if (isActiveGeneration(generation)) setIsLoading(false);
         }
-    }, [isActiveGeneration, motion, refreshRm2, roadMapRef, stopTimer]);
+    }, [activeRoutesRef, completedRouteIdsRef, createActiveRoute, hydrateRoutePositions, isActiveGeneration, refreshRm2, renderTruckPosition, roadMapRef, setRouteOrders, showRoutes, stopTimer, syncRoadRoute]);
 
     useEffect(() => {
         playNodeRef.current = playNode;
@@ -266,6 +271,17 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         }
     }, [refreshRm2, sceneReady, view]);
 
+    const handleVehiclePositions = useCallback((message: VehiclePositionsMessage) => {
+        if (view !== 'roadMap2' || !sceneReady || message.scope !== 'rm2') return;
+        if (message.snapshotVersion && message.snapshotVersion !== snapshotVersionRef.current) return;
+        message.positions.forEach((position) => {
+            if (position.scope !== 'rm2') return;
+            if (position.groupId !== activeGroupIdRef.current) return;
+            if (!activeRouteLineIdsRef.current.has(position.lineId)) return;
+            handleTruckPosition(position);
+        });
+    }, [handleTruckPosition, sceneReady, view]);
+
     useEffect(() => {
         if (view !== 'roadMap2' || !sceneReady) {
             generationRef.current += 1;
@@ -276,9 +292,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         }
 
         void refreshRm2();
-        const timer = window.setInterval(() => void refreshRm2(), 30_000);
         return () => {
-            window.clearInterval(timer);
             generationRef.current += 1;
             groupsRequestRef.current?.abort();
             groupRequestRef.current?.abort();
@@ -300,7 +314,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         loadGroup,
         refreshRm2,
         handleSnapshotChanged,
-        handleVehiclePositions: motion.handlePositionFrame as (message: VehiclePositionsMessage) => void,
+        handleVehiclePositions,
         playbackPhase: activeGroupId ? 'showing' : 'idle',
         isFading: false,
     };

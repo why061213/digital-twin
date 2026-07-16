@@ -203,7 +203,15 @@ function DashboardPage() {
             }
             handleTruckPosition(message);
         },
-        onVehiclePositions: handleRm2VehiclePositions,
+        onVehiclePositions: (message) => {
+            if (message.scope === 'rm2') {
+                handleRm2VehiclePositions(message);
+                return;
+            }
+            if (message.scope === 'rm1' && view === 'roadMap') {
+                message.positions.forEach((position) => handleTruckPosition(position));
+            }
+        },
         onWarehouseUpdate: handleWarehouseUpdate,
         onWarehouseFocus: handleWarehouseFocus,
         onCameraControl: handleCameraControl,

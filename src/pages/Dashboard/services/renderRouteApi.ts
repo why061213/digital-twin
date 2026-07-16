@@ -134,7 +134,7 @@ async function getJson(path: string, signal?: AbortSignal): Promise<unknown> {
 }
 
 export async function fetchRm2Groups(signal?: AbortSignal): Promise<Rm2GroupsResponse> {
-    const data = await getJson('/road/rm2/groups', signal);
+    const data = await getJson('/road/groups?scope=rm2', signal);
     if (!isRecord(data) || data.scope !== 'rm2' || !Array.isArray(data.groups)) {
         throw new Error('Invalid RM2 groups response');
     }
@@ -169,9 +169,9 @@ export async function fetchRm2GroupRoutes(
     snapshotVersion: string,
     signal?: AbortSignal,
 ): Promise<Rm2GroupRoutesResponse> {
-    const query = new URLSearchParams({ snapshotVersion });
+    const query = new URLSearchParams({ scope: 'rm2', snapshotVersion });
     const data = await getJson(
-        `/road/rm2/groups/${encodeURIComponent(groupId)}/routes?${query}`,
+        `/road/groups/${encodeURIComponent(groupId)}/routes?${query}`,
         signal,
     );
 
@@ -199,7 +199,7 @@ export async function fetchRm2GroupRoutes(
         ? data.positions.filter((position): position is TruckPositionMessage => (
             isRecord(position)
             && typeof position.lineId === 'string'
-            && Array.isArray(position.position)
+            && (position.status === 'finished' || Array.isArray(position.position))
         ))
         : [];
     return {

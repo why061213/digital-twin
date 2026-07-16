@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Dispatch, MutableRefObject, RefObject, SetStateAction } from 'react';
-import type { RoadMap3DHandle } from '../modules/RoadMap3D-1';
+import type { RoadObjectInfo } from '../modules/RoadMap3D-1/types';
 import {
     loadTruckPositionsFromCache,
     saveTruckPositionToCache,
@@ -26,9 +26,17 @@ import {
     routeProgressPatch,
 } from '../utils';
 
+type RoadMapMotionHandle = {
+    addRoadPath: (id: string, coords: [number, number][], info?: RoadObjectInfo) => void;
+    removeRoadPath: (id: string) => void;
+    clearRoads: () => void;
+    updateTruckPosition: (lineId: string, position: [number, number], info?: RoadObjectInfo) => void;
+};
+
 type UseTruckPositionControllerOptions = {
-    roadMapRef: RefObject<RoadMap3DHandle | null>;
+    roadMapRef: RefObject<RoadMapMotionHandle | null>;
     view: ViewMode;
+    activeView?: ViewMode;
     onRouteFinished?: (lineId: string) => void;
 };
 
@@ -41,6 +49,7 @@ type UseTruckPositionControllerResult = {
     createActiveRoute: (message: RoadPathMessage) => ActiveRoute | null;
     showRoutes: (routes: ActiveRoute[]) => void;
     prefetchRoutePositions: (routes: ActiveRoute[]) => Promise<ActiveRoute[]>;
+    hydrateRoutePositions: (routes: ActiveRoute[], positions: TruckPositionMessage[]) => ActiveRoute[];
     finishRoute: (lineId: string) => void;
     handleTruckPosition: (message: TruckPositionMessage, forceCalibration?: boolean) => void;
     syncRoadRoute: (route: ActiveRoute) => void;
@@ -50,6 +59,7 @@ type UseTruckPositionControllerResult = {
 export function useTruckPositionController({
     roadMapRef,
     view,
+    activeView = 'roadMap',
     onRouteFinished,
 }: UseTruckPositionControllerOptions): UseTruckPositionControllerResult {
     const [routeOrders, setRouteOrders] = useState<RouteOrder[]>([]);
@@ -118,6 +128,9 @@ export function useTruckPositionController({
                     orderTotalTons: message.orderTotalTons ?? existing.orderTotalTons,
                     orderVehicleCount: message.orderVehicleCount ?? existing.orderVehicleCount,
                     pathKey: message.pathKey ?? existing.pathKey,
+                    plate: message.plate ?? existing.plate,
+                    cargo: message.cargo ?? existing.cargo,
+                    status: message.status ?? existing.status,
                     from: message.from ?? existing.from,
                     to: message.to ?? existing.to,
                     fromCoords: message.coordinates[0],
@@ -155,9 +168,9 @@ export function useTruckPositionController({
                 fromCoords: message.coordinates[0],
                 toCoords: message.coordinates[message.coordinates.length - 1],
                 routeLengthKm,
-                plate: buildPlate(message.lineId),
-                cargo: buildCargo(message.lineId),
-                status: cachedPosition?.status ?? '运输中',
+                plate: message.plate ?? buildPlate(message.lineId),
+                cargo: message.cargo ?? buildCargo(message.lineId),
+                status: cachedPosition?.status ?? message.status ?? '运输中',
                 startedAt: now,
                 fallbackDuration,
                 coordinates: message.coordinates,
@@ -218,6 +231,29 @@ export function useTruckPositionController({
         return routes.filter((route) => !completedRouteIdsRef.current.has(route.lineId));
     }, []);
 
+    const hydrateRoutePositions = useCallback((routes: ActiveRoute[], positions: TruckPositionMessage[]) => {
+        const routeByLineId = new Map(routes.map((route) => [route.lineId, route]));
+        const now = performance.now();
+        positions.forEach((message) => {
+            const route = routeByLineId.get(message.lineId);
+            if (!route) return;
+            if (message.status === 'finished') {
+                completedRouteIdsRef.current.add(message.lineId);
+                return;
+            }
+            if (!message.position) return;
+            applyTruckPositionToRoute(route, message, now);
+            saveTruckPositionToCache({
+                lineId: message.lineId,
+                position: message.position,
+                status: message.status,
+                speedKmh: route.speedKmh,
+                updatedAt: new Date().toISOString(),
+            });
+        });
+        return routes.filter((route) => !completedRouteIdsRef.current.has(route.lineId));
+    }, []);
+
     const finishRoute = useCallback((lineId: string) => {
         const alreadyFinished = completedRouteIdsRef.current.has(lineId);
         completedRouteIdsRef.current.add(lineId);
@@ -238,6 +274,7 @@ export function useTruckPositionController({
                 finishRoute(message.lineId);
                 return;
             }
+            if (!message.position) return;
 
             const now = performance.now();
             if (!forceCalibration && now < route.nextCalibrationAt) return;
@@ -286,7 +323,7 @@ export function useTruckPositionController({
     );
 
     useEffect(() => {
-        if (view !== 'roadMap') return;
+        if (view !== activeView) return;
         const replayTimer = window.setTimeout(() => {
             const now = performance.now();
             roadMapRef.current?.clearRoads();
@@ -297,12 +334,12 @@ export function useTruckPositionController({
         }, 0);
 
         return () => window.clearTimeout(replayTimer);
-    }, [renderTruckPosition, roadMapRef, syncRoadRoute, view]);
+    }, [activeView, renderTruckPosition, roadMapRef, syncRoadRoute, view]);
 
     useEffect(() => {
         // 关键：只有 RoadMap 正在显示时，才更新车辆位置和 routeOrders。
         // 否则 ChinaMap 聚焦时，DashboardPage 会被这个定时器高频刷新，导致两侧仓库面板闪动。
-        if (view !== 'roadMap') return;
+        if (view !== activeView) return;
 
         const timer = window.setInterval(() => {
             const now = performance.now();
@@ -339,7 +376,7 @@ export function useTruckPositionController({
         }, POSITION_RENDER_TICK_MS);
 
         return () => window.clearInterval(timer);
-    }, [renderTruckPosition, requestTruckPosition, view]);
+    }, [activeView, renderTruckPosition, requestTruckPosition, view]);
 
     return {
         routeOrders,
@@ -350,6 +387,7 @@ export function useTruckPositionController({
         createActiveRoute,
         showRoutes,
         prefetchRoutePositions,
+        hydrateRoutePositions,
         finishRoute,
         handleTruckPosition,
         syncRoadRoute,

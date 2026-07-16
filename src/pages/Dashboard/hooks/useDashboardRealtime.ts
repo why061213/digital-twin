@@ -43,7 +43,7 @@ export type RoadPathMessage = {
 export type TruckPositionMessage = {
     type: 'truck_position';
     lineId: string;
-    position: [number, number];
+    position?: [number, number];
     speed?: [number, number];
     velocity?: [number, number];
     speedKmh?: number;
@@ -188,7 +188,11 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
     const syncVehiclePositionSubscription = () => {
         const socket = socketRef.current;
         if (!socket || socket.readyState !== WebSocket.OPEN) return;
-        const nextScope = optionsRef.current.view === 'roadMap2' ? 'rm2' : null;
+        const nextScope = optionsRef.current.view === 'roadMap2'
+            ? 'rm2'
+            : optionsRef.current.view === 'roadMap'
+                ? 'rm1'
+                : null;
         if (subscribedVehiclePositionScopeRef.current === nextScope) return;
         socket.send(JSON.stringify({
             type: 'vehicle_position_subscription',

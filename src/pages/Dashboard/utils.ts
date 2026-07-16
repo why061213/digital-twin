@@ -169,6 +169,7 @@ export function routeProgressPatch(route: ActiveRoute, now: number) {
 }
 
 export function applyTruckPositionToRoute(route: ActiveRoute, message: TruckPositionMessage, now: number) {
+    if (!message.position) return;
     const pushedVelocity = message.velocity ?? message.speed;
     const elapsedSinceLastCalibration = now - route.calibratedAt;
     const nextDistance = projectDistanceOnPath(route.coordinates, message.position);

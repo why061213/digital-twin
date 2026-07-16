@@ -8,7 +8,8 @@ import type {
 } from '../types';
 
 export async function fetchRoadGroupsByStrategy(strategy: RoadGroupStrategy): Promise<RoadGroupSummary[]> {
-    const response = await fetch(`${API_BASE_URL}/road/groups?strategy=${encodeURIComponent(strategy)}`);
+    const query = new URLSearchParams({ strategy, scope: 'rm1' });
+    const response = await fetch(`${API_BASE_URL}/road/groups?${query}`);
     if (!response.ok) throw new Error(`Groups request failed: ${response.status}`);
 
     const data = await response.json() as RoadGroupsResponse;
@@ -20,7 +21,7 @@ export async function fetchRoadGroupRoutes(
     strategy: RoadGroupStrategy,
 ): Promise<RoadGroupRoutesResponse> {
     const response = await fetch(
-        `${API_BASE_URL}/road/groups/${encodeURIComponent(groupId)}/routes?strategy=${encodeURIComponent(strategy)}`,
+        `${API_BASE_URL}/road/groups/${encodeURIComponent(groupId)}/routes?${new URLSearchParams({ strategy, scope: 'rm1' })}`,
     );
     if (!response.ok) throw new Error(`Group routes request failed: ${response.status}`);
 

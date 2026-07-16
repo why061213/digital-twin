@@ -38,6 +38,7 @@ export type RoadGroupSummary = {
 };
 
 export type RoadGroupsResponse = {
+    scope?: 'rm1';
     groupSize: number;
     strategy?: string;
     totalRoutes: number;
@@ -45,6 +46,7 @@ export type RoadGroupsResponse = {
 };
 
 export type RoadGroupRoutesResponse = {
+    scope?: 'rm1';
     groupId: string;
     routes: RoadPathMessage[];
 };
