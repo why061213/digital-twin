@@ -56,7 +56,7 @@ export async function loadCityGeoJson(): Promise<any> {
     const districtFeatures: any[] = [];
     const cityAdcodes = cityFeatures
         .map((f) => f.properties.adcode)
-        .filter((code: number) => code && !DIRECT_CITY_ADCODES.includes(code) && !NO_DISTRICT_CITIES.has(code));
+        .filter((code: number) => code && !NO_DISTRICT_CITIES.has(code));
     await Promise.all(
         cityAdcodes.map(async (adcode: number) => {
             try {

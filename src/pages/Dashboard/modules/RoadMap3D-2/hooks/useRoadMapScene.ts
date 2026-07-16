@@ -74,22 +74,24 @@ export function useRoadMapScene(
 
                     const cityGroup = new THREE.Group();
                     rings.forEach((ring) => {
-                        // 省份只画边界线，不填充
+                        // 省份边界线——用 TubeGeometry 加粗
                         if (isProvinceBoundary) {
                             const points: THREE.Vector3[] = [];
                             ring.forEach(([lng, lat]) => {
                                 const projected = projection([lng, lat]);
                                 if (!projected) return;
                                 const [x, y] = projected;
-                                points.push(new THREE.Vector3(-x, -y, 0.62));
+                                points.push(new THREE.Vector3(-x, -y, 0.8));
                             });
                             if (points.length < 2) return;
                             if (!points[0].equals(points[points.length - 1])) points.push(points[0].clone());
-                            const lineGeom = new THREE.BufferGeometry().setFromPoints(points);
-                            const provinceLine = new THREE.Line(lineGeom, new THREE.LineBasicMaterial({
-                                color: 0xf59e0b, transparent: true, opacity: 0.5, linewidth: 1, depthWrite: false,
+
+                            const curve = new THREE.CatmullRomCurve3(points, true);
+                            const tubeGeom = new THREE.TubeGeometry(curve, points.length * 2, 0.35, 6, true);
+                            const tube = new THREE.Mesh(tubeGeom, new THREE.MeshBasicMaterial({
+                                color: 0xf59e0b, transparent: true, opacity: 0.7, depthWrite: false,
                             }));
-                            cityGroup.add(provinceLine);
+                            cityGroup.add(tube);
                             return;
                         }
 
