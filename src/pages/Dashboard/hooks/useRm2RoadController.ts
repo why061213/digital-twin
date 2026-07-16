@@ -232,17 +232,42 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
         playbackRef.current = { activeGroupId, phase: playbackPhase };
     }, [activeGroupId, playbackPhase]);
 
+    const activeRoutesRef = useRef<Map<string, RenderRouteDTO>>(new Map());
+
     const mapAdapter = useMemo(() => ({
-        updateVehicle: (lineId: string, position: [number, number], info: { speedKmh: number | null; status: string }) => {
+        updateVehicle: (lineId: string, position: [number, number], info: { speedKmh: number | null; status: string; routeLengthKm?: number }) => {
             roadMapRef.current?.updateTruckPosition(lineId, position, {
                 speedKmh: info.speedKmh,
                 status: info.status,
             });
         },
         removeVehicle: (lineId: string) => roadMapRef.current?.removeRoadPath(lineId),
+        replaceRoute: (
+            lineId: string,
+            coordinates: [number, number][],
+            position: [number, number],
+            info: { speedKmh: number | null; status: string; routeLengthKm?: number },
+        ) => {
+            const roadMap = roadMapRef.current;
+            const route = activeRoutesRef.current.get(lineId);
+            if (!roadMap || !route) return;
+            const routeInfo = {
+                plate: route.plate,
+                cargo: route.cargo,
+                from: route.from,
+                to: route.to,
+                status: info.status,
+                speedKmh: info.speedKmh,
+                routeLengthKm: info.routeLengthKm ?? route.routeLengthKm,
+                orderId: route.orderId,
+                // 越界车辆从共享道路中独立出来，后续改路复用同一个稳定轨道键。
+                pathKey: `${route.pathKey}::adaptive::${lineId}`,
+            };
+            roadMap.removeRoadPath(lineId);
+            roadMap.addRoadPath(lineId, coordinates, routeInfo);
+            roadMap.updateTruckPosition(lineId, position, routeInfo);
+        },
     }), [roadMapRef]);
-
-    const activeRoutesRef = useRef<Map<string, RenderRouteDTO>>(new Map());
 
     const motion = useVehicleMotionController({
         scope: 'rm2',

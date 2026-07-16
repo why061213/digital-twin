@@ -4,15 +4,31 @@ import type { TruckPositionMessage, VehiclePositionsMessage } from './useDashboa
 import { POSITION_RENDER_TICK_MS } from '../constants';
 import {
     applyTruckPositionToRoute,
+    buildCentripetalRoute,
+    inspectRouteCorridor,
+    insertRouteNode,
     pathLength,
     pathLengthKm,
     predictedDistance,
     predictedPosition,
+    projectDistanceOnPath,
 } from '../utils';
 
 type MapAdapter = {
-    updateVehicle: (lineId: string, position: LonLat, info: { speedKmh: number | null; status: string }) => void;
+    updateVehicle: (lineId: string, position: LonLat, info: MotionRenderInfo) => void;
     removeVehicle: (lineId: string) => void;
+    replaceRoute?: (
+        lineId: string,
+        coordinates: LonLat[],
+        position: LonLat,
+        info: MotionRenderInfo,
+    ) => void;
+};
+
+type MotionRenderInfo = {
+    speedKmh: number | null;
+    status: string;
+    routeLengthKm?: number;
 };
 
 type RouteSeed = {
@@ -44,6 +60,13 @@ type Options = {
 
 const WS_FLUSH_MS = 300;
 const ARRIVAL_RECHECK_DELAY_MS = 5_000;
+const ROUTE_CORRIDOR_TOLERANCE_KM = 5;
+
+function isTrustedRealPosition(message: TruckPositionMessage) {
+    const source = message.source?.trim().toLowerCase() ?? '';
+    return !message.stale
+        && (source === 'real' || source === 'real-provider' || message.speedQuality === 'provider');
+}
 
 export function useVehicleMotionController(options: Options) {
     const activeRoutesRef = useRef<Map<string, ActiveRoute>>(new Map());
@@ -53,8 +76,10 @@ export function useVehicleMotionController(options: Options) {
     const snapshotVersionRef = useRef(options.snapshotVersion);
     const flushTimerRef = useRef<number | null>(null);
 
-    activeGroupIdRef.current = options.activeGroupId;
-    snapshotVersionRef.current = options.snapshotVersion;
+    useEffect(() => {
+        activeGroupIdRef.current = options.activeGroupId;
+        snapshotVersionRef.current = options.snapshotVersion;
+    }, [options.activeGroupId, options.snapshotVersion]);
 
     const applyPosition = useCallback((message: TruckPositionMessage) => {
         const route = activeRoutesRef.current.get(message.lineId);
@@ -75,9 +100,58 @@ export function useVehicleMotionController(options: Options) {
             return true;
         }
         if (!message.position) return false;
-        // 与 RM1 一致：真实定位统一投影到已渲染路径上。短途订单的提供方定位
-        // 可能离城市中心路线很远，但不应因此让车辆永远停留在模拟起点。
-        applyTruckPositionToRoute(route, message, performance.now());
+        const now = performance.now();
+        const routeNodes = route.routeNodes ?? route.coordinates;
+        const corridor = inspectRouteCorridor(
+            routeNodes,
+            message.position,
+            ROUTE_CORRIDOR_TOLERANCE_KM,
+        );
+
+        // 先基于旧路线吸收本次真实速度，再在必要时重建几何并重新标定距离。
+        applyTruckPositionToRoute(route, message, now);
+        if (options.scope === 'rm2'
+            && options.mapAdapter.replaceRoute
+            && isTrustedRealPosition(message)
+            && !corridor.inside) {
+            const nextNodes = insertRouteNode(
+                routeNodes,
+                message.position,
+                corridor.nearestSegmentIndex,
+            );
+            const nextCoordinates = buildCentripetalRoute(nextNodes);
+            const nextPathLength = pathLength(nextCoordinates);
+            const nextRouteLengthKm = pathLengthKm(nextCoordinates);
+            const calibratedDistance = projectDistanceOnPath(nextCoordinates, message.position);
+            const calibratedSpeed = route.speedKmh !== null && nextRouteLengthKm > 0
+                ? route.speedKmh / 3_600_000 * nextPathLength / nextRouteLengthKm
+                : route.pathSpeed;
+
+            route.routeNodes = nextNodes;
+            route.coordinates = nextCoordinates;
+            route.pathLength = nextPathLength;
+            route.routeLengthKm = nextRouteLengthKm;
+            route.calibratedDistance = calibratedDistance;
+            route.calibratedAt = now;
+            route.pathSpeed = calibratedSpeed;
+            options.mapAdapter.replaceRoute(
+                route.lineId,
+                nextCoordinates,
+                message.position,
+                {
+                    speedKmh: route.speedKmh,
+                    status: route.status,
+                    routeLengthKm: route.routeLengthKm,
+                },
+            );
+            console.info('[RM2 motion] adapted route to real position', {
+                lineId: route.lineId,
+                distanceFromCorridorKm: Number(corridor.distanceKm.toFixed(3)),
+                toleranceKm: ROUTE_CORRIDOR_TOLERANCE_KM,
+                nodeCount: nextNodes.length,
+                sampledPointCount: nextCoordinates.length,
+            });
+        }
         return true;
     }, [options]);
 
@@ -176,6 +250,7 @@ export function useVehicleMotionController(options: Options) {
                 lineId: seed.lineId, from: '', to: '', fromCoords: seed.coordinates[0], toCoords: seed.coordinates[seed.coordinates.length - 1],
                 plate: '', cargo: '', status: seed.status ?? '运输中', startedAt: now,
                 fallbackDuration: seed.travelDurationMs ?? 60_000, coordinates: seed.coordinates,
+                routeNodes: seed.coordinates.map((point) => [point[0], point[1]]),
                 calibratedAt: now, calibratedDistance: 0, pathSpeed: length / (seed.travelDurationMs ?? 60_000),
                 pathLength: length, routeLengthKm: seed.routeLengthKm ?? pathLengthKm(seed.coordinates),
                 speedKmh: seed.speedKmh ?? null, nextCalibrationAt: now, arrivalCheckRequested: false,

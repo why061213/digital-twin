@@ -15,6 +15,8 @@ export type ActiveRoute = RouteOrder & {
     startedAt: number;
     fallbackDuration: number;
     coordinates: LonLat[];
+    /** 用于偏移走廊判断的折线节点；coordinates 可以是其平滑采样结果。 */
+    routeNodes?: LonLat[];
     calibratedAt: number;
     calibratedDistance: number;
     pathSpeed: number;

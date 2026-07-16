@@ -1,4 +1,5 @@
-﻿import type { TruckPositionMessage } from './hooks/useDashboardRealtime';
+﻿import * as THREE from 'three';
+import type { TruckPositionMessage } from './hooks/useDashboardRealtime';
 import type { ActiveRoute, LonLat, RoadGroupRing, RoadGroupStrategy, RouteOrder } from './types';
 import { LOW_SPEED_THRESHOLD_KMH, POSITION_QUERY_INTERVAL_MS, SLOW_POSITION_QUERY_INTERVAL_MS } from './constants';
 
@@ -78,6 +79,91 @@ export function pathLengthKm(coordinates: LonLat[]) {
         total += distanceKm(coordinates[i - 1], coordinates[i]);
     }
     return total;
+}
+
+type RouteCorridorResult = {
+    inside: boolean;
+    nearestSegmentIndex: number;
+    distanceKm: number;
+};
+
+function localKilometers(point: LonLat, referenceLatitude: number): [number, number] {
+    const latitudeRadians = referenceLatitude * Math.PI / 180;
+    return [
+        point[0] * 111.32 * Math.cos(latitudeRadians),
+        point[1] * 110.574,
+    ];
+}
+
+/**
+ * 判断位置是否落在任意节点线段两侧 toleranceKm 的矩形内。
+ * 不使用端点圆帽，超出线段首尾的点会被视为走廊外。
+ */
+export function inspectRouteCorridor(
+    nodes: LonLat[],
+    point: LonLat,
+    toleranceKm: number,
+): RouteCorridorResult {
+    if (nodes.length < 2) {
+        return { inside: false, nearestSegmentIndex: 0, distanceKm: Number.POSITIVE_INFINITY };
+    }
+
+    let inside = false;
+    let nearestSegmentIndex = 0;
+    let nearestDistanceKm = Number.POSITIVE_INFINITY;
+
+    for (let index = 1; index < nodes.length; index += 1) {
+        const start = nodes[index - 1];
+        const end = nodes[index];
+        const referenceLatitude = (start[1] + end[1] + point[1]) / 3;
+        const [startX, startY] = localKilometers(start, referenceLatitude);
+        const [endX, endY] = localKilometers(end, referenceLatitude);
+        const [pointX, pointY] = localKilometers(point, referenceLatitude);
+        const segmentX = endX - startX;
+        const segmentY = endY - startY;
+        const segmentLengthSq = segmentX * segmentX + segmentY * segmentY;
+        if (segmentLengthSq <= Number.EPSILON) continue;
+
+        const rawProgress = ((pointX - startX) * segmentX + (pointY - startY) * segmentY)
+            / segmentLengthSq;
+        const clampedProgress = clamp01(rawProgress);
+        const projectedX = startX + segmentX * clampedProgress;
+        const projectedY = startY + segmentY * clampedProgress;
+        const distanceToSegment = Math.hypot(pointX - projectedX, pointY - projectedY);
+
+        if (distanceToSegment < nearestDistanceKm) {
+            nearestDistanceKm = distanceToSegment;
+            nearestSegmentIndex = index - 1;
+        }
+        if (rawProgress >= 0 && rawProgress <= 1 && distanceToSegment <= toleranceKm) {
+            inside = true;
+        }
+    }
+
+    return { inside, nearestSegmentIndex, distanceKm: nearestDistanceKm };
+}
+
+export function insertRouteNode(nodes: LonLat[], point: LonLat, afterSegmentIndex: number): LonLat[] {
+    const insertionIndex = Math.min(Math.max(1, afterSegmentIndex + 1), nodes.length - 1);
+    return [
+        ...nodes.slice(0, insertionIndex),
+        [point[0], point[1]],
+        ...nodes.slice(insertionIndex),
+    ];
+}
+
+/** 生成经过全部节点的 centripetal Catmull-Rom 曲线采样。 */
+export function buildCentripetalRoute(nodes: LonLat[], samplesPerSegment = 32): LonLat[] {
+    if (nodes.length < 3) return nodes.map((point) => [point[0], point[1]]);
+    const curve = new THREE.CatmullRomCurve3(
+        nodes.map(([lng, lat]) => new THREE.Vector3(lng, lat, 0)),
+        false,
+        'centripetal',
+    );
+    const segmentCount = nodes.length - 1;
+    return curve
+        .getPoints(Math.max(segmentCount * samplesPerSegment, 64))
+        .map((point): LonLat => [point.x, point.y]);
 }
 
 export function positionAtDistance(coordinates: LonLat[], targetDistance: number): LonLat {
