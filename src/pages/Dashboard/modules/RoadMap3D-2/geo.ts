@@ -10,6 +10,18 @@ export const projection = geoMercator()
     .scale(80)
     .translate([0, 0]);
 
+/** 没有下级区县数据的城市 adcode（AliDataV 无 _full.json），不发无效请求 */
+const NO_DISTRICT_CITIES = new Set([
+    469001, 469002, 469003, 469004, 469005, 469006, 469007, 469021, 469022, 469023, 469024, 469025, 469026, 469027, 469028, 469029, 469030, // 海南直辖县级
+    429004, 429005, 429006, 429021,  // 湖北直辖县级
+    659001, 659002, 659003, 659004, 659005, 659006, 659007, 659008, 659009, 659010, 659011, // 新疆直辖县级
+    620200, // 嘉峪关
+    460400, // 海南直辖
+    442000, // 中山（无区县）
+    441900, // 东莞（无区县）
+    419001, // 河南直辖
+]);
+
 export async function loadCityGeoJson(): Promise<any> {
     const provResp = await fetch(`${BASE_URL}100000_full.json`);
     const provData = await provResp.json();
@@ -44,7 +56,7 @@ export async function loadCityGeoJson(): Promise<any> {
     const districtFeatures: any[] = [];
     const cityAdcodes = cityFeatures
         .map((f) => f.properties.adcode)
-        .filter((code: number) => code && !DIRECT_CITY_ADCODES.includes(code));
+        .filter((code: number) => code && !DIRECT_CITY_ADCODES.includes(code) && !NO_DISTRICT_CITIES.has(code));
     await Promise.all(
         cityAdcodes.map(async (adcode: number) => {
             try {
