@@ -157,7 +157,7 @@ export async function fetchRm2Groups(signal?: AbortSignal): Promise<Rm2GroupsRes
     return {
         snapshotVersion,
         scope: 'rm2',
-        groupSize: typeof data.groupSize === 'number' ? data.groupSize : 12,
+        groupSize: typeof data.groupSize === 'number' ? data.groupSize : 3,
         totalRoutes,
         groups,
         diagnostics,
