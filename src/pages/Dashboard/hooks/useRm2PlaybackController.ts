@@ -305,34 +305,31 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         setIsLoading(true);
 
         try {
+            const directionMapKeys = (node.directionMapKeys ?? [])
+                .filter((key) => key !== node.provinceKey);
             if (provinceChanged || directionChanged) {
                 roadMapRef.current?.clearRoads();
-                roadMapRef.current?.clearMapRegions();
                 activeRoutesRef.current.clear();
                 activeRouteLineIdsRef.current.clear();
                 setRouteOrders([]);
             }
-            if (provinceChanged && node.provinceKey && node.provinceMapKeys?.length) {
-                await roadMapRef.current?.setMapRegions(
-                    `province:${node.provinceKey}`,
-                    node.provinceMapKeys,
-                );
+            if (provinceChanged && node.provinceKey) {
+                // 第二层只拥有始发省；离开省节点时才释放它。
+                roadMapRef.current?.clearDirectionRegions();
+                roadMapRef.current?.clearProvinceRegion();
+                await roadMapRef.current?.setProvinceRegion(node.provinceKey);
                 if (request.signal.aborted || !isActiveGeneration(generation)) return;
             }
-            if (directionChanged && node.directionKey && node.directionMapKeys?.length) {
-                // 省节点展示完成后进入方向节点，释放省节点资源并加载方向走廊。
-                roadMapRef.current?.clearMapRegions();
-                await roadMapRef.current?.setMapRegions(
-                    `direction:${node.directionKey}`,
-                    node.directionMapKeys,
-                );
+            if (directionChanged && node.directionKey) {
+                // 第三层只替换目的省和途经省，始发省图层保持不动。
+                roadMapRef.current?.clearDirectionRegions();
+                if (directionMapKeys.length > 0) {
+                    await roadMapRef.current?.setDirectionRegions(node.directionKey, directionMapKeys);
+                }
                 if (request.signal.aborted || !isActiveGeneration(generation)) return;
-            } else if (node.directionKey && node.directionMapKeys?.length) {
+            } else if (node.directionKey && directionMapKeys.length > 0) {
                 // 快照可能在同一方向内改变途经省；签名不变时该调用为零成本。
-                await roadMapRef.current?.setMapRegions(
-                    `direction:${node.directionKey}`,
-                    node.directionMapKeys,
-                );
+                await roadMapRef.current?.setDirectionRegions(node.directionKey, directionMapKeys);
             }
 
             const response = await fetchRm2GroupRoutes(node.id, snapshotVersionRef.current, request.signal);

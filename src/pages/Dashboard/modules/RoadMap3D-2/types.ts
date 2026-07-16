@@ -6,8 +6,10 @@ export type RoadMap3DHandle = {
     removeRoadPath: (id: string) => void;
     clearRoads: () => void;
     setRoadsOpacity: (opacity: number) => void;
-    setMapRegions: (provinceKey: string, mapKeys: string[]) => Promise<void>;
-    clearMapRegions: () => void;
+    setProvinceRegion: (provinceKey: string) => Promise<void>;
+    clearProvinceRegion: () => void;
+    setDirectionRegions: (directionKey: string, mapKeys: string[]) => Promise<void>;
+    clearDirectionRegions: () => void;
     updateTruckPosition: (lineId: string, position: [number, number], info?: RoadObjectInfo) => void;
     refreshAllPositions: () => void;
 };
