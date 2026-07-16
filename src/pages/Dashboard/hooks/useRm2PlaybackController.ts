@@ -144,6 +144,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
     }, [stopTimer]);
 
     const {
+        routeOrders,
         activeRoutesRef,
         completedRouteIdsRef,
         createActiveRoute,
@@ -532,6 +533,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
     return {
         groups,
         activeGroupId,
+        routeOrders,
         isLoading,
         diagnostics,
         loadGroup,

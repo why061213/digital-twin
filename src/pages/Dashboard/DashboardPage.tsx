@@ -108,6 +108,7 @@ function DashboardPage() {
     const {
         groups: rm2Groups,
         activeGroupId: activeRm2GroupId,
+        routeOrders: rm2RouteOrders,
         isLoading: isLoadingRm2Group,
         diagnostics: rm2Diagnostics,
         loadGroup: loadRm2Group,
@@ -259,7 +260,7 @@ function DashboardPage() {
             onSelectGroup={(groupId) => void loadRm2Group(groupId)}
         />
     );
-    const rm2DiagnosticsPanel = view === 'roadMap2' && (
+    const rm2DiagnosticsPanel = view === 'roadMap2' && !activeRm2GroupId && (
         <Rm2Diagnostics
             diagnostics={rm2Diagnostics}
             isLoading={isLoadingRm2Group}
@@ -283,12 +284,18 @@ function DashboardPage() {
     const activeRoadGroup = activeRoadGroupId
         ? roadGroups.find((group) => group.groupId === activeRoadGroupId) ?? null
         : null;
+    const activeRm2Group = activeRm2GroupId
+        ? rm2Groups.find((group) => group.groupId === activeRm2GroupId) ?? null
+        : null;
     const shouldShowRoadPanel = view === 'roadMap' && Boolean(activeRoadGroup);
+    const shouldShowRm2Panel = view === 'roadMap2' && Boolean(activeRm2Group);
     const sidePanelMode: 'hidden' | 'warehouse_focus' | 'road_group_focus' =
         view === 'chinaMap' && warehouseFocus
             ? 'warehouse_focus'
             : shouldShowRoadPanel
                 ? 'road_group_focus'
+                : shouldShowRm2Panel
+                    ? 'road_group_focus'
                 : 'hidden';
     const roadPanelState: RoadGroupPanelState | null = activeRoadGroup
         ? {
@@ -303,6 +310,18 @@ function DashboardPage() {
             routes: routeOrders,
         }
         : null;
+    const rm2RoadPanelState: RoadGroupPanelState | null = activeRm2Group
+        ? {
+            groupId: activeRm2Group.groupId,
+            groupIndex: activeRm2Group.index,
+            groupCount: activeRm2Group.count,
+            vehicleCount: activeRm2Group.vehicleCount,
+            groupKey: activeRm2Group.directionKey,
+            orderIds: [],
+            routes: rm2RouteOrders,
+        }
+        : null;
+    const displayedRoadPanelState = view === 'roadMap2' ? rm2RoadPanelState : roadPanelState;
 
     return (
         <MainLayout
@@ -315,8 +334,9 @@ function DashboardPage() {
                     <DashboardSidePanels
                         mode={sidePanelMode}
                         warehouseFocus={warehouseFocus}
-                        roadGroup={roadPanelState}
-                        isRoadGroupFading={isRoadGroupFading}
+                        roadGroup={displayedRoadPanelState}
+                        roadPanelVariant={view === 'roadMap2' ? 'vehicle' : 'aggregate'}
+                        isRoadGroupFading={view === 'roadMap' ? isRoadGroupFading : false}
                     />
                     {roadGroupQueue}
                     {rm2GroupQueue}

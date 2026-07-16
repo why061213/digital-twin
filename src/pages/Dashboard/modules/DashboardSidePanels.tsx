@@ -26,6 +26,7 @@ type DashboardSidePanelsProps = {
     mode: 'hidden' | 'warehouse_focus' | 'road_group_focus';
     warehouseFocus: WarehouseFocusState | null;
     roadGroup: RoadGroupPanelState | null;
+    roadPanelVariant?: 'aggregate' | 'vehicle';
     isRoadGroupFading?: boolean;
 };
 
@@ -401,7 +402,39 @@ function useRoadGroupPanelTransition(
     };
 }
 
-function RoadGroupLeftPanels({ roadGroup }: { roadGroup: RoadGroupPanelState }) {
+function VehicleTransportDetails({ roadGroup }: { roadGroup: RoadGroupPanelState }) {
+    const targetRoute = roadGroup.routes.find((route) => (
+        route.status !== '已完成' && route.status !== 'finished'
+    )) ?? roadGroup.routes[0];
+
+    return (
+        <Panel title="车辆运输详情" className="h-[44%] min-h-[300px]">
+            <div className="space-y-2">
+                <StatRow label="目标车牌" value={targetRoute?.plate || '--'} tone="text-cyan-200" />
+                <div className="rounded border border-white/5 bg-white/[0.025] px-3 py-2">
+                    <div className="text-xs text-slate-400">起点</div>
+                    <div className="mt-1 break-words text-sm font-semibold leading-5 text-sky-100">
+                        {targetRoute?.from || '--'}
+                    </div>
+                </div>
+                <div className="rounded border border-white/5 bg-white/[0.025] px-3 py-2">
+                    <div className="text-xs text-slate-400">目的地</div>
+                    <div className="mt-1 break-words text-sm font-semibold leading-5 text-emerald-100">
+                        {targetRoute?.to || '--'}
+                    </div>
+                </div>
+            </div>
+        </Panel>
+    );
+}
+
+function RoadGroupLeftPanels({
+    roadGroup,
+    variant,
+}: {
+    roadGroup: RoadGroupPanelState;
+    variant: 'aggregate' | 'vehicle';
+}) {
     const routes = roadGroup.routes;
     const routeCount = uniqueRouteCount(routes);
     const vehicleCount = roadGroup.vehicleCount ?? routes.length;
@@ -415,16 +448,20 @@ function RoadGroupLeftPanels({ roadGroup }: { roadGroup: RoadGroupPanelState }) 
 
     return (
         <>
-            <Panel title="运输聚合详情" className="h-[44%] min-h-[300px]">
-                <div className="space-y-2">
-                    <StatRow label="当前组" value={roadGroup.groupIndex !== undefined ? `第 ${roadGroup.groupIndex + 1} 组` : roadGroup.groupId ?? '-'} />
-                    <StatRow label="组内线路" value={roadGroup.groupCount ?? routeCount} unit="条" tone="text-cyan-200" />
-                    <StatRow label="调度车辆" value={vehicleCount} unit="辆" tone="text-sky-200" />
-                    <StatRow label="运输中" value={running} unit="辆" tone="text-emerald-200" />
-                    <StatRow label="已完成" value={finished} unit="辆" />
-                    <StatRow label="平均时速" value={avgSpeed > 0 ? Math.round(avgSpeed) : '--'} unit="km/h" tone="text-amber-200" />
-                </div>
-            </Panel>
+            {variant === 'vehicle' ? (
+                <VehicleTransportDetails roadGroup={roadGroup} />
+            ) : (
+                <Panel title="运输聚合详情" className="h-[44%] min-h-[300px]">
+                    <div className="space-y-2">
+                        <StatRow label="当前组" value={roadGroup.groupIndex !== undefined ? `第 ${roadGroup.groupIndex + 1} 组` : roadGroup.groupId ?? '-'} />
+                        <StatRow label="组内线路" value={roadGroup.groupCount ?? routeCount} unit="条" tone="text-cyan-200" />
+                        <StatRow label="调度车辆" value={vehicleCount} unit="辆" tone="text-sky-200" />
+                        <StatRow label="运输中" value={running} unit="辆" tone="text-emerald-200" />
+                        <StatRow label="已完成" value={finished} unit="辆" />
+                        <StatRow label="平均时速" value={avgSpeed > 0 ? Math.round(avgSpeed) : '--'} unit="km/h" tone="text-amber-200" />
+                    </div>
+                </Panel>
+            )}
 
             <Panel title="组内订单" className="h-[56%] min-h-[320px]">
                 <div className="flex h-full min-h-0 flex-col">
@@ -557,6 +594,7 @@ function DashboardSidePanels({
     mode,
     warehouseFocus,
     roadGroup,
+    roadPanelVariant = 'aggregate',
     isRoadGroupFading = false,
 }: DashboardSidePanelsProps) {
     const visible = mode !== 'hidden';
@@ -578,7 +616,7 @@ function DashboardSidePanels({
                 {mode === 'road_group_focus' && displayRoadGroup && (
                     <div className={`flex min-h-0 flex-1 flex-col gap-3 transition-all duration-500 ${roadPanelTransitionClass}`}>
                         <div key={`left-${transitionKey}`} className="flex min-h-0 flex-1 flex-col gap-3">
-                            <RoadGroupLeftPanels roadGroup={displayRoadGroup} />
+                            <RoadGroupLeftPanels roadGroup={displayRoadGroup} variant={roadPanelVariant} />
                         </div>
                     </div>
                 )}
