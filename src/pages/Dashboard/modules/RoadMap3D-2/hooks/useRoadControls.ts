@@ -112,7 +112,7 @@ function setVehicleBarTransform(
 ) {
     const { point, tangent } = pointAndTangentAtProgress(road, vehicle.progress);
     const laneCount = Math.max(1, road.orders.size);
-    const laneOffset = (lane.laneIndex - (laneCount - 1) / 2) * 0.3;
+    const laneOffset = (lane.laneIndex - (laneCount - 1) / 2) * 0.4;
     const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
     const trailDirection = vehicle.progress >= 0.5 ? -1 : 1;
     const position = point
@@ -154,11 +154,11 @@ export function useRoadControls(
         const orderCount = Math.max(1, road.orders.size);
         if (road.renderedOrderCount !== orderCount) {
             const routeWidthFactor = Math.min(2.8, 0.7 + 0.3 * orderCount);
-            const baseRadius = 0.16 * routeWidthFactor;
+            const baseRadius = 0.22 * routeWidthFactor;
             road.grayTube.geometry.dispose();
             road.grayTube.geometry = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, baseRadius, road.radialSegments, false);
             road.selectionTube.geometry.dispose();
-            road.selectionTube.geometry = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, baseRadius + 0.12, road.radialSegments, false);
+            road.selectionTube.geometry = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, baseRadius + 0.16, road.radialSegments, false);
             road.renderedOrderCount = orderCount;
         }
 
@@ -205,8 +205,8 @@ export function useRoadControls(
 
                 // 3. 缩放（领头车辆稍大）
                 const baseScale = isLead
-                    ? { x: 1.18, y: 1.28, z: 1.18 }
-                    : { x: 0.78, y: 0.90, z: 0.78 };
+                    ? { x: 1.25, y: 1.34, z: 1.25 }
+                    : { x: 0.88, y: 0.98, z: 0.88 };
                 vehicle.baseScale.set(baseScale.x, baseScale.y, baseScale.z);
                 vehicle.bar.scale.copy(vehicle.baseScale);
 
@@ -217,10 +217,10 @@ export function useRoadControls(
                 // 领头车保持车道中心，跟随车在同一平面内向两侧轻微展开。
                 const followerOrder = followerIndex;
                 if (!isLead) followerIndex += 1;
-                const spreadStep = Math.ceil((followerOrder + 1) / 2) * 0.11;
+                const spreadStep = Math.ceil((followerOrder + 1) / 2) * 0.15;
                 const vehicleOffset = isLead
                     ? 0
-                    : Math.min(0.28, spreadStep) * (followerOrder % 2 === 0 ? 1 : -1);
+                    : Math.min(0.36, spreadStep) * (followerOrder % 2 === 0 ? 1 : -1);
                 const overlapsLead = !isLead && leadVehicle !== null
                     && Math.abs(vehicle.progress - leadVehicle.progress) < 0.012;
                 const trailOffset = overlapsLead ? Math.min(0.7, (followerOrder + 1) * 0.35) : 0;
@@ -344,7 +344,7 @@ export function useRoadControls(
 
         const laneIndex = road.orders.size;
         const color = colorForOrder(orderId);
-        const progressGeo = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, 0.12, road.radialSegments, false);
+        const progressGeo = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, 0.17, road.radialSegments, false);
         progressGeo.setDrawRange(0, 0);
         const progressTube = new THREE.Mesh(progressGeo, new THREE.MeshBasicMaterial({
             color,
@@ -379,7 +379,7 @@ export function useRoadControls(
         }
 
         const bar = new THREE.Mesh(
-            new THREE.BoxGeometry(0.48, 0.11, 0.16),
+            new THREE.BoxGeometry(0.68, 0.15, 0.23),
             new THREE.MeshBasicMaterial({
                 color: lane.color,
                 transparent: true,
@@ -437,7 +437,7 @@ export function useRoadControls(
             }
 
             const grayTube = new THREE.Mesh(
-                new THREE.TubeGeometry(pathCurve, tubularSegments, 0.13, radialSegments, false),
+                new THREE.TubeGeometry(pathCurve, tubularSegments, 0.18, radialSegments, false),
                 new THREE.MeshBasicMaterial({
                     color: 0x6b7280,       // 更浅的灰（原 0x475569）
                     transparent: true,
@@ -448,7 +448,7 @@ export function useRoadControls(
             grayTube.renderOrder = 2;
             grayTube.userData = { roadId: pathKey, objectType: '共享路线' };
 
-            const selectionTube = new THREE.Mesh(new THREE.TubeGeometry(pathCurve, tubularSegments, 0.28, radialSegments, false), new THREE.MeshBasicMaterial({
+            const selectionTube = new THREE.Mesh(new THREE.TubeGeometry(pathCurve, tubularSegments, 0.38, radialSegments, false), new THREE.MeshBasicMaterial({
                 color: 0x38bdf8,
                 transparent: true,
                 opacity: 0,
