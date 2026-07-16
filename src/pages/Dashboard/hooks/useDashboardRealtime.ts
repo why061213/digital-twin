@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { RouteSnapshotChangedMessage } from '../services/renderRouteApi';
+import type { ViewMode } from '../types';
 
 type CityRaiseMessage = {
     type: 'city_raise';
@@ -110,6 +111,7 @@ export type RouteOrder = {
 };
 
 type UseDashboardRealtimeOptions = {
+    view?: ViewMode;
     onCityRaise: (cityName: string) => void;
     onCityFall: (cityName: string) => void;
     onRouteRaise: (order: RouteOrder) => void;
@@ -171,6 +173,8 @@ function createRouteOrder(line: CityRaiseMessage): RouteOrder {
 
 export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
     const optionsRef = useRef(options);
+    const socketRef = useRef<WebSocket | null>(null);
+    const subscribedVehiclePositionScopeRef = useRef<'rm1' | 'rm2' | null>(null);
     const activeLinesRef = useRef<Map<string, { from: string; to: string; startedAt: number }>>(new Map());
     const activeCityCountRef = useRef<Map<string, number>>(new Map());
     const cityFallTimersRef = useRef<Map<string, number>>(new Map());
@@ -180,6 +184,20 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
     const lastMessageAtRef = useRef(0);
 
     optionsRef.current = options;
+
+    const syncVehiclePositionSubscription = () => {
+        const socket = socketRef.current;
+        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        const nextScope = optionsRef.current.view === 'roadMap2' ? 'rm2' : null;
+        if (subscribedVehiclePositionScopeRef.current === nextScope) return;
+        socket.send(JSON.stringify({
+            type: 'vehicle_position_subscription',
+            scope: nextScope ?? '',
+            active: nextScope !== null,
+            clientTime: Date.now(),
+        }));
+        subscribedVehiclePositionScopeRef.current = nextScope;
+    };
 
     useEffect(() => {
         let socket: WebSocket | null = null;
@@ -325,10 +343,12 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
             if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
 
             socket = new WebSocket(buildRealtimeUrl());
+            socketRef.current = socket;
 
             socket.onopen = () => {
                 reconnectAttemptRef.current = 0;
                 startHeartbeat(socket as WebSocket);
+                syncVehiclePositionSubscription();
                 console.info('WebSocket connected');
             };
 
@@ -356,6 +376,8 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
                     wasClean: event.wasClean,
                 });
                 socket = null;
+                socketRef.current = null;
+                subscribedVehiclePositionScopeRef.current = null;
                 scheduleReconnect();
             };
         };
@@ -374,4 +396,8 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
             socket?.close(1000, 'component unmounted');
         };
     }, []);
+
+    useEffect(() => {
+        syncVehiclePositionSubscription();
+    }, [options.view]);
 }

@@ -185,6 +185,7 @@ function DashboardPage() {
     }, []);
 
     useDashboardRealtime({
+        view,
         onCityRaise: handleCityRaise,
         onCityFall: handleCityFall,
         onRouteRaise: handleRouteRaise,
