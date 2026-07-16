@@ -42,6 +42,8 @@ type RouteDisplayData = RouteOrder & {
     pathKey?: unknown;
 };
 
+const WEIGHT_ONLY_PATTERN = /^\s*\d+(?:\.\d+)?\s*(?:吨|t|kg|千克|公斤)\s*$/i;
+
 function routeDisplayData(route: RouteOrder): RouteDisplayData {
     return route as RouteDisplayData;
 }
@@ -60,6 +62,28 @@ function detailedDirection(directionDeg?: number, providerLabel?: string) {
     const nearestAngle = nearestIndex * 45;
     const deviation = Math.abs(((normalized - nearestAngle + 540) % 360) - 180);
     return `${labels[nearestIndex]} · ${Math.round(normalized)}°（偏差 ${Math.round(deviation)}°）`;
+}
+
+function routeCargoContent(route?: RouteOrder) {
+    const cargo = route?.cargo?.trim();
+    if (!cargo || WEIGHT_ONLY_PATTERN.test(cargo)) return '--';
+    return cargo;
+}
+
+function routeCargoWeight(route?: RouteOrder) {
+    const cargoWeight = Number(route?.cargoWeight);
+    if (Number.isFinite(cargoWeight) && cargoWeight > 0) {
+        return `${cargoWeight.toLocaleString()} ${route?.cargoUnit?.trim() || '吨'}`;
+    }
+    const totalTons = Number(route?.orderTotalTons);
+    if (Number.isFinite(totalTons) && totalTons > 0) return `${totalTons.toLocaleString()} 吨`;
+    const cargo = route?.cargo?.trim();
+    return cargo && WEIGHT_ONLY_PATTERN.test(cargo) ? cargo : '--';
+}
+
+function coordinateText(position?: [number, number]) {
+    if (!position || !position.every(Number.isFinite)) return '--';
+    return `${position[0].toFixed(6)}, ${position[1].toFixed(6)}`;
 }
 
 function numberValue(value: unknown, fallback: number) {
@@ -450,6 +474,9 @@ function VehicleTransportDetails({ roadGroup }: { roadGroup: RoadGroupPanelState
                         <div className="mt-1 truncate text-lg font-semibold text-sky-100" title={targetRoute?.plate || '--'}>
                             {targetRoute?.plate || '--'}
                         </div>
+                        <div className="mt-1 max-w-52 truncate text-[9px] tabular-nums text-slate-500" title={targetRoute?.orderId || '--'}>
+                            订单 {targetRoute?.orderId || '--'}
+                        </div>
                     </div>
                     <div className="shrink-0 text-right">
                         <div className="text-[10px] tabular-nums text-slate-500">
@@ -461,7 +488,7 @@ function VehicleTransportDetails({ roadGroup }: { roadGroup: RoadGroupPanelState
                     </div>
                 </div>
 
-                <div className="mt-3 flex min-h-0 flex-1 flex-col rounded border border-white/8 bg-slate-900/55 px-3 py-3">
+                <div className="no-scrollbar mt-3 flex min-h-0 flex-1 flex-col overflow-y-auto rounded border border-white/8 bg-slate-900/55 px-3 py-3">
                     <div className="grid grid-cols-[1rem_1fr] gap-x-3">
                         <div className="flex flex-col items-center py-1">
                             <span className="h-2.5 w-2.5 rounded-full border-2 border-sky-200 bg-sky-500 shadow-[0_0_10px_rgba(56,189,248,0.7)]" />
@@ -494,6 +521,30 @@ function VehicleTransportDetails({ roadGroup }: { roadGroup: RoadGroupPanelState
                             <div className="text-[10px] text-slate-500">驾驶员</div>
                             <div className="mt-1 truncate font-semibold text-sky-100" title={targetRoute?.driverName || '--'}>
                                 {targetRoute?.driverName || '--'}
+                            </div>
+                        </div>
+                        <div className="rounded bg-white/[0.035] px-2.5 py-2">
+                            <div className="text-[10px] text-slate-500">路线长度</div>
+                            <div className="mt-1 font-semibold tabular-nums text-cyan-100">
+                                {Number.isFinite(Number(targetRoute?.routeLengthKm)) ? `${Number(targetRoute?.routeLengthKm).toFixed(1)} km` : '--'}
+                            </div>
+                        </div>
+                        <div className="rounded bg-white/[0.035] px-2.5 py-2">
+                            <div className="text-[10px] text-slate-500">重量</div>
+                            <div className="mt-1 truncate font-semibold tabular-nums text-amber-100" title={routeCargoWeight(targetRoute)}>
+                                {routeCargoWeight(targetRoute)}
+                            </div>
+                        </div>
+                        <div className="rounded bg-white/[0.035] px-2.5 py-2">
+                            <div className="text-[10px] text-slate-500">货物内容</div>
+                            <div className="mt-1 truncate font-medium text-sky-100" title={routeCargoContent(targetRoute)}>
+                                {routeCargoContent(targetRoute)}
+                            </div>
+                        </div>
+                        <div className="rounded bg-white/[0.035] px-2.5 py-2">
+                            <div className="text-[10px] text-slate-500">经纬度</div>
+                            <div className="mt-1 truncate font-medium tabular-nums text-slate-200" title={coordinateText(targetRoute?.currentPosition)}>
+                                {coordinateText(targetRoute?.currentPosition)}
                             </div>
                         </div>
                         <div className="col-span-2 rounded bg-white/[0.035] px-2.5 py-2">

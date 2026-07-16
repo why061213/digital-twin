@@ -36,6 +36,8 @@ export type RoadPathMessage = {
     speedKmh?: number;
     plate?: string;
     cargo?: string;
+    cargoWeight?: number;
+    cargoUnit?: string;
     status?: string;
     vehicleId?: string;
 };
@@ -105,13 +107,18 @@ type DashboardMessage =
 
 export type RouteOrder = {
     lineId: string;
+    orderId?: string;
     from: string;
     to: string;
     fromCoords: [number, number];
     toCoords: [number, number];
+    currentPosition?: [number, number];
     routeLengthKm?: number;
+    orderTotalTons?: number;
     plate: string;
     cargo: string;
+    cargoWeight?: number;
+    cargoUnit?: string;
     status: string;
     speedKmh?: number | null;
     driverName?: string;

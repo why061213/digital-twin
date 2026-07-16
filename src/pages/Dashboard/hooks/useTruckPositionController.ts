@@ -58,6 +58,7 @@ type UseTruckPositionControllerResult = {
 
 function positionDetailsPatch(message: TruckPositionMessage) {
     return {
+        ...(message.position !== undefined ? { currentPosition: message.position } : {}),
         ...(message.driverName !== undefined ? { driverName: message.driverName } : {}),
         ...(message.address !== undefined ? { address: message.address } : {}),
         ...(message.stateStr !== undefined ? { stateStr: message.stateStr } : {}),
@@ -140,6 +141,8 @@ export function useTruckPositionController({
                     pathKey: message.pathKey ?? existing.pathKey,
                     plate: message.plate ?? existing.plate,
                     cargo: message.cargo ?? existing.cargo,
+                    cargoWeight: message.cargoWeight ?? existing.cargoWeight,
+                    cargoUnit: message.cargoUnit ?? existing.cargoUnit,
                     status: message.status ?? existing.status,
                     from: message.from ?? existing.from,
                     to: message.to ?? existing.to,
@@ -180,6 +183,8 @@ export function useTruckPositionController({
                 routeLengthKm,
                 plate: message.plate ?? buildPlate(message.lineId),
                 cargo: message.cargo ?? buildCargo(message.lineId),
+                cargoWeight: message.cargoWeight,
+                cargoUnit: message.cargoUnit,
                 status: cachedPosition?.status ?? message.status ?? '运输中',
                 startedAt: now,
                 fallbackDuration,
@@ -289,9 +294,13 @@ export function useTruckPositionController({
             }
             if (!message.position) {
                 if (Object.keys(detailPatch).length > 0) {
-                    setRouteOrders((prev) => prev.map((item) => (
-                        item.lineId === route.lineId ? { ...item, ...detailPatch } : item
-                    )));
+                    setRouteOrders((prev) => {
+                        const next = prev.map((item) => (
+                            item.lineId === route.lineId ? { ...item, ...detailPatch } : item
+                        ));
+                        routeOrdersRef.current = next;
+                        return next;
+                    });
                 }
                 return;
             }
@@ -299,9 +308,13 @@ export function useTruckPositionController({
             const now = performance.now();
             if (!forceCalibration && now < route.nextCalibrationAt) {
                 if (Object.keys(detailPatch).length > 0) {
-                    setRouteOrders((prev) => prev.map((item) => (
-                        item.lineId === route.lineId ? { ...item, ...detailPatch } : item
-                    )));
+                    setRouteOrders((prev) => {
+                        const next = prev.map((item) => (
+                            item.lineId === route.lineId ? { ...item, ...detailPatch } : item
+                        ));
+                        routeOrdersRef.current = next;
+                        return next;
+                    });
                 }
                 return;
             }

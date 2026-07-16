@@ -248,6 +248,7 @@ export function routeProgressPatch(route: ActiveRoute, now: number) {
     return {
         progress: route.pathLength > 0 ? clamp01(currentDistance / route.pathLength) : 0,
         calibratedDistance: currentDistance,
+        currentPosition: positionAtDistance(route.coordinates, currentDistance),
         pathLength: route.pathLength,
         routeLengthKm: route.routeLengthKm,
         speedKmh: route.speedKmh,

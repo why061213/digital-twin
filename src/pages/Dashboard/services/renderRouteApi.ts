@@ -16,6 +16,8 @@ export type RenderRouteDTO = {
     speedKmh?: number | null;
     status: string;
     cargo?: string;
+    cargoWeight?: number;
+    cargoUnit?: string;
     travelDurationMs?: number;
     pathKey: string;
     scope: 'rm1' | 'rm2';
@@ -320,6 +322,8 @@ export function adaptRenderRoute(route: RenderRouteDTO): RoadPathMessage | null 
         plate: route.plate,
         vehicleId: route.vehicleId,
         cargo: route.cargo,
+        cargoWeight: route.cargoWeight,
+        cargoUnit: route.cargoUnit,
         status: route.status,
         from: route.from,
         to: route.to,
