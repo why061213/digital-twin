@@ -66,6 +66,7 @@ export function useRoadMapScene(
                 const group = new THREE.Group();
                 geoJson.features.forEach((feature: any) => {
                     const { geometry, properties } = feature;
+                    const isProvince = properties?.level === 'province';
                     const isDistrict = properties?.level === 'district';
                     let rings: number[][][] = [];
                     if (geometry.type === 'Polygon') rings = [geometry.coordinates[0]];
@@ -73,6 +74,25 @@ export function useRoadMapScene(
 
                     const cityGroup = new THREE.Group();
                     rings.forEach((ring) => {
+                        // 省份只画边界线，不填充
+                        if (isProvince) {
+                            const points: THREE.Vector3[] = [];
+                            ring.forEach(([lng, lat]) => {
+                                const projected = projection([lng, lat]);
+                                if (!projected) return;
+                                const [x, y] = projected;
+                                points.push(new THREE.Vector3(-x, -y, 0.62));
+                            });
+                            if (points.length < 2) return;
+                            if (!points[0].equals(points[points.length - 1])) points.push(points[0].clone());
+                            const lineGeom = new THREE.BufferGeometry().setFromPoints(points);
+                            const provinceLine = new THREE.Line(lineGeom, new THREE.LineBasicMaterial({
+                                color: 0x60a5fa, transparent: true, opacity: 0.55, linewidth: 1, depthWrite: false,
+                            }));
+                            cityGroup.add(provinceLine);
+                            return;
+                        }
+
                         const shape = new THREE.Shape();
                         ring.forEach(([lng, lat], index) => {
                             const projected = projection([lng, lat]);

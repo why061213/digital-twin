@@ -14,6 +14,7 @@ export async function loadCityGeoJson(): Promise<any> {
     const provResp = await fetch(`${BASE_URL}100000_full.json`);
     const provData = await provResp.json();
     const municipalityFeatures: any[] = [];
+    const provinceFeatures: any[] = [];
     const provinceAdcodes: number[] = [];
 
     provData.features.forEach((feature: any) => {
@@ -22,6 +23,8 @@ export async function loadCityGeoJson(): Promise<any> {
             municipalityFeatures.push(feature);
         } else if (/^\d+$/.test(String(adcode))) {
             provinceAdcodes.push(adcode);
+            // 保存省边界（标记为 province 级别）
+            provinceFeatures.push({ ...feature, properties: { ...feature.properties, level: 'province' } });
         }
     });
 
@@ -55,7 +58,7 @@ export async function loadCityGeoJson(): Promise<any> {
 
     return {
         type: 'FeatureCollection',
-        features: [...municipalityFeatures, ...cityFeatures, ...districtFeatures],
+        features: [...provinceFeatures, ...municipalityFeatures, ...cityFeatures, ...districtFeatures],
     };
 }
 
