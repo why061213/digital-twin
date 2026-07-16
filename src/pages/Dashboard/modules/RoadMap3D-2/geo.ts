@@ -30,6 +30,7 @@ export async function loadCityGeoJson(): Promise<any> {
         provinceAdcodes.map(async (adcode) => {
             try {
                 const resp = await fetch(`${BASE_URL}${adcode}_full.json`);
+                if (!resp.ok) return;
                 const data = await resp.json();
                 if (data.features) cityFeatures.push(...data.features);
             } catch { /* ignore */ }
@@ -45,6 +46,7 @@ export async function loadCityGeoJson(): Promise<any> {
         cityAdcodes.map(async (adcode: number) => {
             try {
                 const resp = await fetch(`${BASE_URL}${adcode}_full.json`);
+                if (!resp.ok) return;
                 const data = await resp.json();
                 if (data.features) districtFeatures.push(...data.features);
             } catch { /* ignore */ }
