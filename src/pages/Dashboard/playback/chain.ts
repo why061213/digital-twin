@@ -14,6 +14,10 @@ export type ChainNode = {
     playbackNext: ChainNode | null;
     child: ChainNode | null;
     groupId?: string;
+    provinceKey?: string;
+    directionKey?: string;
+    provinceMapKeys?: string[];
+    directionMapKeys?: string[];
     routes?: RenderRouteDTO[];
     durationMs?: number;
 };
@@ -100,6 +104,8 @@ export function buildPlaybackChain(
         const raw = rawNodes.get(groupId);
         const group = groupById.get(groupId);
         if (!raw || !group || raw.nodeType !== 'group') return;
+        const directionRaw = rawNodes.get(raw.parentNodeId);
+        const provinceRaw = directionRaw ? rawNodes.get(directionRaw.parentNodeId) : null;
         const leaf: ChainNode = {
             id: raw.nodeId,
             kind: 'group',
@@ -109,6 +115,10 @@ export function buildPlaybackChain(
             playbackNext: null,
             child: null,
             groupId,
+            provinceKey: provinceRaw?.key ?? group.fromProvinceKey,
+            directionKey: directionRaw?.key ?? group.directionKey,
+            provinceMapKeys: provinceRaw?.renderProvinceKeys ?? [group.fromProvinceKey],
+            directionMapKeys: directionRaw?.renderProvinceKeys ?? group.renderProvinceKeys,
             routes: routesByGroupId.get(groupId) ?? [],
             durationMs: calcDuration(group.count),
         };
@@ -127,6 +137,8 @@ export function buildPlaybackChain(
             hierarchyNext: null,
             playbackNext: null,
             child: null,
+            directionKey: raw.key,
+            directionMapKeys: raw.renderProvinceKeys,
         });
     });
     acceptedProvinceIds.forEach((nodeId) => {
@@ -140,6 +152,8 @@ export function buildPlaybackChain(
             hierarchyNext: null,
             playbackNext: null,
             child: null,
+            provinceKey: raw.key,
+            provinceMapKeys: raw.renderProvinceKeys,
         });
     });
 

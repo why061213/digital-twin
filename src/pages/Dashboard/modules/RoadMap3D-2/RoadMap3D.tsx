@@ -14,7 +14,7 @@ const RoadMap3D = forwardRef<RoadMap3DHandle, RoadMap3DProps>(({ onVisualReady }
     const controls = useRoadControls(refs);
     const selection = useRoadSelection(refs);
 
-    useRoadMapScene(refs, controls, selection, onVisualReady);
+    const mapScene = useRoadMapScene(refs, controls, selection, onVisualReady);
 
     const clearRoads = useCallback(() => {
         controls.clearRoads();
@@ -27,6 +27,8 @@ const RoadMap3D = forwardRef<RoadMap3DHandle, RoadMap3DProps>(({ onVisualReady }
         removeRoadPath: controls.removeRoadPath,
         clearRoads,
         setRoadsOpacity: controls.setRoadsOpacity,
+        setMapRegions: mapScene.setMapRegions,
+        clearMapRegions: mapScene.clearMapRegions,
         updateTruckPosition: controls.updateTruckPosition,
         refreshAllPositions: controls.refreshAllPositions,
     }), [
@@ -35,6 +37,8 @@ const RoadMap3D = forwardRef<RoadMap3DHandle, RoadMap3DProps>(({ onVisualReady }
         controls.removeRoadPath,
         clearRoads,
         controls.setRoadsOpacity,
+        mapScene.setMapRegions,
+        mapScene.clearMapRegions,
         controls.updateTruckPosition,
         controls.refreshAllPositions,
     ]);

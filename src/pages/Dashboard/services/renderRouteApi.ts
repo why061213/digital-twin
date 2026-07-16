@@ -39,6 +39,7 @@ export type Rm2GroupDTO = {
     fromProvinceKey: string;
     toProvinceKey: string;
     directionKey: string;
+    renderProvinceKeys: string[];
     pageIndex: number;
 };
 
@@ -52,6 +53,7 @@ export type Rm2ChainNodeDTO = {
     nextNodeId: string;
     childNodeIds: string[];
     groupId?: string | null;
+    renderProvinceKeys: string[];
 };
 
 export type Rm2ChainStructureResponse = {
@@ -145,6 +147,10 @@ function groupRejectReason(value: unknown): string | null {
     if (typeof value.fromProvinceKey !== 'string' || value.fromProvinceKey.length === 0) return `${value.groupId}: missing fromProvinceKey`;
     if (typeof value.toProvinceKey !== 'string' || value.toProvinceKey.length === 0) return `${value.groupId}: missing toProvinceKey`;
     if (typeof value.directionKey !== 'string' || value.directionKey.length === 0) return `${value.groupId}: missing directionKey`;
+    if (!Array.isArray(value.renderProvinceKeys)
+        || !value.renderProvinceKeys.every((key) => typeof key === 'string' && /^\d{6}$/.test(key))) {
+        return `${value.groupId}: invalid renderProvinceKeys`;
+    }
     if (typeof value.pageIndex !== 'number' || !Number.isFinite(value.pageIndex)) return `${value.groupId}: invalid pageIndex`;
     return null;
 }
@@ -183,7 +189,9 @@ function isRm2ChainNode(value: unknown): value is Rm2ChainNodeDTO {
         && typeof value.index === 'number'
         && typeof value.nextNodeId === 'string'
         && Array.isArray(value.childNodeIds)
-        && value.childNodeIds.every((nodeId) => typeof nodeId === 'string');
+        && value.childNodeIds.every((nodeId) => typeof nodeId === 'string')
+        && Array.isArray(value.renderProvinceKeys)
+        && value.renderProvinceKeys.every((key) => typeof key === 'string' && /^\d{6}$/.test(key));
 }
 
 export async function fetchRm2ChainStructure(signal?: AbortSignal): Promise<Rm2ChainStructureResponse> {

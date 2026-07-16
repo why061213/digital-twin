@@ -55,6 +55,10 @@ function waitForPaint() {
     return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
+function sameKeys(left: readonly string[] | undefined, right: readonly string[] | undefined) {
+    return JSON.stringify(left ?? []) === JSON.stringify(right ?? []);
+}
+
 function topologySignature(structure: Rm2ChainStructureResponse, groups: readonly Rm2GroupDTO[]) {
     return JSON.stringify({
         headNodeId: structure.headNodeId,
@@ -64,6 +68,8 @@ function topologySignature(structure: Rm2ChainStructureResponse, groups: readonl
             parentNodeId: node.parentNodeId,
             nextNodeId: node.nextNodeId,
             childNodeIds: node.childNodeIds,
+            key: node.key,
+            renderProvinceKeys: node.renderProvinceKeys,
             index: node.index,
         })),
         groups: groups.map((group) => ({
@@ -75,6 +81,7 @@ function topologySignature(structure: Rm2ChainStructureResponse, groups: readonl
             vehicleLineIdsByOrderLineId: group.vehicleLineIdsByOrderLineId,
             mapKey: group.mapKey,
             directionKey: group.directionKey,
+            renderProvinceKeys: group.renderProvinceKeys,
         })),
     });
 }
@@ -284,14 +291,50 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         groupRequestRef.current = request;
         const generation = generationRef.current + 1;
         generationRef.current = generation;
+        const previousNode = currentNodeRef.current;
         const previousGroupId = activeGroupIdRef.current;
         const previousLineIds = new Set(activeRoutesRef.current.keys());
+        const provinceChanged = previousNode?.provinceKey !== node.provinceKey
+            || !sameKeys(previousNode?.provinceMapKeys, node.provinceMapKeys);
+        const directionChanged = provinceChanged
+            || previousNode?.directionKey !== node.directionKey
+            || !sameKeys(previousNode?.directionMapKeys, node.directionMapKeys);
         currentNodeRef.current = node;
         activeGroupIdRef.current = node.id;
         setActiveGroupId(node.id);
         setIsLoading(true);
 
         try {
+            if (provinceChanged || directionChanged) {
+                roadMapRef.current?.clearRoads();
+                roadMapRef.current?.clearMapRegions();
+                activeRoutesRef.current.clear();
+                activeRouteLineIdsRef.current.clear();
+                setRouteOrders([]);
+            }
+            if (provinceChanged && node.provinceKey && node.provinceMapKeys?.length) {
+                await roadMapRef.current?.setMapRegions(
+                    `province:${node.provinceKey}`,
+                    node.provinceMapKeys,
+                );
+                if (request.signal.aborted || !isActiveGeneration(generation)) return;
+            }
+            if (directionChanged && node.directionKey && node.directionMapKeys?.length) {
+                // 省节点展示完成后进入方向节点，释放省节点资源并加载方向走廊。
+                roadMapRef.current?.clearMapRegions();
+                await roadMapRef.current?.setMapRegions(
+                    `direction:${node.directionKey}`,
+                    node.directionMapKeys,
+                );
+                if (request.signal.aborted || !isActiveGeneration(generation)) return;
+            } else if (node.directionKey && node.directionMapKeys?.length) {
+                // 快照可能在同一方向内改变途经省；签名不变时该调用为零成本。
+                await roadMapRef.current?.setMapRegions(
+                    `direction:${node.directionKey}`,
+                    node.directionMapKeys,
+                );
+            }
+
             const response = await fetchRm2GroupRoutes(node.id, snapshotVersionRef.current, request.signal);
             if (request.signal.aborted || !isActiveGeneration(generation)) return;
             if (response.mismatch) {

@@ -48,77 +48,86 @@ function buildOuterBoundary(adcode: number, children: any[], fallback: any) {
     }, 'province', true);
 }
 
-async function fetchBoundaryFeatures(adcode: number): Promise<any[]> {
+let provinceSourcesPromise: Promise<Map<number, any>> | null = null;
+
+async function loadProvinceSources() {
+    if (!provinceSourcesPromise) {
+        provinceSourcesPromise = fetch(`${BASE_URL}100000_full.json`)
+            .then(async (response) => {
+                if (!response.ok) throw new Error(`Failed to load China boundary: ${response.status}`);
+                const data = await response.json();
+                return new Map<number, any>(
+                    data.features.map((feature: any) => [Number(feature.properties.adcode), feature])
+                );
+            })
+            .catch((error) => {
+                provinceSourcesPromise = null;
+                throw error;
+            });
+    }
+    return provinceSourcesPromise;
+}
+
+async function fetchBoundaryFeatures(adcode: number, signal?: AbortSignal): Promise<any[]> {
     try {
-        const response = await fetch(`${BASE_URL}${adcode}_full.json`);
+        const response = await fetch(`${BASE_URL}${adcode}_full.json`, { signal });
         if (!response.ok) return [];
         const data = await response.json();
         return Array.isArray(data.features) ? data.features : [];
-    } catch {
+    } catch (error) {
+        if ((error as DOMException).name === 'AbortError') throw error;
         return [];
     }
 }
 
-export async function loadCityGeoJson(): Promise<any> {
-    const provResp = await fetch(`${BASE_URL}100000_full.json`);
-    if (!provResp.ok) throw new Error(`Failed to load China boundary: ${provResp.status}`);
-    const provData = await provResp.json();
-    const provinceSourceByAdcode = new Map<number, any>(
-        provData.features.map((feature: any) => [Number(feature.properties.adcode), feature])
-    );
-    const provinceAdcodes: number[] = [];
-    const municipalityAdcodes: number[] = [];
+export async function loadProvinceGeoJson(
+    mapKeys: readonly string[],
+    signal?: AbortSignal,
+): Promise<any> {
+    const provinceSourceByAdcode = await loadProvinceSources();
+    if (signal?.aborted) throw new DOMException('Map load aborted', 'AbortError');
+    const provinceAdcodes = [...new Set(mapKeys
+        .map((key) => Number(key))
+        .filter((adcode) => Number.isFinite(adcode) && provinceSourceByAdcode.has(adcode)))];
 
-    provData.features.forEach((feature: any) => {
-        const adcode = Number(feature.properties.adcode);
-        if (!Number.isFinite(adcode)) return;
-        if (DIRECT_CITY_ADCODES.includes(adcode)) {
-            municipalityAdcodes.push(adcode);
-        } else {
-            provinceAdcodes.push(adcode);
+    const regionFeatureGroups = await Promise.all(provinceAdcodes.map(async (adcode) => {
+        const provinceSource = provinceSourceByAdcode.get(adcode);
+        const isDirectCity = DIRECT_CITY_ADCODES.includes(adcode);
+        const children = NO_DISTRICT_CITIES.has(adcode) ? [] : await fetchBoundaryFeatures(adcode, signal);
+
+        if (isDirectCity) {
+            const districtFeatures = children.map((feature) => withBoundaryLevel(feature, 'district'));
+            const leafFeatures = districtFeatures.length === 0
+                ? [withBoundaryLevel(provinceSource, 'city')]
+                : [];
+            return [
+                buildOuterBoundary(adcode, children, provinceSource),
+                ...leafFeatures,
+                ...districtFeatures,
+            ];
         }
-    });
 
-    const cityFeatureGroups = await Promise.all(
-        provinceAdcodes.map(async (adcode) =>
-            (await fetchBoundaryFeatures(adcode)).map((feature) =>
-                withBoundaryLevel(feature, 'city')
-            )
-        )
-    );
-    const cityFeatures = cityFeatureGroups.flat();
-
-    const cityAdcodes = cityFeatures
-        .map((feature: any) => Number(feature.properties.adcode))
-        .filter((adcode: number) => Number.isFinite(adcode) && !NO_DISTRICT_CITIES.has(adcode));
-
-    const [cityDistrictGroups, municipalityDistrictGroups] = await Promise.all([
-        Promise.all(cityAdcodes.map(async (adcode: number) =>
-            (await fetchBoundaryFeatures(adcode)).map((feature) =>
-                withBoundaryLevel(feature, 'district')
-            )
-        )),
-        // 直辖市的 _full 文件直接包含区县，不能从普通省份的城市列表中推导。
-        Promise.all(municipalityAdcodes.map(async (adcode) =>
-            (NO_DISTRICT_CITIES.has(adcode) ? [] : await fetchBoundaryFeatures(adcode)).map((feature) =>
-                withBoundaryLevel(feature, 'district')
-            )
-        )),
-    ]);
-
-    const districtFeatures = [...cityDistrictGroups.flat(), ...municipalityDistrictGroups.flat()];
-    const provinceFeatures = [
-        ...provinceAdcodes.map((adcode, index) =>
-            buildOuterBoundary(adcode, cityFeatureGroups[index], provinceSourceByAdcode.get(adcode))
-        ),
-        ...municipalityAdcodes.map((adcode, index) =>
-            buildOuterBoundary(adcode, municipalityDistrictGroups[index], provinceSourceByAdcode.get(adcode))
-        ),
-    ];
+        const cityFeatures = children.map((feature) => withBoundaryLevel(feature, 'city'));
+        const cityAdcodes = cityFeatures
+            .map((feature: any) => Number(feature.properties.adcode))
+            .filter((cityAdcode: number) => Number.isFinite(cityAdcode) && !NO_DISTRICT_CITIES.has(cityAdcode));
+        const districtFeatures = (await Promise.all(cityAdcodes.map(async (cityAdcode) =>
+            (await fetchBoundaryFeatures(cityAdcode, signal)).map((feature) => withBoundaryLevel(feature, 'district'))
+        ))).flat();
+        const leafFeatures = cityFeatures.length === 0
+            ? [withBoundaryLevel(provinceSource, 'city')]
+            : [];
+        return [
+            buildOuterBoundary(adcode, children, provinceSource),
+            ...leafFeatures,
+            ...cityFeatures,
+            ...districtFeatures,
+        ];
+    }));
 
     return {
         type: 'FeatureCollection',
-        features: [...provinceFeatures, ...cityFeatures, ...districtFeatures],
+        features: regionFeatureGroups.flat(),
     };
 }
 
