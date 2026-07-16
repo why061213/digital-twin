@@ -15,10 +15,11 @@ type BoundaryLevel = 'province' | 'city' | 'district';
 
 /** 已确认没有下级区县数据的城市 adcode（AliDataV 无 _full.json） */
 const NO_DISTRICT_CITIES = new Set([
-    469001, 429005, 659009, 469022, 469029, 429004, 469005, 469024,
+    469001, 469002, 429005, 659002, 659005, 659009, 469022, 469029,
+    429004, 469005, 469024,
     659004, 429006, 469030, 469007, 469026, 469027, 469025, 469028,
     469006, 659003, 620200, 460400, 659006, 659010, 429021, 442000,
-    659007, 469023, 469021, 659008, 441900, 419001,
+    659007, 469023, 469021, 659008, 441900, 419001, 710000,
 ]);
 
 function withBoundaryLevel(feature: any, level: BoundaryLevel, boundaryOnly = false) {
@@ -99,7 +100,7 @@ export async function loadCityGeoJson(): Promise<any> {
         )),
         // 直辖市的 _full 文件直接包含区县，不能从普通省份的城市列表中推导。
         Promise.all(municipalityAdcodes.map(async (adcode) =>
-            (await fetchBoundaryFeatures(adcode)).map((feature) =>
+            (NO_DISTRICT_CITIES.has(adcode) ? [] : await fetchBoundaryFeatures(adcode)).map((feature) =>
                 withBoundaryLevel(feature, 'district')
             )
         )),
