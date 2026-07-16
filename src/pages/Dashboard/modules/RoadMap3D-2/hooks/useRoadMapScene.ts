@@ -228,7 +228,7 @@ export function useRoadMapScene(
         orbitControls.maxAzimuthAngle = Number.POSITIVE_INFINITY;
         orbitControls.minPolarAngle = Math.PI / 10;
         orbitControls.maxPolarAngle = Math.PI / 2 - 0.035;
-        orbitControls.maxDistance = 2200;
+        orbitControls.maxDistance = 8000;
         orbitControls.minDistance = 100;
         orbitControls.update();
         refs.controlsRef.current = orbitControls;

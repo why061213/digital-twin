@@ -2,7 +2,7 @@ import { useCallback, useRef } from 'react';
 import * as THREE from 'three';
 import { mapPosition } from '../geo';
 import { disposeObject3D, clamp01, makePathCurve, indexCount } from '../utils';
-import { ROAD_LIFT, TRUCK_LIFT, PATH_SAMPLE_COUNT, CAMERA_TILT_RATIO } from '../constants';
+import { ROAD_LIFT, TRUCK_LIFT, PATH_SAMPLE_COUNT } from '../constants';
 import type { RoadState, RoadObjectInfo, OrderLaneState, VehicleBarState } from '../types';
 import type { useRoadMapRefs } from './useRoadMapRefs';
 
@@ -112,13 +112,13 @@ function setVehicleBarTransform(
 ) {
     const { point, tangent } = pointAndTangentAtProgress(road, vehicle.progress);
     const laneCount = Math.max(1, road.orders.size);
-    const laneOffset = (lane.laneIndex - (laneCount - 1) / 2) * 0.2;
+    const laneOffset = (lane.laneIndex - (laneCount - 1) / 2) * 0.3;
     const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
     const trailDirection = vehicle.progress >= 0.5 ? -1 : 1;
     const position = point
         .add(normal.clone().multiplyScalar(laneOffset + vehicleOffset))
         .add(tangent.clone().multiplyScalar(trailOffset * trailDirection))
-        .setY(TRUCK_LIFT + 0.05);
+        .setY(TRUCK_LIFT + 0.08);
 
     vehicle.bar.position.copy(position);
     vehicle.bar.rotation.y = -Math.atan2(normal.z, normal.x);
@@ -154,11 +154,11 @@ export function useRoadControls(
         const orderCount = Math.max(1, road.orders.size);
         if (road.renderedOrderCount !== orderCount) {
             const routeWidthFactor = Math.min(2.8, 0.7 + 0.3 * orderCount);
-            const baseRadius = 0.105 * routeWidthFactor;
+            const baseRadius = 0.16 * routeWidthFactor;
             road.grayTube.geometry.dispose();
             road.grayTube.geometry = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, baseRadius, road.radialSegments, false);
             road.selectionTube.geometry.dispose();
-            road.selectionTube.geometry = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, baseRadius + 0.075, road.radialSegments, false);
+            road.selectionTube.geometry = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, baseRadius + 0.12, road.radialSegments, false);
             road.renderedOrderCount = orderCount;
         }
 
@@ -205,8 +205,8 @@ export function useRoadControls(
 
                 // 3. 缩放（领头车辆稍大）
                 const baseScale = isLead
-                    ? { x: 1.08, y: 1.22, z: 1.08 }
-                    : { x: 0.65, y: 0.80, z: 0.65 };
+                    ? { x: 1.18, y: 1.28, z: 1.18 }
+                    : { x: 0.78, y: 0.90, z: 0.78 };
                 vehicle.baseScale.set(baseScale.x, baseScale.y, baseScale.z);
                 vehicle.bar.scale.copy(vehicle.baseScale);
 
@@ -217,13 +217,13 @@ export function useRoadControls(
                 // 领头车保持车道中心，跟随车在同一平面内向两侧轻微展开。
                 const followerOrder = followerIndex;
                 if (!isLead) followerIndex += 1;
-                const spreadStep = Math.ceil((followerOrder + 1) / 2) * 0.075;
+                const spreadStep = Math.ceil((followerOrder + 1) / 2) * 0.11;
                 const vehicleOffset = isLead
                     ? 0
-                    : Math.min(0.18, spreadStep) * (followerOrder % 2 === 0 ? 1 : -1);
+                    : Math.min(0.28, spreadStep) * (followerOrder % 2 === 0 ? 1 : -1);
                 const overlapsLead = !isLead && leadVehicle !== null
                     && Math.abs(vehicle.progress - leadVehicle.progress) < 0.012;
-                const trailOffset = overlapsLead ? Math.min(0.48, (followerOrder + 1) * 0.24) : 0;
+                const trailOffset = overlapsLead ? Math.min(0.7, (followerOrder + 1) * 0.35) : 0;
                 setVehicleBarTransform(road, lane, vehicle, vehicleOffset, trailOffset);
             });
         });
@@ -242,25 +242,21 @@ export function useRoadControls(
         const container = refs.containerRef.current;
         if (!camera || !controls || !container || points.length === 0) return;
 
-        const box = new THREE.Box3().setFromPoints(points);
-        const center = box.getCenter(new THREE.Vector3());
-        const size = box.getSize(new THREE.Vector3());
+        const sphere = new THREE.Box3().setFromPoints(points).getBoundingSphere(new THREE.Sphere());
+        const center = sphere.center;
         const verticalFov = THREE.MathUtils.degToRad(camera.fov);
         const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
-        const neededHeightByDepth = size.z / (2 * Math.tan(verticalFov / 2));
-        const neededHeightByWidth = size.x / (2 * Math.tan(horizontalFov / 2));
-        const span = Math.max(size.x, size.z, 1);
-        const height = THREE.MathUtils.clamp(Math.max(neededHeightByDepth, neededHeightByWidth) * 1.55 + 10, 24, 132);
-        const tilt = THREE.MathUtils.clamp(span * CAMERA_TILT_RATIO + 10, 16, 48);
-        const viewDirection = new THREE.Vector3(
-            camera.position.x - controls.target.x,
-            0,
-            camera.position.z - controls.target.z
-        );
-        if (viewDirection.lengthSq() < 0.001) viewDirection.set(-0.34, 0, 1);
+        const fitFov = Math.max(THREE.MathUtils.degToRad(10), Math.min(verticalFov, horizontalFov));
+        const fitDistance = Math.max(36, (Math.max(sphere.radius, 1) / Math.sin(fitFov / 2)) * 1.18);
+        const viewDirection = camera.position.clone().sub(controls.target);
+        if (viewDirection.lengthSq() < 0.001) viewDirection.set(-0.34, 0.82, 1);
         viewDirection.normalize();
+        if (viewDirection.y < 0.28) {
+            viewDirection.y = 0.28;
+            viewDirection.normalize();
+        }
 
-        const targetPosition = new THREE.Vector3(center.x + viewDirection.x * tilt, height, center.z + viewDirection.z * tilt);
+        const targetPosition = center.clone().addScaledVector(viewDirection, fitDistance);
         const targetLookAt = new THREE.Vector3(center.x, 0, center.z);
         const startPosition = camera.position.clone();
         const startTarget = controls.target.clone();
@@ -294,9 +290,7 @@ export function useRoadControls(
             const points: THREE.Vector3[] = [];
             refs.roadsMapRef.current.forEach((road) => {
                 if (road.samples.length === 0) return;
-                points.push(road.samples[0]);
-                points.push(road.samples[road.samples.length - 1]);
-                points.push(road.samples[Math.floor(road.samples.length * 0.5)]);
+                points.push(...road.samples);
                 road.orders.forEach((lane) => {
                     lane.vehicles.forEach((vehicle) => points.push(vehicle.bar.position));
                 });
@@ -350,7 +344,7 @@ export function useRoadControls(
 
         const laneIndex = road.orders.size;
         const color = colorForOrder(orderId);
-        const progressGeo = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, 0.072, road.radialSegments, false);
+        const progressGeo = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, 0.12, road.radialSegments, false);
         progressGeo.setDrawRange(0, 0);
         const progressTube = new THREE.Mesh(progressGeo, new THREE.MeshBasicMaterial({
             color,
@@ -385,7 +379,7 @@ export function useRoadControls(
         }
 
         const bar = new THREE.Mesh(
-            new THREE.BoxGeometry(0.28, 0.07, 0.1),
+            new THREE.BoxGeometry(0.48, 0.11, 0.16),
             new THREE.MeshBasicMaterial({
                 color: lane.color,
                 transparent: true,
@@ -443,18 +437,18 @@ export function useRoadControls(
             }
 
             const grayTube = new THREE.Mesh(
-                new THREE.TubeGeometry(pathCurve, tubularSegments, 0.08, radialSegments, false),
+                new THREE.TubeGeometry(pathCurve, tubularSegments, 0.13, radialSegments, false),
                 new THREE.MeshBasicMaterial({
                     color: 0x6b7280,       // 更浅的灰（原 0x475569）
                     transparent: true,
-                    opacity: 0.45,         // 更透明（原 0.7）
+                    opacity: 0.62,
                     depthWrite: false,
                 })
             );
             grayTube.renderOrder = 2;
             grayTube.userData = { roadId: pathKey, objectType: '共享路线' };
 
-            const selectionTube = new THREE.Mesh(new THREE.TubeGeometry(pathCurve, tubularSegments, 0.17, radialSegments, false), new THREE.MeshBasicMaterial({
+            const selectionTube = new THREE.Mesh(new THREE.TubeGeometry(pathCurve, tubularSegments, 0.28, radialSegments, false), new THREE.MeshBasicMaterial({
                 color: 0x38bdf8,
                 transparent: true,
                 opacity: 0,
