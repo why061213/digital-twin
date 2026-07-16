@@ -29,12 +29,12 @@ export type PlaybackChain = {
     leaves: Map<string, ChainNode>;
 };
 
-const SECONDS_PER_ROUTE = 8;
-const MIN_SECONDS = 15;
-const MAX_SECONDS = 60;
+const SECONDS_PER_VEHICLE = 15;
+const MIN_SECONDS = 20;
+const MAX_SECONDS = 180;
 
-function calcDuration(routeCount: number): number {
-    return Math.max(MIN_SECONDS, Math.min(MAX_SECONDS, routeCount * SECONDS_PER_ROUTE)) * 1000;
+function calcDuration(vehicleCount: number): number {
+    return Math.max(MIN_SECONDS, Math.min(MAX_SECONDS, vehicleCount * SECONDS_PER_VEHICLE)) * 1000;
 }
 
 function orderedRing(
@@ -120,7 +120,7 @@ export function buildPlaybackChain(
             provinceMapKeys: provinceRaw?.renderProvinceKeys ?? [group.fromProvinceKey],
             directionMapKeys: directionRaw?.renderProvinceKeys ?? group.renderProvinceKeys,
             routes: routesByGroupId.get(groupId) ?? [],
-            durationMs: calcDuration(group.count),
+            durationMs: calcDuration(group.vehicleCount),
         };
         nodes.set(leaf.id, leaf);
         leaves.set(groupId, leaf);

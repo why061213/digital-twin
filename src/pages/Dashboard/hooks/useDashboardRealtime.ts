@@ -58,6 +58,11 @@ export type TruckPositionMessage = {
     stale?: boolean;
     fetchedAt?: string;
     speedQuality?: 'provider' | 'calculated' | 'fallback' | 'rejected';
+    driverName?: string;
+    address?: string;
+    stateStr?: string;
+    directionDeg?: number;
+    directionLabel?: string;
     sequence?: number;
 };
 
@@ -108,6 +113,12 @@ export type RouteOrder = {
     plate: string;
     cargo: string;
     status: string;
+    speedKmh?: number | null;
+    driverName?: string;
+    address?: string;
+    stateStr?: string;
+    directionDeg?: number;
+    directionLabel?: string;
 };
 
 type UseDashboardRealtimeOptions = {

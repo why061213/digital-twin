@@ -46,6 +46,22 @@ function routeDisplayData(route: RouteOrder): RouteDisplayData {
     return route as RouteDisplayData;
 }
 
+function compactPositionAddress(address?: string) {
+    if (!address) return '--';
+    const segments = address.split(/[\s,，]+/).map((part) => part.trim()).filter(Boolean);
+    return segments[segments.length - 1] ?? address;
+}
+
+function detailedDirection(directionDeg?: number, providerLabel?: string) {
+    if (!Number.isFinite(directionDeg)) return providerLabel || '--';
+    const normalized = ((Number(directionDeg) % 360) + 360) % 360;
+    const labels = ['北', '东北', '东', '东南', '南', '西南', '西', '西北'];
+    const nearestIndex = Math.round(normalized / 45) % labels.length;
+    const nearestAngle = nearestIndex * 45;
+    const deviation = Math.abs(((normalized - nearestAngle + 540) % 360) - 180);
+    return `${labels[nearestIndex]} · ${Math.round(normalized)}°（偏差 ${Math.round(deviation)}°）`;
+}
+
 function numberValue(value: unknown, fallback: number) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
@@ -419,15 +435,14 @@ function VehicleTransportDetails({ roadGroup }: { roadGroup: RoadGroupPanelState
 
     useEffect(() => {
         if (detailRoutes.length <= 1) return;
-        const intervalMs = Math.max(900, Math.min(2800, Math.floor(12_000 / detailRoutes.length)));
         const timer = window.setInterval(() => {
             setCycleIndex((index) => index + 1);
-        }, intervalMs);
+        }, 15_000);
         return () => window.clearInterval(timer);
     }, [detailRoutes.length, roadGroup.groupId]);
 
     return (
-        <Panel title="车辆运输详情" className="h-[64%] min-h-0">
+        <Panel title="车辆运输详情" className="h-full min-h-0">
             <div key={targetRoute?.lineId ?? 'empty'} className="vehicle-detail-swap flex h-full min-h-0 flex-col">
                 <div className="flex items-center justify-between gap-3 rounded border border-sky-300/20 bg-sky-400/8 px-3 py-3 shadow-[inset_3px_0_0_rgba(125,211,252,0.8)]">
                     <div className="min-w-0">
@@ -447,24 +462,56 @@ function VehicleTransportDetails({ roadGroup }: { roadGroup: RoadGroupPanelState
                 </div>
 
                 <div className="mt-3 flex min-h-0 flex-1 flex-col rounded border border-white/8 bg-slate-900/55 px-3 py-3">
-                    <div className="grid min-h-0 flex-1 grid-cols-[1rem_1fr] gap-x-3">
+                    <div className="grid grid-cols-[1rem_1fr] gap-x-3">
                         <div className="flex flex-col items-center py-1">
                             <span className="h-2.5 w-2.5 rounded-full border-2 border-sky-200 bg-sky-500 shadow-[0_0_10px_rgba(56,189,248,0.7)]" />
                             <span className="my-1 min-h-5 w-px flex-1 bg-gradient-to-b from-sky-300/70 to-emerald-300/70" />
                             <span className="h-2.5 w-2.5 rounded-full border-2 border-emerald-200 bg-emerald-500 shadow-[0_0_10px_rgba(52,211,153,0.65)]" />
                         </div>
-                        <div className="flex min-h-0 flex-col justify-between gap-3">
+                        <div className="flex min-h-0 flex-col justify-between gap-2">
                             <div>
                                 <div className="text-[10px] text-slate-500">起点</div>
-                                <div className="mt-1 line-clamp-3 text-sm font-medium leading-5 text-sky-100" title={targetRoute?.from || '--'}>
+                                <div className="mt-1 line-clamp-1 text-sm font-medium leading-5 text-sky-100" title={targetRoute?.from || '--'}>
                                     {targetRoute?.from || '--'}
                                 </div>
                             </div>
                             <div>
                                 <div className="text-[10px] text-slate-500">目的地</div>
-                                <div className="mt-1 line-clamp-3 text-sm font-medium leading-5 text-emerald-100" title={targetRoute?.to || '--'}>
+                                <div className="mt-1 line-clamp-1 text-sm font-medium leading-5 text-emerald-100" title={targetRoute?.to || '--'}>
                                     {targetRoute?.to || '--'}
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 border-t border-white/8 pt-3 text-xs">
+                        <div className="rounded bg-white/[0.035] px-2.5 py-2">
+                            <div className="text-[10px] text-slate-500">速度</div>
+                            <div className="mt-1 font-semibold tabular-nums text-amber-100">
+                                {Number.isFinite(Number(targetRoute?.speedKmh)) ? `${Math.round(Number(targetRoute?.speedKmh))} km/h` : '--'}
+                            </div>
+                        </div>
+                        <div className="rounded bg-white/[0.035] px-2.5 py-2">
+                            <div className="text-[10px] text-slate-500">驾驶员</div>
+                            <div className="mt-1 truncate font-semibold text-sky-100" title={targetRoute?.driverName || '--'}>
+                                {targetRoute?.driverName || '--'}
+                            </div>
+                        </div>
+                        <div className="col-span-2 rounded bg-white/[0.035] px-2.5 py-2">
+                            <div className="text-[10px] text-slate-500">方向</div>
+                            <div className="mt-1 font-medium text-cyan-100">
+                                {detailedDirection(targetRoute?.directionDeg, targetRoute?.directionLabel)}
+                            </div>
+                        </div>
+                        <div className="col-span-2 rounded bg-white/[0.035] px-2.5 py-2">
+                            <div className="text-[10px] text-slate-500">当前位置</div>
+                            <div className="mt-1 truncate text-slate-200" title={targetRoute?.address || '--'}>
+                                {compactPositionAddress(targetRoute?.address)}
+                            </div>
+                        </div>
+                        <div className="col-span-2 rounded bg-white/[0.035] px-2.5 py-2">
+                            <div className="text-[10px] text-slate-500">车辆状态</div>
+                            <div className="mt-1 line-clamp-2 leading-5 text-emerald-100" title={targetRoute?.stateStr || '--'}>
+                                {targetRoute?.stateStr || '--'}
                             </div>
                         </div>
                     </div>
@@ -493,24 +540,24 @@ function RoadGroupLeftPanels({
     const visibleOrderSummaries = variant === 'vehicle' ? orderSummaries.slice(0, 3) : orderSummaries;
     const shouldAutoScrollOrders = variant === 'aggregate' && visibleOrderSummaries.length >= 4;
 
+    if (variant === 'vehicle') {
+        return <VehicleTransportDetails roadGroup={roadGroup} />;
+    }
+
     return (
         <>
-            {variant === 'vehicle' ? (
-                <VehicleTransportDetails roadGroup={roadGroup} />
-            ) : (
-                <Panel title="运输聚合详情" className="h-[44%] min-h-[300px]">
-                    <div className="space-y-2">
-                        <StatRow label="当前组" value={roadGroup.groupIndex !== undefined ? `第 ${roadGroup.groupIndex + 1} 组` : roadGroup.groupId ?? '-'} />
-                        <StatRow label="组内线路" value={roadGroup.groupCount ?? routeCount} unit="条" tone="text-cyan-200" />
-                        <StatRow label="调度车辆" value={vehicleCount} unit="辆" tone="text-sky-200" />
-                        <StatRow label="运输中" value={running} unit="辆" tone="text-emerald-200" />
-                        <StatRow label="已完成" value={finished} unit="辆" />
-                        <StatRow label="平均时速" value={avgSpeed > 0 ? Math.round(avgSpeed) : '--'} unit="km/h" tone="text-amber-200" />
-                    </div>
-                </Panel>
-            )}
+            <Panel title="运输聚合详情" className="h-[44%] min-h-[300px]">
+                <div className="space-y-2">
+                    <StatRow label="当前组" value={roadGroup.groupIndex !== undefined ? `第 ${roadGroup.groupIndex + 1} 组` : roadGroup.groupId ?? '-'} />
+                    <StatRow label="组内线路" value={roadGroup.groupCount ?? routeCount} unit="条" tone="text-cyan-200" />
+                    <StatRow label="调度车辆" value={vehicleCount} unit="辆" tone="text-sky-200" />
+                    <StatRow label="运输中" value={running} unit="辆" tone="text-emerald-200" />
+                    <StatRow label="已完成" value={finished} unit="辆" />
+                    <StatRow label="平均时速" value={avgSpeed > 0 ? Math.round(avgSpeed) : '--'} unit="km/h" tone="text-amber-200" />
+                </div>
+            </Panel>
 
-            <Panel title="组内订单" className={variant === 'vehicle' ? 'h-[36%] min-h-0' : 'h-[56%] min-h-[320px]'}>
+            <Panel title="组内订单" className="h-[56%] min-h-[320px]">
                 <div className="flex h-full min-h-0 flex-col">
                     <AutoScrollList
                         enabled={shouldAutoScrollOrders}
@@ -550,7 +597,13 @@ function RoadGroupLeftPanels({
     );
 }
 
-function RoadGroupRightPanels({ roadGroup }: { roadGroup: RoadGroupPanelState }) {
+function RoadGroupRightPanels({
+    roadGroup,
+    variant,
+}: {
+    roadGroup: RoadGroupPanelState;
+    variant: 'aggregate' | 'vehicle';
+}) {
     const routes = roadGroup.routes;
     const finishedRoutes = routes.filter((route) => route.status === '已完成' || route.status === 'finished');
     const unfinishedRoutes = routes.filter((route) => !(route.status === '已完成' || route.status === 'finished'));
@@ -558,6 +611,9 @@ function RoadGroupRightPanels({ roadGroup }: { roadGroup: RoadGroupPanelState })
     const visibleUnfinished = sortedUnfinished.slice(0, 40);
     const shouldAutoScroll = visibleUnfinished.length > 4;
     const recentFinished = finishedRoutes.slice(-4);
+    const orderSummaries = variant === 'vehicle'
+        ? buildOrderSummaries(routes, roadGroup.orderIds ?? []).slice(0, 3)
+        : [];
 
     const renderRouteCard = (route: RouteOrder, keySuffix = '') => {
         const progress = routeProgress(route);
@@ -607,7 +663,7 @@ function RoadGroupRightPanels({ roadGroup }: { roadGroup: RoadGroupPanelState })
     };
 
     return (
-        <Panel title="组内车辆" className="h-full min-h-0">
+        <Panel title={variant === 'vehicle' ? '组内运输' : '组内车辆'} className="h-full min-h-0">
             <div className="flex h-full min-h-0 flex-col">
                 <div className="flex min-h-0 flex-1 flex-col">
                     <AutoScrollList
@@ -619,6 +675,29 @@ function RoadGroupRightPanels({ roadGroup }: { roadGroup: RoadGroupPanelState })
                         </div>
                     </AutoScrollList>
                 </div>
+
+                {variant === 'vehicle' && orderSummaries.length > 0 && (
+                    <div className="shrink-0 border-t border-sky-400/20 bg-sky-400/[0.035] px-2 py-2">
+                        <div className="mb-1.5 flex items-center justify-between text-xs font-semibold text-sky-200">
+                            <span>组内订单</span>
+                            <span className="text-[10px] font-normal text-slate-500">{orderSummaries.length} 单</span>
+                        </div>
+                        <div className="space-y-1">
+                            {orderSummaries.map((order) => (
+                                <div key={`right-order-${order.id}`} className="flex items-center justify-between gap-2 rounded border border-white/8 bg-slate-900/65 px-2 py-1.5 text-[10px]">
+                                    <div className="min-w-0">
+                                        <div className="truncate text-sky-100" title={order.name}>{order.name}</div>
+                                        <div className="truncate text-slate-500" title={order.id}>{order.id}</div>
+                                    </div>
+                                    <div className="shrink-0 text-right text-slate-400">
+                                        <div>{order.totalTons > 0 ? `${order.totalTons} 吨` : '--'}</div>
+                                        <div>{order.dispatchedVehicles} 辆</div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 <div className="shrink-0 overflow-hidden border-t border-cyan-400/20 bg-cyan-400/5 px-2 py-2">
                     {recentFinished.length > 0 ? (
@@ -685,7 +764,7 @@ function DashboardSidePanels({
                 {mode === 'road_group_focus' && displayRoadGroup && (
                     <div className={`flex min-h-0 flex-1 flex-col transition-all duration-500 ${roadPanelTransitionClass}`}>
                         <div key={`right-${transitionKey}`} className="flex min-h-0 flex-1 flex-col">
-                            <RoadGroupRightPanels roadGroup={displayRoadGroup} />
+                            <RoadGroupRightPanels roadGroup={displayRoadGroup} variant={roadPanelVariant} />
                         </div>
                     </div>
                 )}

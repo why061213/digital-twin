@@ -56,6 +56,16 @@ type UseTruckPositionControllerResult = {
     renderTruckPosition: (route: ActiveRoute, now: number) => void;
 };
 
+function positionDetailsPatch(message: TruckPositionMessage) {
+    return {
+        ...(message.driverName !== undefined ? { driverName: message.driverName } : {}),
+        ...(message.address !== undefined ? { address: message.address } : {}),
+        ...(message.stateStr !== undefined ? { stateStr: message.stateStr } : {}),
+        ...(message.directionDeg !== undefined ? { directionDeg: message.directionDeg } : {}),
+        ...(message.directionLabel !== undefined ? { directionLabel: message.directionLabel } : {}),
+    };
+}
+
 export function useTruckPositionController({
     roadMapRef,
     view,
@@ -237,6 +247,7 @@ export function useTruckPositionController({
         positions.forEach((message) => {
             const route = routeByLineId.get(message.lineId);
             if (!route) return;
+            Object.assign(route, positionDetailsPatch(message));
             if (message.status === 'finished') {
                 completedRouteIdsRef.current.add(message.lineId);
                 return;
@@ -269,15 +280,31 @@ export function useTruckPositionController({
         (message: TruckPositionMessage, forceCalibration = false) => {
             const route = activeRoutesRef.current.get(message.lineId);
             if (!route) return;
+            const detailPatch = positionDetailsPatch(message);
+            Object.assign(route, detailPatch);
 
             if (message.status === 'finished') {
                 finishRoute(message.lineId);
                 return;
             }
-            if (!message.position) return;
+            if (!message.position) {
+                if (Object.keys(detailPatch).length > 0) {
+                    setRouteOrders((prev) => prev.map((item) => (
+                        item.lineId === route.lineId ? { ...item, ...detailPatch } : item
+                    )));
+                }
+                return;
+            }
 
             const now = performance.now();
-            if (!forceCalibration && now < route.nextCalibrationAt) return;
+            if (!forceCalibration && now < route.nextCalibrationAt) {
+                if (Object.keys(detailPatch).length > 0) {
+                    setRouteOrders((prev) => prev.map((item) => (
+                        item.lineId === route.lineId ? { ...item, ...detailPatch } : item
+                    )));
+                }
+                return;
+            }
 
             applyTruckPositionToRoute(route, message, now);
 
@@ -293,6 +320,7 @@ export function useTruckPositionController({
             setRouteOrders((prev) => {
                 const next = prev.map((item) => (item.lineId === route.lineId ? {
                     ...item,
+                    ...detailPatch,
                     ...routeProgressPatch(route, now),
                 } : item));
                 routeOrdersRef.current = next;

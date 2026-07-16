@@ -23,6 +23,11 @@ export type ActiveRoute = RouteOrder & {
     pathLength: number;
     routeLengthKm: number;
     speedKmh: number | null;
+    driverName?: string;
+    address?: string;
+    stateStr?: string;
+    directionDeg?: number;
+    directionLabel?: string;
     nextCalibrationAt: number;
     arrivalCheckRequested: boolean;
 };
