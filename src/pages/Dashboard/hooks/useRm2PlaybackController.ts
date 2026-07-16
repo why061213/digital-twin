@@ -8,6 +8,7 @@ import {
     fetchRm2GroupRoutes,
     fetchRm2Groups,
     type RenderRouteDTO,
+    type Rm2ChainStructureResponse,
     type Rm2GroupDTO,
     type Rm2GroupsDiagnostics,
     type RouteSnapshotChangedMessage,
@@ -15,6 +16,9 @@ import {
 import type { ActiveRoute, ViewMode } from '../types';
 import type { VehiclePositionsMessage } from './useDashboardRealtime';
 import { useTruckPositionController } from './useTruckPositionController';
+
+const TOPOLOGY_REFRESH_INTERVAL_MS = 60_000;
+const TOPOLOGY_REFRESH_DEBOUNCE_MS = 250;
 
 type Options = {
     roadMapRef: RefObject<RoadMap3D2Handle | null>;
@@ -51,6 +55,42 @@ function waitForPaint() {
     return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
+function topologySignature(structure: Rm2ChainStructureResponse, groups: readonly Rm2GroupDTO[]) {
+    return JSON.stringify({
+        headNodeId: structure.headNodeId,
+        leafGroupIds: structure.leafGroupIds,
+        nodes: structure.nodes.map((node) => ({
+            nodeId: node.nodeId,
+            parentNodeId: node.parentNodeId,
+            nextNodeId: node.nextNodeId,
+            childNodeIds: node.childNodeIds,
+            index: node.index,
+        })),
+        groups: groups.map((group) => ({
+            groupId: group.groupId,
+            index: group.index,
+            count: group.count,
+            orderLineIds: group.orderLineIds,
+            vehicleLineIds: group.vehicleLineIds,
+            vehicleLineIdsByOrderLineId: group.vehicleLineIdsByOrderLineId,
+            mapKey: group.mapKey,
+            directionKey: group.directionKey,
+        })),
+    });
+}
+
+function diffGroupIds(previous: readonly Rm2GroupDTO[], next: readonly Rm2GroupDTO[]) {
+    const previousById = new Map(previous.map((group) => [group.groupId, JSON.stringify(group)]));
+    const nextById = new Map(next.map((group) => [group.groupId, JSON.stringify(group)]));
+    return {
+        addedGroupIds: [...nextById.keys()].filter((groupId) => !previousById.has(groupId)),
+        removedGroupIds: [...previousById.keys()].filter((groupId) => !nextById.has(groupId)),
+        changedGroupIds: [...nextById.keys()].filter((groupId) => (
+            previousById.has(groupId) && previousById.get(groupId) !== nextById.get(groupId)
+        )),
+    };
+}
+
 export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Options) {
     const [groups, setGroups] = useState<Rm2GroupDTO[]>([]);
     const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
@@ -63,9 +103,12 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
     const activeRouteLineIdsRef = useRef<Set<string>>(new Set());
     const completedLineIdsByGroupRef = useRef<Map<string, Set<string>>>(new Map());
     const timerRef = useRef<number | null>(null);
+    const topologyRefreshTimerRef = useRef<number | null>(null);
     const groupsRequestRef = useRef<AbortController | null>(null);
     const groupRequestRef = useRef<AbortController | null>(null);
     const generationRef = useRef(0);
+    const topologySignatureRef = useRef('');
+    const backendGroupsRef = useRef<Rm2GroupDTO[]>([]);
     const playNodeRef = useRef<(node: ChainNode) => Promise<void>>(async () => {});
 
     const stopTimer = useCallback(() => {
@@ -121,20 +164,44 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         const request = new AbortController();
         groupsRequestRef.current = request;
         try {
-            let structure = await fetchRm2ChainStructure(request.signal);
-            let response = await fetchRm2Groups(request.signal, structure.snapshotVersion);
-            if (response.mismatch || response.snapshotVersion !== structure.snapshotVersion) {
-                structure = await fetchRm2ChainStructure(request.signal);
-                response = await fetchRm2Groups(request.signal, structure.snapshotVersion);
+            let structure: Rm2ChainStructureResponse | null = null;
+            let response: Awaited<ReturnType<typeof fetchRm2Groups>> | null = null;
+            let mismatchDetails: Record<string, unknown> = {};
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                const candidateStructure = await fetchRm2ChainStructure(request.signal);
+                const candidateResponse = await fetchRm2Groups(request.signal, candidateStructure.snapshotVersion);
+                const structureGroupIds = new Set(candidateStructure.leafGroupIds);
+                const responseGroupIds = new Set(candidateResponse.groups.map((group) => group.groupId));
+                const missingFromStructure = [...responseGroupIds].filter((groupId) => !structureGroupIds.has(groupId));
+                const missingFromGroups = [...structureGroupIds].filter((groupId) => !responseGroupIds.has(groupId));
+                const versionMismatch = candidateResponse.mismatch
+                    || candidateResponse.snapshotVersion !== candidateStructure.snapshotVersion;
+                mismatchDetails = {
+                    attempt: attempt + 1,
+                    structureVersion: candidateStructure.snapshotVersion,
+                    groupsVersion: candidateResponse.snapshotVersion,
+                    versionMismatch,
+                    missingFromStructure,
+                    missingFromGroups,
+                };
+                if (!versionMismatch && missingFromStructure.length === 0 && missingFromGroups.length === 0) {
+                    structure = candidateStructure;
+                    response = candidateResponse;
+                    break;
+                }
             }
             if (request.signal.aborted) return;
-            if (response.mismatch || response.snapshotVersion !== structure.snapshotVersion) {
-                throw new Error('RM2 structure/groups snapshot mismatch');
+            if (!structure || !response) {
+                throw new Error(`RM2 structure/groups snapshot mismatch: ${JSON.stringify(mismatchDetails)}`);
             }
 
             const visibleGroupId = activeGroupIdRef.current;
             const structureLeafIds = new Set(structure.leafGroupIds);
-            const structurallyAcceptedGroups = response.groups.filter((group) => structureLeafIds.has(group.groupId));
+            const responseGroupById = new Map(response.groups.map((group) => [group.groupId, group]));
+            const structurallyAcceptedGroups = structure.leafGroupIds.flatMap((groupId) => {
+                const group = responseGroupById.get(groupId);
+                return group ? [group] : [];
+            });
             const structureRejectedGroups = response.groups
                 .filter((group) => !structureLeafIds.has(group.groupId))
                 .map((group) => `${group.groupId}: missing from chain structure`);
@@ -144,6 +211,17 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 if (!completed || completed.size === 0 || keepsVisibleGroup) return [group];
                 const filtered = withoutCompletedVehicles(group, completed);
                 return filtered ? [filtered] : [];
+            });
+            const nextTopologySignature = topologySignature(structure, filteredGroups);
+            if (nextTopologySignature === topologySignatureRef.current
+                && response.snapshotVersion === snapshotVersionRef.current) {
+                return;
+            }
+            const groupDiff = diffGroupIds(backendGroupsRef.current, response.groups);
+            console.info('[RM2 topology diff]', {
+                snapshotVersion: response.snapshotVersion,
+                hadPreviousTopology: topologySignatureRef.current.length > 0,
+                ...groupDiff,
             });
             const playableGroupIds = new Set(filteredGroups.map((group) => group.groupId));
             let fallbackGroupId: string | null = null;
@@ -158,6 +236,8 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
             }
 
             snapshotVersionRef.current = response.snapshotVersion;
+            topologySignatureRef.current = nextTopologySignature;
+            backendGroupsRef.current = response.groups;
             setGroups(filteredGroups);
             setDiagnostics({
                 ...response.diagnostics,
@@ -312,7 +392,13 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
     const handleSnapshotChanged = useCallback((message: RouteSnapshotChangedMessage) => {
         if (view !== 'roadMap2' || !sceneReady) return;
         if (message.scope === 'rm2' && message.snapshotVersion !== snapshotVersionRef.current) {
-            void refreshRm2();
+            if (topologyRefreshTimerRef.current !== null) {
+                window.clearTimeout(topologyRefreshTimerRef.current);
+            }
+            topologyRefreshTimerRef.current = window.setTimeout(() => {
+                topologyRefreshTimerRef.current = null;
+                void refreshRm2();
+            }, TOPOLOGY_REFRESH_DEBOUNCE_MS);
         }
     }, [refreshRm2, sceneReady, view]);
 
@@ -337,10 +423,19 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         }
 
         void refreshRm2();
+        const topologyInterval = window.setInterval(
+            () => void refreshRm2(),
+            TOPOLOGY_REFRESH_INTERVAL_MS,
+        );
         return () => {
+            window.clearInterval(topologyInterval);
             generationRef.current += 1;
             groupsRequestRef.current?.abort();
             groupRequestRef.current?.abort();
+            if (topologyRefreshTimerRef.current !== null) {
+                window.clearTimeout(topologyRefreshTimerRef.current);
+                topologyRefreshTimerRef.current = null;
+            }
             stopTimer();
         };
     }, [refreshRm2, sceneReady, stopTimer, view]);
@@ -348,6 +443,9 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
     useEffect(() => () => {
         groupsRequestRef.current?.abort();
         groupRequestRef.current?.abort();
+        if (topologyRefreshTimerRef.current !== null) {
+            window.clearTimeout(topologyRefreshTimerRef.current);
+        }
         stopTimer();
     }, [stopTimer]);
 
