@@ -32,6 +32,30 @@ export type Rm2GroupDTO = {
     count: number;
     orderLineIds: string[];
     mapKey: string;
+    fromProvinceKey: string;
+    toProvinceKey: string;
+    directionKey: string;
+    pageIndex: number;
+};
+
+export type Rm2ChainNodeDTO = {
+    nodeId: string;
+    nodeType: 'province' | 'direction' | 'group';
+    parentNodeId: string;
+    key: string;
+    label: string;
+    index: number;
+    nextNodeId: string;
+    childNodeIds: string[];
+    groupId?: string | null;
+};
+
+export type Rm2ChainStructureResponse = {
+    snapshotVersion: string;
+    scope: 'rm2';
+    headNodeId: string | null;
+    nodes: Rm2ChainNodeDTO[];
+    leafGroupIds: string[];
 };
 
 export type Rm2GroupsResponse = {
@@ -41,6 +65,7 @@ export type Rm2GroupsResponse = {
     totalRoutes: number;
     groups: Rm2GroupDTO[];
     diagnostics: Rm2GroupsDiagnostics;
+    mismatch?: boolean;
 };
 
 export type Rm2GroupsDiagnostics = {
@@ -108,6 +133,10 @@ function groupRejectReason(value: unknown): string | null {
     const lineIds = (value as Record<string, unknown>).orderLineIds ?? (value as Record<string, unknown>).lineIds;
     if (!Array.isArray(lineIds) || !lineIds.every((lineId: unknown) => typeof lineId === 'string')) return `${value.groupId}: invalid orderLineIds`;
     if (typeof value.mapKey !== 'string' || value.mapKey.length === 0) return `${value.groupId}: missing mapKey`;
+    if (typeof value.fromProvinceKey !== 'string' || value.fromProvinceKey.length === 0) return `${value.groupId}: missing fromProvinceKey`;
+    if (typeof value.toProvinceKey !== 'string' || value.toProvinceKey.length === 0) return `${value.groupId}: missing toProvinceKey`;
+    if (typeof value.directionKey !== 'string' || value.directionKey.length === 0) return `${value.groupId}: missing directionKey`;
+    if (typeof value.pageIndex !== 'number' || !Number.isFinite(value.pageIndex)) return `${value.groupId}: invalid pageIndex`;
     return null;
 }
 
@@ -133,8 +162,51 @@ async function getJson(path: string, signal?: AbortSignal): Promise<unknown> {
     return response.json() as Promise<unknown>;
 }
 
-export async function fetchRm2Groups(signal?: AbortSignal): Promise<Rm2GroupsResponse> {
-    const data = await getJson('/road/groups?scope=rm2', signal);
+function isRm2ChainNode(value: unknown): value is Rm2ChainNodeDTO {
+    if (!isRecord(value)) return false;
+    return (value.nodeType === 'province' || value.nodeType === 'direction' || value.nodeType === 'group')
+        && typeof value.nodeId === 'string'
+        && typeof value.parentNodeId === 'string'
+        && typeof value.key === 'string'
+        && typeof value.label === 'string'
+        && typeof value.index === 'number'
+        && typeof value.nextNodeId === 'string'
+        && Array.isArray(value.childNodeIds)
+        && value.childNodeIds.every((nodeId) => typeof nodeId === 'string');
+}
+
+export async function fetchRm2ChainStructure(signal?: AbortSignal): Promise<Rm2ChainStructureResponse> {
+    const data = await getJson('/road/groups/structure?scope=rm2', signal);
+    if (!isRecord(data) || data.scope !== 'rm2' || !Array.isArray(data.nodes) || !Array.isArray(data.leafGroupIds)) {
+        throw new Error('Invalid RM2 chain structure response');
+    }
+    const nodes = data.nodes.filter(isRm2ChainNode);
+    if (nodes.length !== data.nodes.length) throw new Error('Invalid RM2 chain node');
+    const nodeIds = new Set(nodes.map((node) => node.nodeId));
+    const leafGroupIds = data.leafGroupIds.filter((groupId): groupId is string => typeof groupId === 'string');
+    if (leafGroupIds.length !== data.leafGroupIds.length) throw new Error('Invalid RM2 leaf group ids');
+    nodes.forEach((node) => {
+        if (!nodeIds.has(node.nextNodeId)) throw new Error(`RM2 chain next node missing: ${node.nextNodeId}`);
+        node.childNodeIds.forEach((childId) => {
+            if (!nodeIds.has(childId)) throw new Error(`RM2 chain child node missing: ${childId}`);
+        });
+    });
+    return {
+        snapshotVersion: typeof data.snapshotVersion === 'string' ? data.snapshotVersion : '',
+        scope: 'rm2',
+        headNodeId: typeof data.headNodeId === 'string' ? data.headNodeId : null,
+        nodes,
+        leafGroupIds,
+    };
+}
+
+export async function fetchRm2Groups(
+    signal?: AbortSignal,
+    expectedSnapshotVersion?: string,
+): Promise<Rm2GroupsResponse> {
+    const query = new URLSearchParams({ scope: 'rm2' });
+    if (expectedSnapshotVersion) query.set('snapshotVersion', expectedSnapshotVersion);
+    const data = await getJson(`/road/groups?${query}`, signal);
     if (!isRecord(data) || data.scope !== 'rm2' || !Array.isArray(data.groups)) {
         throw new Error('Invalid RM2 groups response');
     }
@@ -161,6 +233,7 @@ export async function fetchRm2Groups(signal?: AbortSignal): Promise<Rm2GroupsRes
         totalRoutes,
         groups,
         diagnostics,
+        mismatch: data.mismatch === true,
     };
 }
 

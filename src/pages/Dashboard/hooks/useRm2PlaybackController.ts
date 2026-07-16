@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
-import { buildPlaybackChain, type ChainNode } from '../playback/chain';
+import { buildPlaybackChain, type ChainNode, type PlaybackChain } from '../playback/chain';
 import type { RoadMap3DHandle as RoadMap3D2Handle } from '../modules/RoadMap3D-2';
 import {
     adaptRenderRoute,
+    fetchRm2ChainStructure,
     fetchRm2GroupRoutes,
     fetchRm2Groups,
     type RenderRouteDTO,
@@ -35,7 +36,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
     const [isLoading, setIsLoading] = useState(false);
     const [diagnostics, setDiagnostics] = useState<Rm2GroupsDiagnostics | null>(null);
     const snapshotVersionRef = useRef('');
-    const chainRef = useRef<ChainNode | null>(null);
+    const chainRef = useRef<PlaybackChain | null>(null);
     const currentNodeRef = useRef<ChainNode | null>(null);
     const activeGroupIdRef = useRef<string | null>(null);
     const activeRouteLineIdsRef = useRef<Set<string>>(new Set());
@@ -66,7 +67,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         const activeLineIds = activeRouteLineIdsRef.current;
         if (activeLineIds.size > 0 && [...activeLineIds].every((id) => completed.has(id))) {
             stopTimer();
-            const next = currentNodeRef.current?.next;
+            const next = currentNodeRef.current?.playbackNext;
             if (next) void playNodeRef.current(next);
         }
     }, [stopTimer]);
@@ -91,14 +92,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
     });
 
     const findNode = useCallback((groupId: string) => {
-        const head = chainRef.current?.child;
-        if (!head) return null;
-        let node: ChainNode | null = head;
-        do {
-            if (node.id === groupId) return node;
-            node = node.next;
-        } while (node && node !== head);
-        return null;
+        return chainRef.current?.leaves.get(groupId) ?? null;
     }, []);
 
     const refreshRm2 = useCallback(async () => {
@@ -106,24 +100,52 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         const request = new AbortController();
         groupsRequestRef.current = request;
         try {
-            const response = await fetchRm2Groups(request.signal);
+            let structure = await fetchRm2ChainStructure(request.signal);
+            let response = await fetchRm2Groups(request.signal, structure.snapshotVersion);
+            if (response.mismatch || response.snapshotVersion !== structure.snapshotVersion) {
+                structure = await fetchRm2ChainStructure(request.signal);
+                response = await fetchRm2Groups(request.signal, structure.snapshotVersion);
+            }
             if (request.signal.aborted) return;
+            if (response.mismatch || response.snapshotVersion !== structure.snapshotVersion) {
+                throw new Error('RM2 structure/groups snapshot mismatch');
+            }
 
             const visibleGroupId = activeGroupIdRef.current;
-            const filteredGroups = response.groups.flatMap((group) => {
+            const structureLeafIds = new Set(structure.leafGroupIds);
+            const structurallyAcceptedGroups = response.groups.filter((group) => structureLeafIds.has(group.groupId));
+            const structureRejectedGroups = response.groups
+                .filter((group) => !structureLeafIds.has(group.groupId))
+                .map((group) => `${group.groupId}: missing from chain structure`);
+            const filteredGroups = structurallyAcceptedGroups.flatMap((group) => {
                 const completed = completedLineIdsByGroupRef.current.get(group.groupId);
                 const keepsVisibleGroup = group.groupId === visibleGroupId;
                 if (!completed || completed.size === 0 || keepsVisibleGroup) return [group];
                 const orderLineIds = group.orderLineIds.filter((lineId) => !completed.has(lineId));
                 return orderLineIds.length === 0 ? [] : [{ ...group, orderLineIds, count: orderLineIds.length }];
             });
+            const playableGroupIds = new Set(filteredGroups.map((group) => group.groupId));
+            let fallbackGroupId: string | null = null;
+            let fallbackNode = currentNodeRef.current?.playbackNext ?? null;
+            const previousLeafCount = chainRef.current?.leaves.size ?? 0;
+            for (let visited = 0; fallbackNode && visited < previousLeafCount; visited += 1) {
+                if (fallbackNode.groupId && playableGroupIds.has(fallbackNode.groupId)) {
+                    fallbackGroupId = fallbackNode.groupId;
+                    break;
+                }
+                fallbackNode = fallbackNode.playbackNext;
+            }
 
             snapshotVersionRef.current = response.snapshotVersion;
             setGroups(filteredGroups);
-            setDiagnostics({ ...response.diagnostics, acceptedGroupCount: filteredGroups.length });
-            chainRef.current = buildPlaybackChain(filteredGroups);
+            setDiagnostics({
+                ...response.diagnostics,
+                acceptedGroupCount: filteredGroups.length,
+                rejectedGroups: [...response.diagnostics.rejectedGroups, ...structureRejectedGroups],
+            });
+            chainRef.current = buildPlaybackChain(structure, filteredGroups);
 
-            if (!chainRef.current?.child) {
+            if (!chainRef.current.headLeaf) {
                 currentNodeRef.current = null;
                 activeGroupIdRef.current = null;
                 setActiveGroupId(null);
@@ -134,7 +156,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
             }
 
             if (!visibleGroupId) {
-                void playNodeRef.current(chainRef.current.child);
+                void playNodeRef.current(chainRef.current.headLeaf);
                 return;
             }
 
@@ -143,7 +165,9 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 currentNodeRef.current = currentNode;
                 void playNodeRef.current(currentNode);
             } else {
-                void playNodeRef.current(chainRef.current.child);
+                void playNodeRef.current(
+                    (fallbackGroupId ? findNode(fallbackGroupId) : null) ?? chainRef.current.headLeaf,
+                );
             }
         } catch (error) {
             if ((error as DOMException).name !== 'AbortError') {
@@ -182,7 +206,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
             if (completed.size > 0) completedLineIdsByGroupRef.current.set(node.id, completed);
             const routes = response.routes.filter((route) => !isCompletedRoute(route) && !completed.has(route.lineId));
             if (routes.length === 0) {
-                const next = node.next;
+                const next = node.playbackNext;
                 if (next && next !== node) {
                     await playNodeRef.current(next);
                 } else {
@@ -200,7 +224,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
 
             const accepted = routes.map(adaptRenderRoute).filter((route): route is NonNullable<typeof route> => route !== null);
             if (accepted.length === 0) {
-                const next = node.next;
+                const next = node.playbackNext;
                 if (next && next !== node) await playNodeRef.current(next);
                 return;
             }
@@ -210,7 +234,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 .filter((route): route is ActiveRoute => route !== null);
             activeRoutes = hydrateRoutePositions(activeRoutes, response.positions);
             if (activeRoutes.length === 0) {
-                const next = node.next;
+                const next = node.playbackNext;
                 if (next && next !== node) await playNodeRef.current(next);
                 else await refreshRm2();
                 return;
@@ -241,13 +265,13 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
             const durationMs = node.durationMs ?? 15_000;
             timerRef.current = window.setTimeout(() => {
                 timerRef.current = null;
-                const next = node.next;
+                const next = node.playbackNext;
                 if (next) void playNodeRef.current(next);
             }, durationMs);
         } catch (error) {
             if ((error as DOMException).name !== 'AbortError') {
                 console.warn('[RM2 playback] group load failed', { groupId: node.id, error });
-                const next = node.next;
+                const next = node.playbackNext;
                 if (next && next !== node) void playNodeRef.current(next);
             }
         } finally {

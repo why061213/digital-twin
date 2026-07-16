@@ -16,9 +16,9 @@ import {
 import type { ViewMode } from '../types';
 
 const FIXTURE_GROUPS: Rm2GroupDTO[] = [
-    { groupId: 'rm2-fixture-fs-gz', groupName: '佛山 - 广州', index: 0, count: 2, orderLineIds: ['rm2-fs-gz-01', 'rm2-fs-gz-02'], mapKey: '440000' },
-    { groupId: 'rm2-fixture-dg-sz', groupName: '东莞 - 深圳', index: 1, count: 2, orderLineIds: ['rm2-dg-sz-01', 'rm2-dg-sz-02'], mapKey: '440000' },
-    { groupId: 'rm2-fixture-zs-zh', groupName: '中山 - 珠海', index: 2, count: 1, orderLineIds: ['rm2-zs-zh-01'], mapKey: '440000' },
+    { groupId: 'rm2-fixture-fs-gz', groupName: '佛山 - 广州', index: 0, count: 2, orderLineIds: ['rm2-fs-gz-01', 'rm2-fs-gz-02'], mapKey: '440000', fromProvinceKey: '440000', toProvinceKey: '440000', directionKey: '440000:440000', pageIndex: 1 },
+    { groupId: 'rm2-fixture-dg-sz', groupName: '东莞 - 深圳', index: 1, count: 2, orderLineIds: ['rm2-dg-sz-01', 'rm2-dg-sz-02'], mapKey: '440000', fromProvinceKey: '440000', toProvinceKey: '440000', directionKey: '440000:440000', pageIndex: 2 },
+    { groupId: 'rm2-fixture-zs-zh', groupName: '中山 - 珠海', index: 2, count: 1, orderLineIds: ['rm2-zs-zh-01'], mapKey: '440000', fromProvinceKey: '440000', toProvinceKey: '440000', directionKey: '440000:440000', pageIndex: 3 },
 ];
 
 function fixtureRoute(lineId: string, orderId: string, plate: string, cargo: string, from: string, to: string, groupId: string, pathKey: string, coordinates: [number, number][]): RenderRouteDTO {
@@ -176,7 +176,7 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
         sceneAdapterRef.current?.clearRenderedGroup();
     }, []);
 
-    const isRouteComplete = useCallback(isCompletedRoute, []);
+    const isRouteComplete = useCallback((route: RenderRouteDTO) => isCompletedRoute(route), []);
 
     const getDisplayDuration = useCallback((_group: Rm2GroupDTO, routes: readonly RenderRouteDTO[]) => (
         Math.min(28_000, 10_000 + routes.length * 650)
@@ -241,13 +241,14 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             markRouteFinished(route);
         },
     });
+    const loadMotionGroup = motion.loadGroup;
 
     useEffect(() => {
         motionLoadRef.current = async (routes) => {
             activeRoutesRef.current = new Map(routes.map((route) => [route.lineId, route as RenderRouteDTO]));
-            await motion.loadGroup(routes);
+            await loadMotionGroup(routes);
         };
-    }, [motion.loadGroup]);
+    }, [loadMotionGroup]);
 
     const scheduleRefresh = useCallback((delayMs = 200) => {
         if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current);
