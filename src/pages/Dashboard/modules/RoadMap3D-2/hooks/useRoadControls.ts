@@ -109,13 +109,21 @@ function pointAndTangentAtProgress(road: RoadState, progress: number) {
     return { point, tangent };
 }
 
-function setVehicleBarTransform(road: RoadState, lane: OrderLaneState, vehicle: VehicleBarState) {
+function setVehicleBarTransform(
+    road: RoadState,
+    lane: OrderLaneState,
+    vehicle: VehicleBarState,
+    vehicleOffset: number,
+    trailOffset: number,
+) {
     const { point, tangent } = pointAndTangentAtProgress(road, vehicle.progress);
     const laneCount = Math.max(1, road.orders.size);
     const laneOffset = (lane.laneIndex - (laneCount - 1) / 2) * 0.2;
     const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+    const trailDirection = vehicle.progress >= 0.5 ? -1 : 1;
     const position = point
-        .add(normal.clone().multiplyScalar(laneOffset))
+        .add(normal.clone().multiplyScalar(laneOffset + vehicleOffset))
+        .add(tangent.clone().multiplyScalar(trailOffset * trailDirection))
         .setY(TRUCK_LIFT + 0.05);
 
     vehicle.bar.position.copy(position);
@@ -168,6 +176,7 @@ export function useRoadControls(
             lane.progressTube.position.y = 0.04;
             lane.progressTube.renderOrder = 9 + (progressLayerByLane.get(lane) ?? laneIndex);
             drawTubeProgress(lane.progressTube, lane.maxProgress, road.tubularSegments, road.radialSegments);
+            let followerIndex = 0;
             vehicles.forEach((vehicle, vehicleIndex) => {
                 const material = vehicle.bar.material as THREE.MeshBasicMaterial;
                 const isLead = vehicle === leadVehicle;
@@ -197,7 +206,18 @@ export function useRoadControls(
                 // 4. 渲染顺序
                 vehicle.bar.renderOrder = isLead ? 36 : 18 + (vehicleIndex % 8);
 
-                setVehicleBarTransform(road, lane, vehicle);
+                // 同线路车辆进度相同或非常接近时，不能让头车把跟随横杆完全盖住。
+                // 领头车保持车道中心，跟随车在同一平面内向两侧轻微展开。
+                const followerOrder = followerIndex;
+                if (!isLead) followerIndex += 1;
+                const spreadStep = Math.ceil((followerOrder + 1) / 2) * 0.075;
+                const vehicleOffset = isLead
+                    ? 0
+                    : Math.min(0.18, spreadStep) * (followerOrder % 2 === 0 ? 1 : -1);
+                const overlapsLead = !isLead && leadVehicle !== null
+                    && Math.abs(vehicle.progress - leadVehicle.progress) < 0.012;
+                const trailOffset = overlapsLead ? Math.min(0.48, (followerOrder + 1) * 0.24) : 0;
+                setVehicleBarTransform(road, lane, vehicle, vehicleOffset, trailOffset);
             });
         });
     }, []);
