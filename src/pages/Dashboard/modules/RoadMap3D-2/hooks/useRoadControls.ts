@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import * as THREE from 'three';
 import { mapPosition } from '../geo';
 import { disposeObject3D, clamp01, makePathCurve, indexCount } from '../utils';
@@ -46,12 +46,6 @@ function trackKeyFor(id: string, coords: [number, number][], info: RoadObjectInf
 
 function orderKeyFor(lineId: string, info: RoadObjectInfo) {
     return info.orderFamilyId ?? info.orderId ?? `order-${lineId}`;
-}
-
-function orderColor(orderId: string, index: number) {
-    let hash = 0;
-    for (const char of orderId) hash += char.charCodeAt(0);
-    return UNIFIED_COLORS[(hash + index) % UNIFIED_COLORS.length];
 }
 
 function drawTubeProgress(tube: THREE.Mesh, progress: number, tubularSegments: number, radialSegments: number) {
@@ -133,6 +127,19 @@ function setVehicleBarTransform(
 export function useRoadControls(
     refs: ReturnType<typeof useRoadMapRefs>,
 ) {
+    const orderColorByIdRef = useRef<Map<string, number>>(new Map());
+    const nextOrderColorIndexRef = useRef(0);
+
+    const colorForOrder = useCallback((orderId: string) => {
+        const existing = orderColorByIdRef.current.get(orderId);
+        if (existing !== undefined) return existing;
+
+        const color = UNIFIED_COLORS[nextOrderColorIndexRef.current % UNIFIED_COLORS.length];
+        nextOrderColorIndexRef.current += 1;
+        orderColorByIdRef.current.set(orderId, color);
+        return color;
+    }, []);
+
     const easeInOutCubic = useCallback((value: number) => (
         value < 0.5
             ? 4 * value * value * value
@@ -313,6 +320,8 @@ export function useRoadControls(
         refs.roadsMapRef.current.clear();
         refs.lineTrackMapRef.current.clear();
         refs.selectedRoadIdRef.current = null;
+        orderColorByIdRef.current.clear();
+        nextOrderColorIndexRef.current = 0;
     }, [clearRoad, refs]);
 
     const setRoadsOpacity = useCallback((opacity: number) => {
@@ -340,7 +349,7 @@ export function useRoadControls(
         if (lane) return lane;
 
         const laneIndex = road.orders.size;
-        const color = orderColor(orderId, laneIndex);
+        const color = colorForOrder(orderId);
         const progressGeo = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, 0.072, road.radialSegments, false);
         progressGeo.setDrawRange(0, 0);
         const progressTube = new THREE.Mesh(progressGeo, new THREE.MeshBasicMaterial({
@@ -366,7 +375,7 @@ export function useRoadControls(
         };
         road.orders.set(orderId, lane);
         return lane;
-    }, []);
+    }, [colorForOrder]);
 
     const ensureVehicleBar = useCallback((road: RoadState, lane: OrderLaneState, lineId: string, info: RoadObjectInfo) => {
         let vehicle = lane.vehicles.get(lineId);
