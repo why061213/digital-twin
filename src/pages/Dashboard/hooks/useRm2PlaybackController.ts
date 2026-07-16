@@ -260,10 +260,11 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
     }, [findNode]);
 
     const handleSnapshotChanged = useCallback((message: RouteSnapshotChangedMessage) => {
+        if (view !== 'roadMap2' || !sceneReady) return;
         if (message.scope === 'rm2' && message.snapshotVersion !== snapshotVersionRef.current) {
             void refreshRm2();
         }
-    }, [refreshRm2]);
+    }, [refreshRm2, sceneReady, view]);
 
     useEffect(() => {
         if (view !== 'roadMap2' || !sceneReady) {
