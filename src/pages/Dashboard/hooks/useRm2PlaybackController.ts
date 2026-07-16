@@ -307,6 +307,19 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         try {
             const directionMapKeys = (node.directionMapKeys ?? [])
                 .filter((key) => key !== node.provinceKey);
+            const mapPreparations: Promise<void>[] = [];
+            if (provinceChanged && node.provinceKey) {
+                mapPreparations.push(roadMapRef.current?.preloadProvinceRegion(node.provinceKey) ?? Promise.resolve());
+            }
+            if (directionChanged && node.directionKey && directionMapKeys.length > 0) {
+                mapPreparations.push(
+                    roadMapRef.current?.preloadDirectionRegions(node.directionKey, directionMapKeys)
+                    ?? Promise.resolve(),
+                );
+            }
+            await Promise.all(mapPreparations);
+            if (request.signal.aborted || !isActiveGeneration(generation)) return;
+
             if (provinceChanged || directionChanged) {
                 roadMapRef.current?.clearRoads();
                 activeRoutesRef.current.clear();
@@ -314,22 +327,18 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 setRouteOrders([]);
             }
             if (provinceChanged && node.provinceKey) {
-                // 第二层只拥有始发省；离开省节点时才释放它。
-                roadMapRef.current?.clearDirectionRegions();
-                roadMapRef.current?.clearProvinceRegion();
+                // 新始发省已在上一节点尾部预装；头节点只提升新层并释放旧层。
                 await roadMapRef.current?.setProvinceRegion(node.provinceKey);
                 if (request.signal.aborted || !isActiveGeneration(generation)) return;
             }
             if (directionChanged && node.directionKey) {
-                // 第三层只替换目的省和途经省，始发省图层保持不动。
-                roadMapRef.current?.clearDirectionRegions();
+                // 方向层仅替换目的省和途经省，始发省图层保持不动。
                 if (directionMapKeys.length > 0) {
                     await roadMapRef.current?.setDirectionRegions(node.directionKey, directionMapKeys);
+                } else {
+                    roadMapRef.current?.clearDirectionRegions();
                 }
                 if (request.signal.aborted || !isActiveGeneration(generation)) return;
-            } else if (node.directionKey && directionMapKeys.length > 0) {
-                // 快照可能在同一方向内改变途经省；签名不变时该调用为零成本。
-                await roadMapRef.current?.setDirectionRegions(node.directionKey, directionMapKeys);
             }
 
             const response = await fetchRm2GroupRoutes(node.id, snapshotVersionRef.current, request.signal);
@@ -403,10 +412,41 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
             await waitForPaint();
             if (!isActiveGeneration(generation)) return;
 
+            const next = node.playbackNext;
+            if (next && next !== node) {
+                const nextDirectionMapKeys = (next.directionMapKeys ?? [])
+                    .filter((key) => key !== next.provinceKey);
+                const nextProvinceChanged = next.provinceKey !== node.provinceKey
+                    || !sameKeys(next.provinceMapKeys, node.provinceMapKeys);
+                const nextDirectionChanged = nextProvinceChanged
+                    || next.directionKey !== node.directionKey
+                    || !sameKeys(next.directionMapKeys, node.directionMapKeys);
+                const tailPreloads: Promise<void>[] = [];
+                if (nextProvinceChanged && next.provinceKey) {
+                    tailPreloads.push(
+                        roadMapRef.current?.preloadProvinceRegion(next.provinceKey) ?? Promise.resolve(),
+                    );
+                }
+                if (nextDirectionChanged && next.directionKey && nextDirectionMapKeys.length > 0) {
+                    tailPreloads.push(
+                        roadMapRef.current?.preloadDirectionRegions(next.directionKey, nextDirectionMapKeys)
+                        ?? Promise.resolve(),
+                    );
+                }
+                void Promise.all(tailPreloads).catch((error) => {
+                    if ((error as DOMException).name !== 'AbortError') {
+                        console.warn('[RM2 playback] next map preload failed', {
+                            currentGroupId: node.id,
+                            nextGroupId: next.id,
+                            error,
+                        });
+                    }
+                });
+            }
+
             const durationMs = node.durationMs ?? 15_000;
             timerRef.current = window.setTimeout(() => {
                 timerRef.current = null;
-                const next = node.playbackNext;
                 if (next) void playNodeRef.current(next);
             }, durationMs);
         } catch (error) {

@@ -17,10 +17,14 @@ type MapLayer = {
 type MapLayerSlot = 'province' | 'direction';
 
 type MapLayerState = {
-    layer: MapLayer | null;
-    signature: string;
+    activeLayer: MapLayer | null;
+    activeSignature: string;
+    stagedLayer: MapLayer | null;
+    stagedSignature: string;
     generation: number;
     request: AbortController | null;
+    pendingSignature: string;
+    pendingPromise: Promise<void> | null;
 };
 
 function disposeMapLayer(layer: MapLayer) {
@@ -153,7 +157,12 @@ export function useRoadMapScene(
     const controlsRef = useRef(controls);
     const selectionRef = useRef(selection);
     const onVisualReadyRef = useRef(onVisualReady);
-    const replaceMapRef = useRef<(
+    const preloadMapRef = useRef<(
+        slot: MapLayerSlot,
+        scopeKey: string,
+        mapKeys: string[],
+    ) => Promise<void>>(async () => {});
+    const activateMapRef = useRef<(
         slot: MapLayerSlot,
         scopeKey: string,
         mapKeys: string[],
@@ -163,12 +172,18 @@ export function useRoadMapScene(
     selectionRef.current = selection;
     onVisualReadyRef.current = onVisualReady;
 
+    const preloadProvinceRegion = useCallback((provinceKey: string) => (
+        preloadMapRef.current('province', provinceKey, [provinceKey])
+    ), []);
     const setProvinceRegion = useCallback((provinceKey: string) => (
-        replaceMapRef.current('province', provinceKey, [provinceKey])
+        activateMapRef.current('province', provinceKey, [provinceKey])
     ), []);
     const clearProvinceRegion = useCallback(() => clearMapRef.current('province'), []);
+    const preloadDirectionRegions = useCallback((directionKey: string, mapKeys: string[]) => (
+        preloadMapRef.current('direction', directionKey, mapKeys)
+    ), []);
     const setDirectionRegions = useCallback((directionKey: string, mapKeys: string[]) => (
-        replaceMapRef.current('direction', directionKey, mapKeys)
+        activateMapRef.current('direction', directionKey, mapKeys)
     ), []);
     const clearDirectionRegions = useCallback(() => clearMapRef.current('direction'), []);
 
@@ -195,8 +210,14 @@ export function useRoadMapScene(
         container.appendChild(renderer.domElement);
         refs.rendererRef.current = renderer;
         const mapLayers: Record<MapLayerSlot, MapLayerState> = {
-            province: { layer: null, signature: '', generation: 0, request: null },
-            direction: { layer: null, signature: '', generation: 0, request: null },
+            province: {
+                activeLayer: null, activeSignature: '', stagedLayer: null, stagedSignature: '',
+                generation: 0, request: null, pendingSignature: '', pendingPromise: null,
+            },
+            direction: {
+                activeLayer: null, activeSignature: '', stagedLayer: null, stagedSignature: '',
+                generation: 0, request: null, pendingSignature: '', pendingPromise: null,
+            },
         };
 
         const orbitControls = new OrbitControls(camera, renderer.domElement);
@@ -217,56 +238,94 @@ export function useRoadMapScene(
         dirLight.position.set(-12, 24, 18);
         scene.add(dirLight);
 
-        const releaseMapLayer = (slot: MapLayerSlot) => {
+        const releaseActiveMapLayer = (slot: MapLayerSlot) => {
             const state = mapLayers[slot];
-            if (state.layer) disposeMapLayer(state.layer);
-            state.layer = null;
-            state.signature = '';
+            if (state.activeLayer) disposeMapLayer(state.activeLayer);
+            state.activeLayer = null;
+            state.activeSignature = '';
+        };
+        const releaseStagedMapLayer = (slot: MapLayerSlot) => {
+            const state = mapLayers[slot];
+            if (state.stagedLayer) disposeMapLayer(state.stagedLayer);
+            state.stagedLayer = null;
+            state.stagedSignature = '';
         };
         clearMapRef.current = (slot) => {
             const state = mapLayers[slot];
             state.generation += 1;
             state.request?.abort();
             state.request = null;
-            releaseMapLayer(slot);
+            state.pendingSignature = '';
+            state.pendingPromise = null;
+            releaseStagedMapLayer(slot);
+            releaseActiveMapLayer(slot);
         };
-        replaceMapRef.current = async (slot, scopeKey, requestedMapKeys) => {
+        preloadMapRef.current = async (slot, scopeKey, requestedMapKeys) => {
             const state = mapLayers[slot];
             const mapKeys = [...new Set(requestedMapKeys)]
                 .filter((key) => /^\d{6}$/.test(key))
                 .sort();
             const signature = `${scopeKey}:${mapKeys.join(',')}`;
-            if (state.layer && signature === state.signature) return;
+            if (mapKeys.length === 0 || signature === state.activeSignature || signature === state.stagedSignature) return;
+            if (signature === state.pendingSignature && state.pendingPromise) return state.pendingPromise;
+
+            const generation = ++state.generation;
+            state.request?.abort();
+            releaseStagedMapLayer(slot);
+            const request = new AbortController();
+            state.request = request;
+            state.pendingSignature = signature;
+            const pendingPromise = (async () => {
+                const geoJson = await loadProvinceGeoJson(mapKeys, request.signal);
+                if (disposed || generation !== state.generation) return;
+                const nextLayer = buildMapLayer(geoJson, container);
+                if (disposed || generation !== state.generation) {
+                    disposeMapLayer(nextLayer);
+                    return;
+                }
+                state.stagedLayer = nextLayer;
+                state.stagedSignature = signature;
+                console.info('[RM2 map preload]', {
+                    slot,
+                    scopeKey,
+                    mapKeys,
+                    objectCount: nextLayer.group.children.length,
+                });
+            })().finally(() => {
+                if (generation !== state.generation) return;
+                state.request = null;
+                state.pendingSignature = '';
+                state.pendingPromise = null;
+            });
+            state.pendingPromise = pendingPromise;
+            return pendingPromise;
+        };
+        activateMapRef.current = async (slot, scopeKey, requestedMapKeys) => {
+            const state = mapLayers[slot];
+            const mapKeys = [...new Set(requestedMapKeys)]
+                .filter((key) => /^\d{6}$/.test(key))
+                .sort();
+            const signature = `${scopeKey}:${mapKeys.join(',')}`;
+            if (signature === state.activeSignature) return;
             if (mapKeys.length === 0) {
                 clearMapRef.current(slot);
                 return;
             }
-
-            const generation = ++state.generation;
-            state.request?.abort();
-            const request = new AbortController();
-            state.request = request;
-            const geoJson = await loadProvinceGeoJson(mapKeys, request.signal);
-            if (disposed || generation !== state.generation) return;
-            const nextLayer = buildMapLayer(geoJson, container);
-            if (disposed || generation !== state.generation) {
-                disposeMapLayer(nextLayer);
-                return;
+            if (signature !== state.stagedSignature) {
+                await preloadMapRef.current(slot, scopeKey, mapKeys);
             }
+            if (disposed || signature !== state.stagedSignature || !state.stagedLayer) return;
 
-            releaseMapLayer(slot);
-            state.layer = nextLayer;
-            state.signature = signature;
-            state.request = null;
+            const previousLayer = state.activeLayer;
+            const nextLayer = state.stagedLayer;
             scene.add(nextLayer.group);
+            state.activeLayer = nextLayer;
+            state.activeSignature = signature;
+            state.stagedLayer = null;
+            state.stagedSignature = '';
+            if (previousLayer) disposeMapLayer(previousLayer);
             renderer.render(scene, camera);
-            await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-            console.info('[RM2 map layer]', {
-                slot,
-                scopeKey,
-                mapKeys,
-                objectCount: nextLayer.group.children.length,
-            });
+            console.info('[RM2 map activate]', { slot, scopeKey, mapKeys });
         };
 
         window.requestAnimationFrame(() => {
@@ -300,8 +359,10 @@ export function useRoadMapScene(
             camera.updateProjectionMatrix();
             renderer.setSize(container.clientWidth, container.clientHeight);
             (['province', 'direction'] as const).forEach((slot) => {
-                mapLayers[slot].layer?.boundaryMaterials.forEach((material) => {
-                    material.resolution.set(container.clientWidth, container.clientHeight);
+                [mapLayers[slot].activeLayer, mapLayers[slot].stagedLayer].forEach((layer) => {
+                    layer?.boundaryMaterials.forEach((material) => {
+                        material.resolution.set(container.clientWidth, container.clientHeight);
+                    });
                 });
             });
         };
@@ -318,14 +379,16 @@ export function useRoadMapScene(
             console.log('🧹 RoadMap3D scene cleanup');
 
             disposed = true;
-            replaceMapRef.current = async () => {};
+            preloadMapRef.current = async () => {};
+            activateMapRef.current = async () => {};
             clearMapRef.current = () => {};
             (['province', 'direction'] as const).forEach((slot) => {
                 const state = mapLayers[slot];
                 state.generation += 1;
                 state.request?.abort();
                 state.request = null;
-                releaseMapLayer(slot);
+                releaseStagedMapLayer(slot);
+                releaseActiveMapLayer(slot);
             });
 
             window.removeEventListener('resize', onResize);
@@ -374,8 +437,10 @@ export function useRoadMapScene(
     }, [refs]);
 
     return {
+        preloadProvinceRegion,
         setProvinceRegion,
         clearProvinceRegion,
+        preloadDirectionRegions,
         setDirectionRegions,
         clearDirectionRegions,
     };
