@@ -1,6 +1,9 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { Line2 } from 'three/examples/jsm/lines/Line2.js';
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { loadCityGeoJson, MAP_HORIZONTAL_SCALE, projection } from '../geo';
 import { useRoadMapRefs } from './useRoadMapRefs';
 import { useRoadControls } from './useRoadControls';
@@ -41,6 +44,7 @@ export function useRoadMapScene(
         renderer.domElement.style.background = 'transparent';
         container.appendChild(renderer.domElement);
         refs.rendererRef.current = renderer;
+        const boundaryMaterials: LineMaterial[] = [];
 
         const orbitControls = new OrbitControls(camera, renderer.domElement);
         orbitControls.enableDamping = true;
@@ -64,67 +68,105 @@ export function useRoadMapScene(
             .then((geoJson) => {
                 if (disposed) return;
                 const group = new THREE.Group();
+                const districtParentAdcodes = new Set<number>(
+                    geoJson.features
+                        .filter((feature: any) => feature.properties?._boundaryLevel === 'district')
+                        .map((feature: any) => Number(feature.properties?.parent?.adcode))
+                        .filter((adcode: number) => Number.isFinite(adcode))
+                );
                 geoJson.features.forEach((feature: any) => {
                     const { geometry, properties } = feature;
-                    const isProvinceBoundary = properties?._boundaryOnly === true;
-                    const isDistrict = properties?.level === 'district';
+                    const boundaryLevel = properties?._boundaryLevel as 'province' | 'city' | 'district' | undefined;
+                    const isProvinceBoundary = boundaryLevel === 'province';
+                    const isDistrict = boundaryLevel === 'district';
+                    const hasDistrictFill = boundaryLevel === 'city'
+                        && districtParentAdcodes.has(Number(properties?.adcode));
                     let rings: number[][][] = [];
                     if (geometry.type === 'Polygon') rings = [geometry.coordinates[0]];
                     else if (geometry.type === 'MultiPolygon') rings = geometry.coordinates.map((p: any) => p[0]);
+                    else if (geometry.type === 'LineString') rings = [geometry.coordinates];
+                    else if (geometry.type === 'MultiLineString') rings = geometry.coordinates;
 
                     const cityGroup = new THREE.Group();
                     rings.forEach((ring) => {
-                        // 省份边界线——用 TubeGeometry 加粗
-                        if (isProvinceBoundary) {
-                            const points: THREE.Vector3[] = [];
-                            ring.forEach(([lng, lat]) => {
-                                const projected = projection([lng, lat]);
-                                if (!projected) return;
-                                const [x, y] = projected;
-                                points.push(new THREE.Vector3(-x, -y, 0.8));
-                            });
-                            if (points.length < 2) return;
-                            if (!points[0].equals(points[points.length - 1])) points.push(points[0].clone());
+                        const projectedRing = ring
+                            .map(([lng, lat]) => projection([lng, lat]))
+                            .filter((point): point is [number, number] => point !== null);
+                        if (projectedRing.length < 2) return;
 
-                            const curve = new THREE.CatmullRomCurve3(points, true);
-                            const tubeGeom = new THREE.TubeGeometry(curve, points.length * 2, 0.35, 6, true);
-                            const tube = new THREE.Mesh(tubeGeom, new THREE.MeshBasicMaterial({
-                                color: 0xf59e0b, transparent: true, opacity: 0.7, depthWrite: false,
-                            }));
-                            cityGroup.add(tube);
+                        const boundaryStyle = boundaryLevel === 'province'
+                            ? { color: 0xfbbf24, width: 1.8, opacity: 0.9, z: -0.18, order: 6 }
+                            : boundaryLevel === 'city'
+                                ? { color: 0x38bdf8, width: 1.35, opacity: 0.68, z: -0.12, order: 5 }
+                                : { color: 0x94a3b8, width: 0.75, opacity: 0.42, z: -0.07, order: 4 };
+
+                        const positions: number[] = [];
+                        projectedRing.forEach(([x, y]) => positions.push(-x, -y, boundaryStyle.z));
+                        const [firstX, firstY] = projectedRing[0];
+                        const [lastX, lastY] = projectedRing[projectedRing.length - 1];
+                        if (firstX !== lastX || firstY !== lastY) {
+                            positions.push(-firstX, -firstY, boundaryStyle.z);
+                        }
+
+                        if (isProvinceBoundary) {
+                            const provinceGeometry = new THREE.BufferGeometry();
+                            provinceGeometry.setAttribute(
+                                'position',
+                                new THREE.Float32BufferAttribute(positions, 3)
+                            );
+                            const provinceBoundary = new THREE.Line(
+                                provinceGeometry,
+                                new THREE.LineBasicMaterial({
+                                    color: boundaryStyle.color,
+                                    transparent: true,
+                                    opacity: boundaryStyle.opacity,
+                                    depthWrite: false,
+                                    depthTest: false,
+                                })
+                            );
+                            provinceBoundary.renderOrder = boundaryStyle.order;
+                            cityGroup.add(provinceBoundary);
                             return;
                         }
 
+                        const boundaryGeometry = new LineGeometry();
+                        boundaryGeometry.setPositions(positions);
+                        const boundaryMaterial = new LineMaterial({
+                            color: boundaryStyle.color,
+                            linewidth: boundaryStyle.width,
+                            transparent: true,
+                            opacity: boundaryStyle.opacity,
+                            depthWrite: false,
+                            depthTest: false,
+                        });
+                        boundaryMaterial.resolution.set(container.clientWidth, container.clientHeight);
+                        boundaryMaterials.push(boundaryMaterial);
+                        const boundary = new Line2(boundaryGeometry, boundaryMaterial);
+                        boundary.computeLineDistances();
+                        boundary.renderOrder = boundaryStyle.order;
+                        cityGroup.add(boundary);
+
+                        // 区县面已经覆盖城市时，城市只承担市界线，避免两层共面闪烁。
+                        if (hasDistrictFill) return;
+
                         const shape = new THREE.Shape();
-                        ring.forEach(([lng, lat], index) => {
-                            const projected = projection([lng, lat]);
-                            if (!projected) return;
-                            const [x, y] = projected;
+                        projectedRing.forEach(([x, y], index) => {
                             if (index === 0) shape.moveTo(-x, -y);
                             else shape.lineTo(-x, -y);
                         });
 
-                        const geom = new THREE.ExtrudeGeometry(shape, { depth: isDistrict ? 0.15 : 0.5, bevelEnabled: false });
+                        const geom = new THREE.ExtrudeGeometry(shape, { depth: isDistrict ? 0.1 : 0.16, bevelEnabled: false });
                         const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
-                            color: isDistrict ? '#1a2a3a' : '#2f465e',
-                            emissive: isDistrict ? '#061018' : '#0b2234',
-                            emissiveIntensity: isDistrict ? 0.04 : 0.12,
-                            roughness: isDistrict ? 0.85 : 0.65,
-                            metalness: isDistrict ? 0.05 : 0.18,
+                            color: isDistrict ? '#1b3042' : '#29465f',
+                            emissive: isDistrict ? '#07131c' : '#0b2234',
+                            emissiveIntensity: isDistrict ? 0.05 : 0.1,
+                            roughness: 0.82,
+                            metalness: 0.05,
                             side: THREE.DoubleSide,
                         }));
+                        mesh.position.z = isDistrict ? -0.012 : 0;
+                        mesh.renderOrder = isDistrict ? 2 : 1;
                         cityGroup.add(mesh);
-                        const edgeLine = new THREE.LineSegments(
-                            new THREE.EdgesGeometry(geom, 32),
-                            new THREE.LineBasicMaterial({
-                                color: 0x7dd3fc,
-                                transparent: true,
-                                opacity: 0.14,
-                                depthWrite: false,
-                            })
-                        );
-                        edgeLine.position.z -= 0.018;
-                        cityGroup.add(edgeLine);
                     });
                     group.add(cityGroup);
                 });
@@ -164,6 +206,9 @@ export function useRoadMapScene(
             camera.aspect = container.clientWidth / container.clientHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(container.clientWidth, container.clientHeight);
+            boundaryMaterials.forEach((material) => {
+                material.resolution.set(container.clientWidth, container.clientHeight);
+            });
         };
         window.addEventListener('resize', onResize);
 
