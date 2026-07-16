@@ -105,18 +105,13 @@ function pointAndTangentAtProgress(road: RoadState, progress: number) {
 
 function setVehicleBarTransform(
     road: RoadState,
-    lane: OrderLaneState,
     vehicle: VehicleBarState,
-    vehicleOffset: number,
     trailOffset: number,
 ) {
     const { point, tangent } = pointAndTangentAtProgress(road, vehicle.progress);
-    const laneCount = Math.max(1, road.orders.size);
-    const laneOffset = (lane.laneIndex - (laneCount - 1) / 2) * 0.4;
     const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
     const trailDirection = vehicle.progress >= 0.5 ? -1 : 1;
     const position = point
-        .add(normal.clone().multiplyScalar(laneOffset + vehicleOffset))
         .add(tangent.clone().multiplyScalar(trailOffset * trailDirection))
         .setY(TRUCK_LIFT + 0.08);
 
@@ -213,18 +208,13 @@ export function useRoadControls(
                 // 4. 渲染顺序
                 vehicle.bar.renderOrder = isLead ? 36 : 18 + (vehicleIndex % 8);
 
-                // 同线路车辆进度相同或非常接近时，不能让头车把跟随横杆完全盖住。
-                // 领头车保持车道中心，跟随车在同一平面内向两侧轻微展开。
+                // 横杆中心必须压在线路中心；同线路车辆重合时只沿路线前后错开。
                 const followerOrder = followerIndex;
                 if (!isLead) followerIndex += 1;
-                const spreadStep = Math.ceil((followerOrder + 1) / 2) * 0.15;
-                const vehicleOffset = isLead
-                    ? 0
-                    : Math.min(0.36, spreadStep) * (followerOrder % 2 === 0 ? 1 : -1);
                 const overlapsLead = !isLead && leadVehicle !== null
                     && Math.abs(vehicle.progress - leadVehicle.progress) < 0.012;
                 const trailOffset = overlapsLead ? Math.min(0.7, (followerOrder + 1) * 0.35) : 0;
-                setVehicleBarTransform(road, lane, vehicle, vehicleOffset, trailOffset);
+                setVehicleBarTransform(road, vehicle, trailOffset);
             });
         });
     }, []);
