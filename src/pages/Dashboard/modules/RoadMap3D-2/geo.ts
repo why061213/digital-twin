@@ -23,8 +23,8 @@ export async function loadCityGeoJson(): Promise<any> {
             municipalityFeatures.push(feature);
         } else if (/^\d+$/.test(String(adcode))) {
             provinceAdcodes.push(adcode);
-            // 保存省边界（标记为 province 级别）
-            provinceFeatures.push({ ...feature, properties: { ...feature.properties, level: 'province' } });
+            // 保存省边界（用自定义标记区分，避免和直辖市冲突）
+            provinceFeatures.push({ ...feature, properties: { ...feature.properties, _boundaryOnly: true } });
         }
     });
 
