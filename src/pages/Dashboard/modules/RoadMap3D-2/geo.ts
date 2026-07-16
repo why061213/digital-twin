@@ -2,8 +2,8 @@ import { geoMercator } from 'd3-geo';
 import * as THREE from 'three';
 import { BASE_URL, DIRECT_CITY_ADCODES } from './constants';
 
-// RM2 deliberately exaggerates the ground plane while preserving vertical lift.
-export const MAP_HORIZONTAL_SCALE = 10;
+// RM2 地图水平缩放系数
+export const MAP_HORIZONTAL_SCALE = 100;
 
 export const projection = geoMercator()
     .center([104.5, 35])

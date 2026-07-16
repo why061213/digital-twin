@@ -30,7 +30,7 @@ export function useRoadMapScene(
 
         const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 1, 10000);
         camera.up.set(0, 1, 0);
-        camera.position.set(14, 52, -24);
+        camera.position.set(140, 520, -240);
         camera.lookAt(0, 0, 0);
         refs.cameraRef.current = camera;
 
@@ -50,8 +50,8 @@ export function useRoadMapScene(
         orbitControls.maxAzimuthAngle = Number.POSITIVE_INFINITY;
         orbitControls.minPolarAngle = Math.PI / 10;
         orbitControls.maxPolarAngle = Math.PI / 2 - 0.035;
-        orbitControls.maxDistance = 220;
-        orbitControls.minDistance = 10;
+        orbitControls.maxDistance = 2200;
+        orbitControls.minDistance = 100;
         orbitControls.update();
         refs.controlsRef.current = orbitControls;
 
