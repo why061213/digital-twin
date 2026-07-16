@@ -403,24 +403,70 @@ function useRoadGroupPanelTransition(
 }
 
 function VehicleTransportDetails({ roadGroup }: { roadGroup: RoadGroupPanelState }) {
-    const targetRoute = roadGroup.routes.find((route) => (
-        route.status !== '已完成' && route.status !== 'finished'
-    )) ?? roadGroup.routes[0];
+    const [cycleIndex, setCycleIndex] = useState(0);
+    const detailRoutes = useMemo(() => {
+        const running = roadGroup.routes.filter((route) => (
+            route.status !== '已完成' && route.status !== 'finished'
+        ));
+        const finished = roadGroup.routes.filter((route) => (
+            route.status === '已完成' || route.status === 'finished'
+        ));
+        return [...running, ...finished];
+    }, [roadGroup.routes]);
+    const targetRoute = detailRoutes.length > 0
+        ? detailRoutes[cycleIndex % detailRoutes.length]
+        : undefined;
+
+    useEffect(() => {
+        if (detailRoutes.length <= 1) return;
+        const intervalMs = Math.max(900, Math.min(2800, Math.floor(12_000 / detailRoutes.length)));
+        const timer = window.setInterval(() => {
+            setCycleIndex((index) => index + 1);
+        }, intervalMs);
+        return () => window.clearInterval(timer);
+    }, [detailRoutes.length, roadGroup.groupId]);
 
     return (
-        <Panel title="车辆运输详情" className="h-[44%] min-h-[300px]">
-            <div className="space-y-2">
-                <StatRow label="目标车牌" value={targetRoute?.plate || '--'} tone="text-cyan-200" />
-                <div className="rounded border border-white/5 bg-white/[0.025] px-3 py-2">
-                    <div className="text-xs text-slate-400">起点</div>
-                    <div className="mt-1 break-words text-sm font-semibold leading-5 text-sky-100">
-                        {targetRoute?.from || '--'}
+        <Panel title="车辆运输详情" className="h-[64%] min-h-0">
+            <div key={targetRoute?.lineId ?? 'empty'} className="vehicle-detail-swap flex h-full min-h-0 flex-col">
+                <div className="flex items-center justify-between gap-3 rounded border border-sky-300/20 bg-sky-400/8 px-3 py-3 shadow-[inset_3px_0_0_rgba(125,211,252,0.8)]">
+                    <div className="min-w-0">
+                        <div className="text-[10px] text-slate-400">当前展示车辆</div>
+                        <div className="mt-1 truncate text-lg font-semibold text-sky-100" title={targetRoute?.plate || '--'}>
+                            {targetRoute?.plate || '--'}
+                        </div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                        <div className="text-[10px] tabular-nums text-slate-500">
+                            {detailRoutes.length > 0 ? `${cycleIndex % detailRoutes.length + 1} / ${detailRoutes.length}` : '0 / 0'}
+                        </div>
+                        <div className="mt-1 rounded border border-emerald-300/25 bg-emerald-300/8 px-2 py-0.5 text-[10px] text-emerald-200">
+                            {targetRoute?.status || '等待数据'}
+                        </div>
                     </div>
                 </div>
-                <div className="rounded border border-white/5 bg-white/[0.025] px-3 py-2">
-                    <div className="text-xs text-slate-400">目的地</div>
-                    <div className="mt-1 break-words text-sm font-semibold leading-5 text-emerald-100">
-                        {targetRoute?.to || '--'}
+
+                <div className="mt-3 flex min-h-0 flex-1 flex-col rounded border border-white/8 bg-slate-900/55 px-3 py-3">
+                    <div className="grid min-h-0 flex-1 grid-cols-[1rem_1fr] gap-x-3">
+                        <div className="flex flex-col items-center py-1">
+                            <span className="h-2.5 w-2.5 rounded-full border-2 border-sky-200 bg-sky-500 shadow-[0_0_10px_rgba(56,189,248,0.7)]" />
+                            <span className="my-1 min-h-5 w-px flex-1 bg-gradient-to-b from-sky-300/70 to-emerald-300/70" />
+                            <span className="h-2.5 w-2.5 rounded-full border-2 border-emerald-200 bg-emerald-500 shadow-[0_0_10px_rgba(52,211,153,0.65)]" />
+                        </div>
+                        <div className="flex min-h-0 flex-col justify-between gap-3">
+                            <div>
+                                <div className="text-[10px] text-slate-500">起点</div>
+                                <div className="mt-1 line-clamp-3 text-sm font-medium leading-5 text-sky-100" title={targetRoute?.from || '--'}>
+                                    {targetRoute?.from || '--'}
+                                </div>
+                            </div>
+                            <div>
+                                <div className="text-[10px] text-slate-500">目的地</div>
+                                <div className="mt-1 line-clamp-3 text-sm font-medium leading-5 text-emerald-100" title={targetRoute?.to || '--'}>
+                                    {targetRoute?.to || '--'}
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -444,7 +490,8 @@ function RoadGroupLeftPanels({
         ? routes.reduce((sum, route) => sum + (Number(routeDisplayData(route).speedKmh) || 0), 0) / routes.length
         : 0;
     const orderSummaries = buildOrderSummaries(routes, roadGroup.orderIds ?? []);
-    const shouldAutoScrollOrders = orderSummaries.length >= 4;
+    const visibleOrderSummaries = variant === 'vehicle' ? orderSummaries.slice(0, 3) : orderSummaries;
+    const shouldAutoScrollOrders = variant === 'aggregate' && visibleOrderSummaries.length >= 4;
 
     return (
         <>
@@ -463,15 +510,15 @@ function RoadGroupLeftPanels({
                 </Panel>
             )}
 
-            <Panel title="组内订单" className="h-[56%] min-h-[320px]">
+            <Panel title="组内订单" className={variant === 'vehicle' ? 'h-[36%] min-h-0' : 'h-[56%] min-h-[320px]'}>
                 <div className="flex h-full min-h-0 flex-col">
                     <AutoScrollList
                         enabled={shouldAutoScrollOrders}
-                        resetKey={`${roadGroup.groupId ?? 'none'}-${orderSummaries.length}`}
+                        resetKey={`${roadGroup.groupId ?? 'none'}-${visibleOrderSummaries.length}`}
                         speedPxPerSecond={30}
                     >
                         <div className="space-y-2">
-                        {orderSummaries.map((order, index) => (
+                        {visibleOrderSummaries.map((order, index) => (
                             <div
                                 key={`${order.id}-${index}`}
                                 className="rounded border border-white/5 bg-white/[0.025] px-3 py-2 text-xs"
@@ -509,34 +556,45 @@ function RoadGroupRightPanels({ roadGroup }: { roadGroup: RoadGroupPanelState })
     const unfinishedRoutes = routes.filter((route) => !(route.status === '已完成' || route.status === 'finished'));
     const sortedUnfinished = [...unfinishedRoutes].sort((a, b) => routeProgress(b) - routeProgress(a));
     const visibleUnfinished = sortedUnfinished.slice(0, 40);
-    const shouldAutoScroll = visibleUnfinished.length > 5;
+    const shouldAutoScroll = visibleUnfinished.length > 4;
     const recentFinished = finishedRoutes.slice(-4);
 
     const renderRouteCard = (route: RouteOrder, keySuffix = '') => {
         const progress = routeProgress(route);
+        const tones = [
+            { border: 'border-l-sky-300', plate: 'text-sky-100', dot: 'bg-sky-300', glow: 'shadow-sky-950/30' },
+            { border: 'border-l-amber-300', plate: 'text-amber-100', dot: 'bg-amber-300', glow: 'shadow-amber-950/30' },
+            { border: 'border-l-emerald-300', plate: 'text-emerald-100', dot: 'bg-emerald-300', glow: 'shadow-emerald-950/30' },
+            { border: 'border-l-rose-300', plate: 'text-rose-100', dot: 'bg-rose-300', glow: 'shadow-rose-950/30' },
+        ];
+        const toneIndex = Array.from(route.lineId).reduce((sum, char) => sum + char.charCodeAt(0), 0) % tones.length;
+        const tone = tones[toneIndex];
         return (
             <div
                 key={`${route.lineId}${keySuffix}`}
-                className="rounded border border-white/5 bg-white/[0.025] px-2 py-2 text-xs"
+                className={`rounded border border-white/10 border-l-2 ${tone.border} bg-slate-900/82 px-3 py-3 text-xs shadow-lg ${tone.glow}`}
             >
                 <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-cyan-200" title={route.plate}>{route.plate}</span>
-                    <span className="rounded border border-emerald-300/20 px-1.5 py-0.5 text-[10px] text-emerald-200">
+                    <span className={`flex min-w-0 items-center gap-2 truncate text-sm font-semibold ${tone.plate}`} title={route.plate}>
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${tone.dot} shadow-[0_0_9px_currentColor]`} />
+                        {route.plate}
+                    </span>
+                    <span className="rounded border border-emerald-300/25 bg-emerald-300/8 px-2 py-0.5 text-[10px] text-emerald-200">
                         {route.status}
                     </span>
                 </div>
-                <div className="mt-1 truncate text-slate-400" title={`${route.from} → ${route.to}`}>
+                <div className="mt-2 truncate text-[11px] text-slate-300" title={`${route.from} → ${route.to}`}>
                     {route.from} → {route.to}
                 </div>
-                <div className="mt-2 flex items-center gap-2">
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-800/80">
+                <div className="mt-3 flex items-center gap-2">
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-950/90 ring-1 ring-white/5">
                         <div className="h-full rounded-full bg-gradient-to-r from-cyan-300 via-sky-400 to-emerald-300 shadow-[0_0_10px_rgba(34,211,238,0.45)] transition-all duration-500" style={{ width: `${progress}%` }} />
                     </div>
                     <span className="w-20 text-right text-[10px] tabular-nums text-slate-400">
                         {routeDistanceText(route, progress)}
                     </span>
                 </div>
-                <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
+                <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
                     <span>{routeEtaText(route, progress)}</span>
                     <span>
                         {Number.isFinite(Number(routeDisplayData(route).speedKmh))
@@ -605,13 +663,14 @@ function DashboardSidePanels({
         isHoldingPreviousRoadGroup,
     } = useRoadGroupPanelTransition(roadGroup, isRoadGroupFading);
 
-    const leftWidthClass = isWarehouseMode ? 'w-[18%] min-w-[220px] max-w-[300px]' : 'w-[22%] min-w-[280px] max-w-[360px]';
-    const rightWidthClass = isWarehouseMode ? 'w-[20%] min-w-[240px] max-w-[320px]' : 'w-[25%] min-w-[320px] max-w-[400px]';
+    const panelWidthClass = isWarehouseMode
+        ? 'w-[19%] min-w-[230px] max-w-[320px]'
+        : 'w-[23%] min-w-[280px] max-w-[420px]';
     const roadPanelTransitionClass = isHoldingPreviousRoadGroup ? 'translate-y-1 opacity-60' : 'translate-y-0 opacity-100';
 
     return (
         <div className={`pointer-events-none absolute inset-y-20 left-4 right-4 z-30 flex justify-between gap-4 transition-all duration-500 ${visible ? 'opacity-100' : 'opacity-0'}`}>
-            <div className={`${visible ? 'pointer-events-auto translate-x-0' : 'pointer-events-none -translate-x-4'} flex min-h-0 ${leftWidthClass} flex-col gap-3 transition-transform duration-500`}>
+            <div className={`${visible ? 'pointer-events-auto translate-x-0' : 'pointer-events-none -translate-x-4'} flex min-h-0 ${panelWidthClass} flex-col gap-3 transition-transform duration-500`}>
                 {mode === 'warehouse_focus' && warehouseFocus && <WarehouseLeftPanels focus={warehouseFocus} />}
                 {mode === 'road_group_focus' && displayRoadGroup && (
                     <div className={`flex min-h-0 flex-1 flex-col gap-3 transition-all duration-500 ${roadPanelTransitionClass}`}>
@@ -621,7 +680,7 @@ function DashboardSidePanels({
                     </div>
                 )}
             </div>
-            <div className={`${visible ? 'pointer-events-auto translate-x-0' : 'pointer-events-none translate-x-4'} flex min-h-0 ${rightWidthClass} flex-col gap-3 transition-transform duration-500`}>
+            <div className={`${visible ? 'pointer-events-auto translate-x-0' : 'pointer-events-none translate-x-4'} flex min-h-0 ${panelWidthClass} flex-col gap-3 transition-transform duration-500`}>
                 {mode === 'warehouse_focus' && warehouseFocus && <WarehouseRightPanels focus={warehouseFocus} />}
                 {mode === 'road_group_focus' && displayRoadGroup && (
                     <div className={`flex min-h-0 flex-1 flex-col transition-all duration-500 ${roadPanelTransitionClass}`}>
