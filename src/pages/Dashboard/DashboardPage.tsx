@@ -26,6 +26,7 @@ import {
 function DashboardPage() {
     const [isDispatching, setIsDispatching] = useState(false);
     const [view, setView] = useState<ViewMode>('chinaMap');
+    const [isChinaMapVisualReady, setIsChinaMapVisualReady] = useState(false);
     const [isRoadMapVisualReady, setIsRoadMapVisualReady] = useState(false);
     const [isRoadMap2VisualReady, setIsRoadMap2VisualReady] = useState(false);
     const mapRef = useRef<ChinaMap3DHandle>(null);
@@ -38,13 +39,16 @@ function DashboardPage() {
     const pendingRoadMapRefreshGroupIdRef = useRef<string | null | undefined>(undefined);
     const roadGroupFinishedHandlerRef = useRef<(lineId: string) => void>(() => {});
     const bulkRoadGroupRefreshTimerRef = useRef<number | null>(null);
+    const chinaMapPrepareRunRef = useRef(0);
     const requestViewChange = useCallback((nextView: ViewMode) => {
         if (view === nextView) return;
+        chinaMapPrepareRunRef.current += 1;
+        setIsChinaMapVisualReady(false);
         setIsRoadMapVisualReady(false);
         setIsRoadMap2VisualReady(false);
         setView(nextView);
     }, [view]);
-    const handleChinaMapVisualReady = useCallback(() => {}, []);
+    const handleChinaMapVisualReady = useCallback(() => setIsChinaMapVisualReady(true), []);
     const handleRoadMapVisualReady = useCallback(() => setIsRoadMapVisualReady(true), []);
     const handleRoadMap2VisualReady = useCallback(() => setIsRoadMap2VisualReady(true), []);
     const handleRoadGroupRouteFinished = useCallback((lineId: string) => {
@@ -58,6 +62,7 @@ function DashboardPage() {
         handleWarehouseTourStateChange,
         handleCameraControl,
         handleWarehouseFocus,
+        requestWarehouseSnapshot,
     } = useWarehouseController({
         mapRef,
     });
@@ -226,6 +231,35 @@ function DashboardPage() {
         if (view !== 'roadMap' || !isRoadMapVisualReady) return;
         void requestRoadMapSnapshot();
     }, [isRoadMapVisualReady, requestRoadMapSnapshot, view]);
+
+    useEffect(() => {
+        if (view !== 'chinaMap' || !isChinaMapVisualReady) return;
+
+        const prepareRunId = chinaMapPrepareRunRef.current + 1;
+        chinaMapPrepareRunRef.current = prepareRunId;
+        let retryTimer: number | null = null;
+        const isCurrentPrepareRun = () => (
+            chinaMapPrepareRunRef.current === prepareRunId
+        );
+        const prepareWarehouseTour = () => {
+            void requestWarehouseSnapshot({
+                isCurrentPrepareRun,
+                onDataReady: () => {},
+                onPrepareFailed: () => {
+                    if (!isCurrentPrepareRun()) return;
+                    retryTimer = window.setTimeout(prepareWarehouseTour, 5_000);
+                },
+            });
+        };
+
+        prepareWarehouseTour();
+        return () => {
+            if (chinaMapPrepareRunRef.current === prepareRunId) {
+                chinaMapPrepareRunRef.current += 1;
+            }
+            if (retryTimer !== null) window.clearTimeout(retryTimer);
+        };
+    }, [isChinaMapVisualReady, requestWarehouseSnapshot, view]);
 
     const renderCenterPanel = () => (
         <DashboardCenterPanel
