@@ -44,6 +44,8 @@ const TRUCK_MODEL_URL = '/models/rm2-truck.glb';
 const TRUCK_MODEL_SCALE = 1;
 const TRUCK_MODEL_Y_OFFSET = -0.31;
 const VEHICLE_UPGRADE_MS = 420;
+const NORTH_UP_MAX_FIT_DISTANCE = 320;
+const NORTH_UP_VIEW_DIRECTION = new THREE.Vector3(0, 0.82, -0.58).normalize();
 
 let truckTemplatePromise: Promise<THREE.Object3D> | null = null;
 
@@ -419,12 +421,17 @@ export function useRoadControls(
         const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
         const fitFov = Math.max(THREE.MathUtils.degToRad(10), Math.min(verticalFov, horizontalFov));
         const fitDistance = Math.max(36, (Math.max(sphere.radius, 1) / Math.sin(fitFov / 2)) * 1.18);
-        const viewDirection = camera.position.clone().sub(controls.target);
-        if (viewDirection.lengthSq() < 0.001) viewDirection.set(-0.34, 0.82, 1);
-        viewDirection.normalize();
-        if (viewDirection.y < 0.28) {
-            viewDirection.y = 0.28;
+        const useNorthUpView = fitDistance <= NORTH_UP_MAX_FIT_DISTANCE;
+        const viewDirection = useNorthUpView
+            ? NORTH_UP_VIEW_DIRECTION.clone()
+            : camera.position.clone().sub(controls.target);
+        if (!useNorthUpView) {
+            if (viewDirection.lengthSq() < 0.001) viewDirection.set(-0.34, 0.82, 1);
             viewDirection.normalize();
+            if (viewDirection.y < 0.28) {
+                viewDirection.y = 0.28;
+                viewDirection.normalize();
+            }
         }
 
         const targetPosition = center.clone().addScaledVector(viewDirection, fitDistance);
