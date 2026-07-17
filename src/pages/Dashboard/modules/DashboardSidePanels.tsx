@@ -514,12 +514,15 @@ function useRoadGroupPanelTransition(
 
 function VehicleTransportDetails({
     roadGroup,
+    activeVehicleLineId,
+    onVehicleSelect,
     onActiveVehicleChange,
 }: {
     roadGroup: RoadGroupPanelState;
+    activeVehicleLineId: string | null;
+    onVehicleSelect: (lineId: string) => void;
     onActiveVehicleChange?: (lineId: string | null) => void;
 }) {
-    const [cycleIndex, setCycleIndex] = useState(0);
     const detailRoutes = useMemo(() => {
         const running = roadGroup.routes.filter((route) => (
             route.status !== '已完成' && route.status !== 'finished'
@@ -529,9 +532,10 @@ function VehicleTransportDetails({
         ));
         return [...running, ...finished];
     }, [roadGroup.routes]);
-    const targetRoute = detailRoutes.length > 0
-        ? detailRoutes[cycleIndex % detailRoutes.length]
-        : undefined;
+    const detailRouteIds = detailRoutes.map((route) => route.lineId).join('\u0000');
+    const selectedIndex = detailRoutes.findIndex((route) => route.lineId === activeVehicleLineId);
+    const targetIndex = selectedIndex >= 0 ? selectedIndex : 0;
+    const targetRoute = detailRoutes[targetIndex];
     const targetTone = routeTone(targetRoute, roadGroup.routes);
     const fromAddress = splitAdministrativeAddress(targetRoute?.from);
     const toAddress = splitAdministrativeAddress(targetRoute?.to);
@@ -547,10 +551,12 @@ function VehicleTransportDetails({
     useEffect(() => {
         if (detailRoutes.length <= 1) return;
         const timer = window.setInterval(() => {
-            setCycleIndex((index) => index + 1);
+            const routeLineIds = detailRouteIds.split('\u0000').filter(Boolean);
+            const nextIndex = (targetIndex + 1) % routeLineIds.length;
+            onVehicleSelect(routeLineIds[nextIndex]);
         }, 15_000);
         return () => window.clearInterval(timer);
-    }, [detailRoutes.length, roadGroup.groupId]);
+    }, [activeVehicleLineId, detailRouteIds, detailRoutes.length, onVehicleSelect, targetIndex]);
 
     return (
         <Panel title="车辆运输详情" className="h-full min-h-0">
@@ -578,7 +584,7 @@ function VehicleTransportDetails({
                     </div>
                     <div className="shrink-0 text-right">
                         <div className="text-[10px] tabular-nums text-slate-500">
-                            {detailRoutes.length > 0 ? `${cycleIndex % detailRoutes.length + 1} / ${detailRoutes.length}` : '0 / 0'}
+                            {detailRoutes.length > 0 ? `${targetIndex + 1} / ${detailRoutes.length}` : '0 / 0'}
                         </div>
                         <div className="mt-1 rounded border border-emerald-300/25 bg-emerald-300/8 px-2 py-0.5 text-[10px] text-emerald-200">
                             {targetRoute?.status || '等待数据'}
@@ -687,10 +693,14 @@ function VehicleTransportDetails({
 function RoadGroupLeftPanels({
     roadGroup,
     variant,
+    activeVehicleLineId,
+    onVehicleSelect,
     onActiveVehicleChange,
 }: {
     roadGroup: RoadGroupPanelState;
     variant: 'aggregate' | 'vehicle';
+    activeVehicleLineId: string | null;
+    onVehicleSelect: (lineId: string) => void;
     onActiveVehicleChange?: (lineId: string | null) => void;
 }) {
     const routes = roadGroup.routes;
@@ -706,7 +716,14 @@ function RoadGroupLeftPanels({
     const shouldAutoScrollOrders = variant === 'aggregate' && visibleOrderSummaries.length >= 4;
 
     if (variant === 'vehicle') {
-        return <VehicleTransportDetails roadGroup={roadGroup} onActiveVehicleChange={onActiveVehicleChange} />;
+        return (
+            <VehicleTransportDetails
+                roadGroup={roadGroup}
+                activeVehicleLineId={activeVehicleLineId}
+                onVehicleSelect={onVehicleSelect}
+                onActiveVehicleChange={onActiveVehicleChange}
+            />
+        );
     }
 
     return (
@@ -765,9 +782,13 @@ function RoadGroupLeftPanels({
 function RoadGroupRightPanels({
     roadGroup,
     variant,
+    activeVehicleLineId,
+    onVehicleSelect,
 }: {
     roadGroup: RoadGroupPanelState;
     variant: 'aggregate' | 'vehicle';
+    activeVehicleLineId: string | null;
+    onVehicleSelect: (lineId: string) => void;
 }) {
     const routes = roadGroup.routes;
     const finishedRoutes = routes.filter((route) => route.status === '已完成' || route.status === 'finished');
@@ -789,11 +810,24 @@ function RoadGroupRightPanels({
     const renderRouteCard = (route: RouteOrder, keySuffix = '') => {
         const progress = routeProgress(route);
         const tone = routeTone(route, routes);
+        const isSelected = variant === 'vehicle' && route.lineId === activeVehicleLineId;
         return (
-            <div
+            <button
+                type="button"
                 key={`${route.lineId}${keySuffix}`}
-                className="rounded border border-white/10 border-l-2 bg-slate-900/82 px-3 py-3 text-xs shadow-lg"
-                style={{ borderLeftColor: tone.color, boxShadow: `0 10px 20px ${tone.glow}` }}
+                disabled={variant !== 'vehicle'}
+                aria-pressed={variant === 'vehicle' ? isSelected : undefined}
+                onClick={() => onVehicleSelect(route.lineId)}
+                className={`w-full rounded border border-l-2 px-3 py-3 text-left text-xs shadow-lg transition-[background-color,border-color,box-shadow,transform] duration-200 ${
+                    isSelected
+                        ? 'border-white/25 -translate-x-0.5'
+                        : 'border-white/10 bg-slate-900/82'
+                } ${variant === 'vehicle' ? 'cursor-pointer hover:border-white/20 hover:bg-slate-800/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70' : ''}`}
+                style={{
+                    borderLeftColor: tone.color,
+                    backgroundColor: isSelected ? tone.surface : undefined,
+                    boxShadow: isSelected ? `0 0 0 1px ${tone.color}, 0 12px 24px ${tone.glow}` : `0 10px 20px ${tone.glow}`,
+                }}
             >
                 <div className="flex items-center justify-between gap-2">
                     <span className="flex min-w-0 items-center gap-2 truncate text-sm font-semibold" style={{ color: tone.color }} title={route.plate}>
@@ -826,7 +860,7 @@ function RoadGroupRightPanels({
                             : '-- km/h'}
                     </span>
                 </div>
-            </div>
+            </button>
         );
     };
 
@@ -872,16 +906,24 @@ function RoadGroupRightPanels({
                         <div className="space-y-1">
                             <div className="mb-1 text-xs font-semibold text-cyan-300">已完成车辆</div>
                             {recentFinished.map((route) => (
-                                <div
+                                <button
+                                    type="button"
                                     key={`finished-${route.lineId}`}
-                                    className="flex items-center justify-between gap-2 rounded border border-emerald-300/10 bg-emerald-300/5 px-2 py-1 text-xs"
+                                    disabled={variant !== 'vehicle'}
+                                    aria-pressed={variant === 'vehicle' ? route.lineId === activeVehicleLineId : undefined}
+                                    onClick={() => onVehicleSelect(route.lineId)}
+                                    className={`flex w-full items-center justify-between gap-2 rounded border px-2 py-1 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${
+                                        route.lineId === activeVehicleLineId
+                                            ? 'border-emerald-200/45 bg-emerald-300/15'
+                                            : 'border-emerald-300/10 bg-emerald-300/5'
+                                    } ${variant === 'vehicle' ? 'cursor-pointer hover:bg-emerald-300/10' : ''}`}
                                 >
                                     <span className="truncate font-medium text-cyan-200" title={route.plate}>{route.plate}</span>
                                     <span className="truncate text-[11px] text-slate-400" title={`${route.from} → ${route.to}`}>
                                         {route.from} → {route.to}
                                     </span>
                                     <span className="flex shrink-0 items-center gap-1 text-[11px] text-emerald-300"><span aria-hidden="true">✓</span>完成</span>
-                                </div>
+                                </button>
                             ))}
                         </div>
                     ) : (
@@ -903,6 +945,7 @@ function DashboardSidePanels({
     isRoadGroupFading = false,
     onActiveVehicleChange,
 }: DashboardSidePanelsProps) {
+    const [selectedVehicleLineId, setSelectedVehicleLineId] = useState<string | null>(null);
     const visible = mode !== 'hidden';
     const isWarehouseMode = mode === 'warehouse_focus';
     const {
@@ -910,6 +953,12 @@ function DashboardSidePanels({
         transitionKey,
         isHoldingPreviousRoadGroup,
     } = useRoadGroupPanelTransition(roadGroup, isRoadGroupFading);
+    const firstRunningVehicle = displayRoadGroup?.routes.find((route) => (
+        route.status !== '已完成' && route.status !== 'finished'
+    ));
+    const activeVehicleLineId = displayRoadGroup?.routes.some((route) => route.lineId === selectedVehicleLineId)
+        ? selectedVehicleLineId
+        : firstRunningVehicle?.lineId ?? displayRoadGroup?.routes[0]?.lineId ?? null;
 
     const panelWidthClass = isWarehouseMode
         ? 'w-[19%] min-w-[230px] max-w-[320px]'
@@ -926,6 +975,8 @@ function DashboardSidePanels({
                             <RoadGroupLeftPanels
                                 roadGroup={displayRoadGroup}
                                 variant={roadPanelVariant}
+                                activeVehicleLineId={activeVehicleLineId}
+                                onVehicleSelect={setSelectedVehicleLineId}
                                 onActiveVehicleChange={onActiveVehicleChange}
                             />
                         </div>
@@ -937,7 +988,12 @@ function DashboardSidePanels({
                 {mode === 'road_group_focus' && displayRoadGroup && (
                     <div className={`flex min-h-0 flex-1 flex-col transition-all duration-500 ${roadPanelTransitionClass}`}>
                         <div key={`right-${transitionKey}`} className="flex min-h-0 flex-1 flex-col">
-                            <RoadGroupRightPanels roadGroup={displayRoadGroup} variant={roadPanelVariant} />
+                            <RoadGroupRightPanels
+                                roadGroup={displayRoadGroup}
+                                variant={roadPanelVariant}
+                                activeVehicleLineId={activeVehicleLineId}
+                                onVehicleSelect={setSelectedVehicleLineId}
+                            />
                         </div>
                     </div>
                 )}
