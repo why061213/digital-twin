@@ -41,7 +41,7 @@ const UNIFIED_COLORS = [
 ];
 
 const TRUCK_MODEL_URL = '/models/rm2-truck.glb';
-const TRUCK_MODEL_SCALE = 1;
+const TRUCK_MODEL_SCALE = 0.25;
 const TRUCK_MODEL_Y_OFFSET = -0.31;
 const VEHICLE_UPGRADE_MS = 420;
 let truckTemplatePromise: Promise<THREE.Object3D> | null = null;
