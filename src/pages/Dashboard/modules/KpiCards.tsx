@@ -1,16 +1,11 @@
 import { useEffect, useState } from 'react';
 import DigitalFlop from '@/components/DigitalFlop/DigitalFlop';
 import { API_BASE_URL } from '../constants';
-
-type DailyOrderStatistics = {
-    businessDate: string;
-    deliveryTotalTons: number;
-    dispatchedVehicleCount: number;
-    totalOrderCount: number;
-    arrivedVehicleCount: number;
-    windowStartedAt?: string;
-    lastUpdatedAt?: string | null;
-};
+import {
+    DAILY_KPI_EVENT,
+    isDailyOrderStatistics,
+    type DailyOrderStatistics,
+} from '../services/dashboardKpi';
 
 const EMPTY_STATISTICS: DailyOrderStatistics = {
     businessDate: '',
@@ -18,6 +13,7 @@ const EMPTY_STATISTICS: DailyOrderStatistics = {
     dispatchedVehicleCount: 0,
     totalOrderCount: 0,
     arrivedVehicleCount: 0,
+    revision: -1,
 };
 
 function KpiCards() {
@@ -39,8 +35,10 @@ function KpiCards() {
                 if (!response.ok) {
                     throw new Error(`Daily KPI request failed: ${response.status}`);
                 }
-                const data = await response.json() as DailyOrderStatistics;
-                if (!disposed) setStatistics(data);
+                const data: unknown = await response.json();
+                if (!disposed && isDailyOrderStatistics(data)) {
+                    setStatistics((current) => data.revision >= current.revision ? data : current);
+                }
             } catch (error) {
                 if (!disposed && !controller.signal.aborted) {
                     console.warn('[Dashboard KPI] load failed', error);
@@ -59,6 +57,13 @@ function KpiCards() {
             }, nextMidnight.getTime() - now.getTime());
         };
 
+        const handleRealtimeStatistics = (event: Event) => {
+            const data = (event as CustomEvent<unknown>).detail;
+            if (!isDailyOrderStatistics(data)) return;
+            setStatistics((current) => data.revision >= current.revision ? data : current);
+        };
+
+        window.addEventListener(DAILY_KPI_EVENT, handleRealtimeStatistics);
         void loadStatistics();
         const pollTimer = window.setInterval(() => void loadStatistics(), 30_000);
         scheduleMidnightReset();
@@ -66,6 +71,7 @@ function KpiCards() {
         return () => {
             disposed = true;
             activeController?.abort();
+            window.removeEventListener(DAILY_KPI_EVENT, handleRealtimeStatistics);
             window.clearInterval(pollTimer);
             if (midnightTimer !== null) window.clearTimeout(midnightTimer);
         };

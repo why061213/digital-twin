@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { RouteSnapshotChangedMessage } from '../services/renderRouteApi';
+import { DAILY_KPI_EVENT, isDailyOrderStatistics } from '../services/dashboardKpi';
 import type { ViewMode } from '../types';
 
 type CityRaiseMessage = {
@@ -299,6 +300,11 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
 
             if (message.type === 'vehicle_positions') {
                 optionsRef.current.onVehiclePositions?.(message as VehiclePositionsMessage);
+                return;
+            }
+
+            if (message.type === 'daily_kpis' && isDailyOrderStatistics(message)) {
+                window.dispatchEvent(new CustomEvent(DAILY_KPI_EVENT, { detail: message }));
                 return;
             }
 
