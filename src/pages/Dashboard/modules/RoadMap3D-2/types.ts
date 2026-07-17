@@ -13,6 +13,7 @@ export type RoadMap3DHandle = {
     setDirectionRegions: (directionKey: string, mapKeys: string[]) => Promise<void>;
     clearDirectionRegions: () => void;
     updateTruckPosition: (lineId: string, position: [number, number], info?: RoadObjectInfo) => void;
+    setHighlightedVehicle: (lineId: string | null) => void;
     refreshAllPositions: () => void;
 };
 
@@ -28,6 +29,7 @@ export type RoadObjectInfo = {
     orderFamilyId?: string;
     orderName?: string;
     pathKey?: string;
+    directionDeg?: number;
     manualMarker?: boolean;
 };
 
@@ -39,6 +41,9 @@ export type VehicleBarState = {
     progress: number;
     currentCoords: [number, number];
     info: RoadObjectInfo;
+    upgradeProgress: number;
+    upgradeAnimationFrame?: number;
+    truckVisual?: THREE.Group;
 };
 
 export type OrderLaneState = {

@@ -31,6 +31,9 @@ function DashboardPage() {
     const mapRef = useRef<ChinaMap3DHandle>(null);
     const roadMapRef = useRef<RoadMap3D1Handle>(null);
     const roadMap2Ref = useRef<RoadMap3D2Handle>(null);
+    const handleActiveRm2VehicleChange = useCallback((lineId: string | null) => {
+        roadMap2Ref.current?.setHighlightedVehicle(lineId);
+    }, []);
     const skipNextRoadMapRefreshRef = useRef(false);
     const pendingRoadMapRefreshGroupIdRef = useRef<string | null | undefined>(undefined);
     const roadGroupFinishedHandlerRef = useRef<(lineId: string) => void>(() => {});
@@ -337,6 +340,7 @@ function DashboardPage() {
                         roadGroup={displayedRoadPanelState}
                         roadPanelVariant={view === 'roadMap2' ? 'vehicle' : 'aggregate'}
                         isRoadGroupFading={view === 'roadMap' ? isRoadGroupFading : false}
+                        onActiveVehicleChange={view === 'roadMap2' ? handleActiveRm2VehicleChange : undefined}
                     />
                     {roadGroupQueue}
                     {rm2GroupQueue}

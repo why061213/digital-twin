@@ -34,6 +34,7 @@ const RoadMap3D = forwardRef<RoadMap3DHandle, RoadMap3DProps>(({ onVisualReady }
         setDirectionRegions: mapScene.setDirectionRegions,
         clearDirectionRegions: mapScene.clearDirectionRegions,
         updateTruckPosition: controls.updateTruckPosition,
+        setHighlightedVehicle: controls.setHighlightedVehicle,
         refreshAllPositions: controls.refreshAllPositions,
     }), [
         controls.setRoadPath,
@@ -48,6 +49,7 @@ const RoadMap3D = forwardRef<RoadMap3DHandle, RoadMap3DProps>(({ onVisualReady }
         mapScene.setDirectionRegions,
         mapScene.clearDirectionRegions,
         controls.updateTruckPosition,
+        controls.setHighlightedVehicle,
         controls.refreshAllPositions,
     ]);
 

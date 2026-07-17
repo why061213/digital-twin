@@ -96,6 +96,7 @@ export function useTruckPositionController({
             orderFamilyId: route.orderFamilyId,
             orderName: route.orderName,
             pathKey: route.pathKey,
+            directionDeg: route.directionDeg,
         });
     }, [roadMapRef]);
 
@@ -112,6 +113,7 @@ export function useTruckPositionController({
             orderFamilyId: route.orderFamilyId,
             orderName: route.orderName,
             pathKey: route.pathKey,
+            directionDeg: route.directionDeg,
         });
     }, [roadMapRef]);
 

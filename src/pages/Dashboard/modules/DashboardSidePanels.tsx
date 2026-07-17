@@ -28,6 +28,7 @@ type DashboardSidePanelsProps = {
     roadGroup: RoadGroupPanelState | null;
     roadPanelVariant?: 'aggregate' | 'vehicle';
     isRoadGroupFading?: boolean;
+    onActiveVehicleChange?: (lineId: string | null) => void;
 };
 
 type RouteDisplayData = RouteOrder & {
@@ -442,7 +443,13 @@ function useRoadGroupPanelTransition(
     };
 }
 
-function VehicleTransportDetails({ roadGroup }: { roadGroup: RoadGroupPanelState }) {
+function VehicleTransportDetails({
+    roadGroup,
+    onActiveVehicleChange,
+}: {
+    roadGroup: RoadGroupPanelState;
+    onActiveVehicleChange?: (lineId: string | null) => void;
+}) {
     const [cycleIndex, setCycleIndex] = useState(0);
     const detailRoutes = useMemo(() => {
         const running = roadGroup.routes.filter((route) => (
@@ -456,6 +463,14 @@ function VehicleTransportDetails({ roadGroup }: { roadGroup: RoadGroupPanelState
     const targetRoute = detailRoutes.length > 0
         ? detailRoutes[cycleIndex % detailRoutes.length]
         : undefined;
+
+    useEffect(() => {
+        onActiveVehicleChange?.(targetRoute?.lineId ?? null);
+    }, [onActiveVehicleChange, targetRoute?.lineId]);
+
+    useEffect(() => () => {
+        onActiveVehicleChange?.(null);
+    }, [onActiveVehicleChange]);
 
     useEffect(() => {
         if (detailRoutes.length <= 1) return;
@@ -575,9 +590,11 @@ function VehicleTransportDetails({ roadGroup }: { roadGroup: RoadGroupPanelState
 function RoadGroupLeftPanels({
     roadGroup,
     variant,
+    onActiveVehicleChange,
 }: {
     roadGroup: RoadGroupPanelState;
     variant: 'aggregate' | 'vehicle';
+    onActiveVehicleChange?: (lineId: string | null) => void;
 }) {
     const routes = roadGroup.routes;
     const routeCount = uniqueRouteCount(routes);
@@ -592,7 +609,7 @@ function RoadGroupLeftPanels({
     const shouldAutoScrollOrders = variant === 'aggregate' && visibleOrderSummaries.length >= 4;
 
     if (variant === 'vehicle') {
-        return <VehicleTransportDetails roadGroup={roadGroup} />;
+        return <VehicleTransportDetails roadGroup={roadGroup} onActiveVehicleChange={onActiveVehicleChange} />;
     }
 
     return (
@@ -784,6 +801,7 @@ function DashboardSidePanels({
     roadGroup,
     roadPanelVariant = 'aggregate',
     isRoadGroupFading = false,
+    onActiveVehicleChange,
 }: DashboardSidePanelsProps) {
     const visible = mode !== 'hidden';
     const isWarehouseMode = mode === 'warehouse_focus';
@@ -805,7 +823,11 @@ function DashboardSidePanels({
                 {mode === 'road_group_focus' && displayRoadGroup && (
                     <div className={`flex min-h-0 flex-1 flex-col gap-3 transition-all duration-500 ${roadPanelTransitionClass}`}>
                         <div key={`left-${transitionKey}`} className="flex min-h-0 flex-1 flex-col gap-3">
-                            <RoadGroupLeftPanels roadGroup={displayRoadGroup} variant={roadPanelVariant} />
+                            <RoadGroupLeftPanels
+                                roadGroup={displayRoadGroup}
+                                variant={roadPanelVariant}
+                                onActiveVehicleChange={onActiveVehicleChange}
+                            />
                         </div>
                     </div>
                 )}

@@ -21,6 +21,7 @@ export type RoadObjectInfo = {
     orderFamilyId?: string;
     orderName?: string;
     pathKey?: string;
+    directionDeg?: number;
     manualMarker?: boolean;
 };
 
