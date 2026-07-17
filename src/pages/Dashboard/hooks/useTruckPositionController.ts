@@ -16,14 +16,17 @@ import {
     applyTruckPositionToRoute,
     buildCargo,
     buildPlate,
-    hashText,
+    FALLBACK_TRUCK_SPEED_KMH,
     initialPositionQueryDelay,
     pathLength,
     pathLengthKm,
+    pathSpeedFromKmh,
     predictedDistance,
     predictedPosition,
     projectDistanceOnPath,
     routeProgressPatch,
+    safeTravelDurationMs,
+    trustedTruckSpeedKmh,
 } from '../utils';
 
 type RoadMapMotionHandle = {
@@ -123,13 +126,17 @@ export function useTruckPositionController({
 
             const now = performance.now();
             const existing = activeRoutesRef.current.get(message.lineId);
-            const fallbackDuration = Math.max(
-                POSITION_QUERY_INTERVAL_MS * 2,
-                message.travelDurationMs ?? 14_000 + (hashText(message.lineId) % 9_000)
-            );
             const totalPathLength = pathLength(message.coordinates);
             const routeLengthKm = message.routeLengthKm ?? pathLengthKm(message.coordinates);
-            const speedKmh = message.speedKmh ?? existing?.speedKmh ?? null;
+            const speedKmh = trustedTruckSpeedKmh(message.speedKmh)
+                ?? trustedTruckSpeedKmh(existing?.speedKmh)
+                ?? FALLBACK_TRUCK_SPEED_KMH;
+            const fallbackDuration = safeTravelDurationMs(
+                routeLengthKm,
+                message.travelDurationMs,
+                speedKmh,
+            );
+            const pathSpeed = pathSpeedFromKmh(totalPathLength, routeLengthKm, speedKmh);
 
             if (existing) {
                 const currentPosition = predictedPosition(existing, now);
@@ -155,6 +162,7 @@ export function useTruckPositionController({
                     coordinates: message.coordinates,
                     calibratedAt: now,
                     calibratedDistance: projectDistanceOnPath(message.coordinates, currentPosition),
+                    pathSpeed,
                     pathLength: totalPathLength,
                     speedKmh,
                     arrivalCheckRequested: false,
@@ -193,7 +201,7 @@ export function useTruckPositionController({
                 coordinates: message.coordinates,
                 calibratedAt: now,
                 calibratedDistance: initialDistance,
-                pathSpeed: totalPathLength / fallbackDuration,
+                pathSpeed,
                 pathLength: totalPathLength,
                 speedKmh: cachedPosition?.speedKmh ?? speedKmh,
                 arrivalCheckRequested: false,

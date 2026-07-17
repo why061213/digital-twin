@@ -81,6 +81,45 @@ export function pathLengthKm(coordinates: LonLat[]) {
     return total;
 }
 
+export const FALLBACK_TRUCK_SPEED_KMH = 60;
+export const MAX_TRUSTED_TRUCK_SPEED_KMH = 130;
+const MIN_MEASURED_SPEED_INTERVAL_MS = 5_000;
+
+export function trustedTruckSpeedKmh(value: unknown): number | null {
+    const speed = Number(value);
+    return Number.isFinite(speed) && speed >= 0 && speed <= MAX_TRUSTED_TRUCK_SPEED_KMH
+        ? speed
+        : null;
+}
+
+export function pathSpeedFromKmh(
+    pathLengthValue: number,
+    routeLengthKm: number,
+    speedKmh: number,
+) {
+    if (pathLengthValue <= 0 || routeLengthKm <= 0 || speedKmh <= 0) return 0;
+    return pathLengthValue * speedKmh / routeLengthKm / 3_600_000;
+}
+
+export function safeTravelDurationMs(
+    routeLengthKm: number,
+    suppliedDurationMs: unknown,
+    speedKmh: number,
+) {
+    const duration = Number(suppliedDurationMs);
+    const impliedSpeedKmh = duration > 0 && routeLengthKm > 0
+        ? routeLengthKm / duration * 3_600_000
+        : Number.POSITIVE_INFINITY;
+    if (Number.isFinite(duration)
+        && duration >= 60_000
+        && impliedSpeedKmh <= MAX_TRUSTED_TRUCK_SPEED_KMH) {
+        return duration;
+    }
+    return routeLengthKm > 0
+        ? Math.max(60_000, routeLengthKm / Math.max(1, speedKmh) * 3_600_000)
+        : 60_000;
+}
+
 type RouteCorridorResult = {
     inside: boolean;
     nearestSegmentIndex: number;
@@ -257,21 +296,21 @@ export function routeProgressPatch(route: ActiveRoute, now: number) {
 
 export function applyTruckPositionToRoute(route: ActiveRoute, message: TruckPositionMessage, now: number) {
     if (!message.position) return;
-    const pushedVelocity = message.velocity ?? message.speed;
     const elapsedSinceLastCalibration = now - route.calibratedAt;
     const nextDistance = projectDistanceOnPath(route.coordinates, message.position);
-    const measuredPathSpeed = elapsedSinceLastCalibration > 0
+    const measuredPathSpeed = elapsedSinceLastCalibration >= MIN_MEASURED_SPEED_INTERVAL_MS
         ? Math.max(0, (nextDistance - route.calibratedDistance) / elapsedSinceLastCalibration)
-        : route.pathSpeed;
-    const measuredSpeedKmh = elapsedSinceLastCalibration > 0 && route.pathLength > 0
+        : null;
+    const measuredSpeedKmh = measuredPathSpeed !== null && route.pathLength > 0
         ? measuredPathSpeed / route.pathLength * route.routeLengthKm * 3_600_000
         : null;
-    const pushedPathSpeed = pushedVelocity
-        ? Math.sqrt(pushedVelocity[0] * pushedVelocity[0] + pushedVelocity[1] * pushedVelocity[1])
-        : null;
+    const trustedSpeedKmh = trustedTruckSpeedKmh(message.speedKmh)
+        ?? trustedTruckSpeedKmh(measuredSpeedKmh)
+        ?? trustedTruckSpeedKmh(route.speedKmh)
+        ?? FALLBACK_TRUCK_SPEED_KMH;
 
-    route.pathSpeed = pushedPathSpeed ?? measuredPathSpeed ?? route.pathSpeed;
-    route.speedKmh = message.speedKmh ?? measuredSpeedKmh ?? route.speedKmh;
+    route.pathSpeed = pathSpeedFromKmh(route.pathLength, route.routeLengthKm, trustedSpeedKmh);
+    route.speedKmh = trustedSpeedKmh;
     route.calibratedAt = now;
     route.calibratedDistance = nextDistance;
     route.nextCalibrationAt = now + nextQueryInterval(route.speedKmh);
