@@ -51,32 +51,24 @@ function routeDisplayData(route: RouteOrder): RouteDisplayData {
 
 const ROUTE_TONES = [
     {
-        border: 'border-l-sky-300',
-        plate: 'text-sky-100',
-        dot: 'bg-sky-300',
-        glow: 'shadow-sky-950/30',
-        surface: 'bg-sky-400/8',
+        color: '#00ff88',
+        surface: 'rgba(0, 255, 136, 0.08)',
+        glow: 'rgba(0, 255, 136, 0.18)',
     },
     {
-        border: 'border-l-amber-300',
-        plate: 'text-amber-100',
-        dot: 'bg-amber-300',
-        glow: 'shadow-amber-950/30',
-        surface: 'bg-amber-400/8',
+        color: '#00ccff',
+        surface: 'rgba(0, 204, 255, 0.08)',
+        glow: 'rgba(0, 204, 255, 0.18)',
     },
     {
-        border: 'border-l-emerald-300',
-        plate: 'text-emerald-100',
-        dot: 'bg-emerald-300',
-        glow: 'shadow-emerald-950/30',
-        surface: 'bg-emerald-400/8',
+        color: '#ffaa00',
+        surface: 'rgba(255, 170, 0, 0.08)',
+        glow: 'rgba(255, 170, 0, 0.18)',
     },
     {
-        border: 'border-l-rose-300',
-        plate: 'text-rose-100',
-        dot: 'bg-rose-300',
-        glow: 'shadow-rose-950/30',
-        surface: 'bg-rose-400/8',
+        color: '#ff44aa',
+        surface: 'rgba(255, 68, 170, 0.08)',
+        glow: 'rgba(255, 68, 170, 0.18)',
     },
 ] as const;
 
@@ -529,11 +521,21 @@ function VehicleTransportDetails({
     return (
         <Panel title="车辆运输详情" className="h-full min-h-0">
             <div key={targetRoute?.lineId ?? 'empty'} className="vehicle-detail-swap flex h-full min-h-0 flex-col">
-                <div className={`flex items-center justify-between gap-3 rounded border border-white/10 border-l-2 ${targetTone.border} ${targetTone.surface} px-3 py-3 shadow-lg ${targetTone.glow}`}>
+                <div
+                    className="flex items-center justify-between gap-3 rounded border border-white/10 border-l-2 px-3 py-3 shadow-lg"
+                    style={{
+                        borderLeftColor: targetTone.color,
+                        backgroundColor: targetTone.surface,
+                        boxShadow: `0 10px 20px ${targetTone.glow}`,
+                    }}
+                >
                     <div className="min-w-0">
                         <div className="text-[10px] text-slate-400">当前展示车辆</div>
-                        <div className={`mt-1 flex min-w-0 items-center gap-2 truncate text-lg font-semibold ${targetTone.plate}`} title={targetRoute?.plate || '--'}>
-                            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${targetTone.dot} shadow-[0_0_10px_currentColor]`} />
+                        <div className="mt-1 flex min-w-0 items-center gap-2 truncate text-lg font-semibold" style={{ color: targetTone.color }} title={targetRoute?.plate || '--'}>
+                            <span
+                                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                style={{ backgroundColor: targetTone.color, boxShadow: `0 0 10px ${targetTone.color}` }}
+                            />
                             <span className="truncate">{targetRoute?.plate || '--'}</span>
                         </div>
                         <div className="mt-1 max-w-52 truncate text-[9px] tabular-nums text-slate-500" title={targetRoute?.orderId || '--'}>
@@ -722,7 +724,13 @@ function RoadGroupRightPanels({
     const routes = roadGroup.routes;
     const finishedRoutes = routes.filter((route) => route.status === '已完成' || route.status === 'finished');
     const unfinishedRoutes = routes.filter((route) => !(route.status === '已完成' || route.status === 'finished'));
-    const sortedUnfinished = [...unfinishedRoutes].sort((a, b) => routeProgress(b) - routeProgress(a));
+    const orderKeys = Array.from(new Set(routes.map(routeColorKey)));
+    const orderRank = new Map(orderKeys.map((key, index) => [key, index]));
+    const sortedUnfinished = [...unfinishedRoutes].sort((a, b) => {
+        const orderDifference = (orderRank.get(routeColorKey(a)) ?? Number.MAX_SAFE_INTEGER)
+            - (orderRank.get(routeColorKey(b)) ?? Number.MAX_SAFE_INTEGER);
+        return orderDifference || routeProgress(b) - routeProgress(a);
+    });
     const visibleUnfinished = sortedUnfinished.slice(0, 40);
     const shouldAutoScroll = visibleUnfinished.length > 4;
     const recentFinished = finishedRoutes.slice(-4);
@@ -736,11 +744,15 @@ function RoadGroupRightPanels({
         return (
             <div
                 key={`${route.lineId}${keySuffix}`}
-                className={`rounded border border-white/10 border-l-2 ${tone.border} bg-slate-900/82 px-3 py-3 text-xs shadow-lg ${tone.glow}`}
+                className="rounded border border-white/10 border-l-2 bg-slate-900/82 px-3 py-3 text-xs shadow-lg"
+                style={{ borderLeftColor: tone.color, boxShadow: `0 10px 20px ${tone.glow}` }}
             >
                 <div className="flex items-center justify-between gap-2">
-                    <span className={`flex min-w-0 items-center gap-2 truncate text-sm font-semibold ${tone.plate}`} title={route.plate}>
-                        <span className={`h-2 w-2 shrink-0 rounded-full ${tone.dot} shadow-[0_0_9px_currentColor]`} />
+                    <span className="flex min-w-0 items-center gap-2 truncate text-sm font-semibold" style={{ color: tone.color }} title={route.plate}>
+                        <span
+                            className="h-2 w-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: tone.color, boxShadow: `0 0 9px ${tone.color}` }}
+                        />
                         {route.plate}
                     </span>
                     <span className="rounded border border-emerald-300/25 bg-emerald-300/8 px-2 py-0.5 text-[10px] text-emerald-200">
