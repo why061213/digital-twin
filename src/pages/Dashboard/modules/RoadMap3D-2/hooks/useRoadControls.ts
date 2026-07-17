@@ -41,7 +41,7 @@ const UNIFIED_COLORS = [
 ];
 
 const TRUCK_MODEL_URL = '/models/rm2-truck.glb';
-const TRUCK_MODEL_SCALE = 0.18;
+const TRUCK_MODEL_SCALE = 1;
 const TRUCK_MODEL_Y_OFFSET = -0.31;
 const VEHICLE_UPGRADE_MS = 420;
 
@@ -256,7 +256,7 @@ export function useRoadControls(
         model.position.y = TRUCK_MODEL_Y_OFFSET;
 
         const locator = new THREE.Mesh(
-            new THREE.RingGeometry(1.05, 1.32, 48),
+            new THREE.RingGeometry(4.2, 4.8, 64),
             new THREE.MeshBasicMaterial({
                 color: 0x67e8f9,
                 transparent: true,
