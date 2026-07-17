@@ -818,15 +818,16 @@ function RoadGroupRightPanels({
                 disabled={variant !== 'vehicle'}
                 aria-pressed={variant === 'vehicle' ? isSelected : undefined}
                 onClick={() => onVehicleSelect(route.lineId)}
-                className={`w-full rounded border border-l-2 px-3 py-3 text-left text-xs shadow-lg transition-[background-color,border-color,box-shadow,transform] duration-200 ${
+                className={`w-full rounded border border-l-2 px-3 py-3 text-left text-xs transition-[background-color,border-color,box-shadow] duration-200 ${
                     isSelected
-                        ? 'border-white/25 -translate-x-0.5'
+                        ? 'border-white/20 bg-white/[0.045]'
                         : 'border-white/10 bg-slate-900/82'
                 } ${variant === 'vehicle' ? 'cursor-pointer hover:border-white/20 hover:bg-slate-800/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70' : ''}`}
                 style={{
                     borderLeftColor: tone.color,
-                    backgroundColor: isSelected ? tone.surface : undefined,
-                    boxShadow: isSelected ? `0 0 0 1px ${tone.color}, 0 12px 24px ${tone.glow}` : `0 10px 20px ${tone.glow}`,
+                    boxShadow: isSelected
+                        ? `inset 0 0 0 1px ${tone.glow}, 0 3px 8px ${tone.glow}`
+                        : `0 2px 6px ${tone.glow}`,
                 }}
             >
                 <div className="flex items-center justify-between gap-2">
@@ -837,8 +838,18 @@ function RoadGroupRightPanels({
                         />
                         {route.plate}
                     </span>
-                    <span className="rounded border border-emerald-300/25 bg-emerald-300/8 px-2 py-0.5 text-[10px] text-emerald-200">
-                        {route.status}
+                    <span className="flex shrink-0 items-center gap-1.5">
+                        {isSelected && (
+                            <span
+                                className="rounded-sm border px-1.5 py-0.5 text-[9px] font-medium"
+                                style={{ borderColor: tone.glow, color: tone.color }}
+                            >
+                                当前
+                            </span>
+                        )}
+                        <span className="rounded border border-emerald-300/25 bg-emerald-300/8 px-2 py-0.5 text-[10px] text-emerald-200">
+                            {route.status}
+                        </span>
                     </span>
                 </div>
                 <div className="mt-2 truncate text-[11px] text-slate-300" title={`${route.from} → ${route.to}`}>
@@ -914,7 +925,7 @@ function RoadGroupRightPanels({
                                     onClick={() => onVehicleSelect(route.lineId)}
                                     className={`flex w-full items-center justify-between gap-2 rounded border px-2 py-1 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${
                                         route.lineId === activeVehicleLineId
-                                            ? 'border-emerald-200/45 bg-emerald-300/15'
+                                            ? 'border-white/20 bg-white/[0.045]'
                                             : 'border-emerald-300/10 bg-emerald-300/5'
                                     } ${variant === 'vehicle' ? 'cursor-pointer hover:bg-emerald-300/10' : ''}`}
                                 >
