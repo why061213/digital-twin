@@ -1,3 +1,5 @@
+import { dashboardFetch } from '../pages/Dashboard/services/dashboardAuth';
+
 export type RouteDTO = {
     id: string;
     coords: [number, number][];
@@ -24,7 +26,7 @@ export type VehiclePositionDTO = {
 };
 
 async function requestJson<T>(url: string): Promise<T> {
-    const response = await fetch(url);
+    const response = await dashboardFetch(url);
 
     if (!response.ok) {
         throw new Error(`Request failed: ${response.status} ${response.statusText}`);

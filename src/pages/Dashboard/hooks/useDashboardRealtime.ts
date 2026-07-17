@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { RouteSnapshotChangedMessage } from '../services/renderRouteApi';
 import { DAILY_KPI_EVENT, isDailyOrderStatistics } from '../services/dashboardKpi';
+import { getDashboardAccessToken } from '../services/dashboardAuth';
 import type { ViewMode } from '../types';
 
 type CityRaiseMessage = {
@@ -144,7 +145,6 @@ type UseDashboardRealtimeOptions = {
     onRouteSnapshotChanged?: (message: RouteSnapshotChangedMessage) => void;
 };
 
-const WS_TOKEN = String(import.meta.env.VITE_WS_TOKEN || 'jushen-screen-token');
 const HEADQUARTERS = '\u4f5b\u5c71';
 const CARGO_NAMES = ['\u94dd\u952d', '\u94dc\u6750', '\u94a2\u6750', '\u5316\u5de5\u539f\u6599', '\u5176\u4ed6'];
 const PLATE_PREFIXES = ['\u7ca4A', '\u7ca4B', '\u6e58E', '\u8d63C', '\u82cfE', '\u6d59A'];
@@ -160,11 +160,13 @@ const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 10_000;
 
 function buildRealtimeUrl() {
+    const accessToken = getDashboardAccessToken();
+    if (!accessToken) return null;
     const baseUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws';
     const normalizedBase = String(baseUrl).replace(/\/$/, '');
     const endpoint = normalizedBase.endsWith('/realtime') ? normalizedBase : `${normalizedBase}/realtime`;
     const url = new URL(endpoint);
-    url.searchParams.set('token', WS_TOKEN);
+    url.searchParams.set('token', accessToken);
     return url.toString();
 }
 
@@ -370,7 +372,12 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
             if (disposed) return;
             if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
 
-            socket = new WebSocket(buildRealtimeUrl());
+            const realtimeUrl = buildRealtimeUrl();
+            if (!realtimeUrl) {
+                scheduleReconnect();
+                return;
+            }
+            socket = new WebSocket(realtimeUrl);
             socketRef.current = socket;
 
             socket.onopen = () => {

@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '../constants';
+import { dashboardFetch } from './dashboardAuth';
 import type { RoadPathMessage, TruckPositionMessage } from '../hooks/useDashboardRealtime';
 
 export type RenderRouteDTO = {
@@ -176,7 +177,7 @@ function isRenderRoute(value: unknown): value is RenderRouteDTO {
 }
 
 async function getJson(path: string, signal?: AbortSignal): Promise<unknown> {
-    const response = await fetch(`${API_BASE_URL}${path}`, { signal });
+    const response = await dashboardFetch(`${API_BASE_URL}${path}`, { signal });
     if (!response.ok) throw new Error(`RM2 request failed: ${response.status}`);
     return response.json() as Promise<unknown>;
 }

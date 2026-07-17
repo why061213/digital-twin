@@ -1,8 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { fetchBootstrapStatus, type BootstrapStatus } from '../services/bootstrapApi';
+import {
+    adoptDashboardAccessKey,
+    clearDashboardSession,
+    ensureFreshDashboardSession,
+    getDashboardSession,
+    issueDashboardSession,
+    type DashboardSession,
+} from '../services/dashboardAuth';
 
 type DashboardVerificationGateProps = {
     onVerified: () => void;
+    standalone?: boolean;
 };
 
 const INITIAL_STATUS: BootstrapStatus = {
@@ -32,8 +41,13 @@ function StatusRow({ label, complete, active }: { label: string; complete: boole
     );
 }
 
-export function DashboardVerificationGate({ onVerified }: DashboardVerificationGateProps) {
+export function DashboardVerificationGate({ onVerified, standalone = false }: DashboardVerificationGateProps) {
     const [status, setStatus] = useState(INITIAL_STATUS);
+    const [session, setSession] = useState<DashboardSession | null>(() => getDashboardSession());
+    const [manualKey, setManualKey] = useState('');
+    const [authError, setAuthError] = useState('');
+    const [copyLabel, setCopyLabel] = useState('复制密钥');
+    const issuingRef = useRef<Promise<DashboardSession> | null>(null);
 
     useEffect(() => {
         let disposed = false;
@@ -44,10 +58,32 @@ export function DashboardVerificationGate({ onVerified }: DashboardVerificationG
             controller?.abort();
             controller = new AbortController();
             try {
+                let activeSession = getDashboardSession();
+                if (activeSession) {
+                    try {
+                        activeSession = await ensureFreshDashboardSession();
+                        if (!disposed) setSession(activeSession);
+                    } catch {
+                        clearDashboardSession();
+                        activeSession = null;
+                        if (!disposed) setSession(null);
+                    }
+                }
                 const next = await fetchBootstrapStatus(controller.signal);
                 if (disposed) return;
                 setStatus(next);
-                if (next.ready) {
+                if (next.authorized && !activeSession) {
+                    issuingRef.current ??= issueDashboardSession(controller.signal);
+                    try {
+                        activeSession = await issuingRef.current;
+                        if (!disposed) setSession(activeSession);
+                    } finally {
+                        issuingRef.current = null;
+                    }
+                } else if (activeSession && activeSession.accessToken !== session?.accessToken) {
+                    setSession(activeSession);
+                }
+                if (next.ready && activeSession && !standalone) {
                     timer = window.setTimeout(onVerified, 450);
                     return;
                 }
@@ -69,7 +105,25 @@ export function DashboardVerificationGate({ onVerified }: DashboardVerificationG
             controller?.abort();
             if (timer !== null) window.clearTimeout(timer);
         };
-    }, [onVerified]);
+    }, [onVerified, session?.accessToken, standalone]);
+
+    const applyDistributedKey = async () => {
+        setAuthError('');
+        try {
+            const accepted = await adoptDashboardAccessKey(manualKey);
+            setSession(accepted);
+            setManualKey('');
+        } catch (error) {
+            setAuthError(error instanceof Error ? error.message : '访问密钥验证失败');
+        }
+    };
+
+    const copyKey = async () => {
+        if (!session) return;
+        await navigator.clipboard.writeText(session.accessToken);
+        setCopyLabel('已复制');
+        window.setTimeout(() => setCopyLabel('复制密钥'), 1200);
+    };
 
     const unauthorized = status.phase === 'unauthorized';
     return (
@@ -100,6 +154,51 @@ export function DashboardVerificationGate({ onVerified }: DashboardVerificationG
                     )}
                     {status.lastError && <p className="mt-2 text-xs text-amber-300/80">{status.lastError}</p>}
                 </div>
+
+                {standalone && (
+                    <div className="mt-5 border-t border-white/10 pt-5">
+                        {session ? (
+                            <>
+                                <p className="mb-2 text-xs text-slate-400">调试访问密钥</p>
+                                <div className="flex gap-2">
+                                    <input
+                                        readOnly
+                                        value={session.accessToken}
+                                        className="min-w-0 flex-1 border border-white/10 bg-black/20 px-3 py-2 text-xs text-cyan-200 outline-none"
+                                    />
+                                    <button type="button" onClick={() => void copyKey()} className="border border-cyan-300/30 px-3 text-xs text-cyan-200 hover:bg-cyan-300/10">
+                                        {copyLabel}
+                                    </button>
+                                </div>
+                                <p className="mt-2 text-xs text-slate-500">有效期至 {new Date(session.expiresAt).toLocaleString()}</p>
+                                <button
+                                    type="button"
+                                    disabled={!status.ready}
+                                    onClick={onVerified}
+                                    className="mt-4 w-full bg-cyan-300 px-4 py-2.5 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                    进入数字孪生大屏
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <p className="mb-2 text-xs text-slate-400">使用已分发的访问密钥</p>
+                                <div className="flex gap-2">
+                                    <input
+                                        value={manualKey}
+                                        onChange={(event) => setManualKey(event.target.value)}
+                                        placeholder="jdt_..."
+                                        className="min-w-0 flex-1 border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-100 outline-none focus:border-cyan-300/40"
+                                    />
+                                    <button type="button" disabled={!manualKey.trim()} onClick={() => void applyDistributedKey()} className="border border-cyan-300/30 px-3 text-xs text-cyan-200 disabled:opacity-40">
+                                        验证
+                                    </button>
+                                </div>
+                                {authError && <p className="mt-2 text-xs text-rose-300">{authError}</p>}
+                            </>
+                        )}
+                    </div>
+                )}
             </section>
         </main>
     );

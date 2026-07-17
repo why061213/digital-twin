@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import DigitalFlop from '@/components/DigitalFlop/DigitalFlop';
 import { API_BASE_URL } from '../constants';
+import { dashboardFetch } from '../services/dashboardAuth';
 import {
     DAILY_KPI_EVENT,
     isDailyOrderStatistics,
@@ -29,7 +30,7 @@ function KpiCards() {
             const controller = new AbortController();
             activeController = controller;
             try {
-                const response = await fetch(`${API_BASE_URL}/dashboard/daily-kpis`, {
+                const response = await dashboardFetch(`${API_BASE_URL}/dashboard/daily-kpis`, {
                     signal: controller.signal,
                 });
                 if (!response.ok) {
