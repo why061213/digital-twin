@@ -44,6 +44,8 @@ type RouteDisplayData = RouteOrder & {
 };
 
 const WEIGHT_ONLY_PATTERN = /^\s*\d+(?:\.\d+)?\s*(?:吨|t|kg|千克|公斤)\s*$/i;
+const PROVINCE_PREFIX_PATTERN = /^(北京市|天津市|上海市|重庆市|内蒙古自治区|广西壮族自治区|西藏自治区|宁夏回族自治区|新疆维吾尔自治区|香港特别行政区|澳门特别行政区|[^省\s]{2,8}省)/;
+const CITY_PREFIX_PATTERN = /^(.{2,12}?(?:自治州|地区|盟|市))/;
 
 function routeDisplayData(route: RouteOrder): RouteDisplayData {
     return route as RouteDisplayData;
@@ -90,6 +92,32 @@ function compactPositionAddress(address?: string) {
     if (!address) return '--';
     const segments = address.split(/[\s,，]+/).map((part) => part.trim()).filter(Boolean);
     return segments[segments.length - 1] ?? address;
+}
+
+function splitAdministrativeAddress(address?: string) {
+    const fullAddress = address?.trim() || '--';
+    if (fullAddress === '--') return { region: '--', detail: '--', fullAddress };
+
+    let remaining = fullAddress;
+    const regionParts: string[] = [];
+    const province = remaining.match(PROVINCE_PREFIX_PATTERN)?.[1];
+    if (province) {
+        regionParts.push(province);
+        remaining = remaining.slice(province.length).trim();
+    }
+
+    const provinceActsAsCity = province?.endsWith('市') || province?.endsWith('特别行政区');
+    const city = provinceActsAsCity ? undefined : remaining.match(CITY_PREFIX_PATTERN)?.[1];
+    if (city) {
+        regionParts.push(city);
+        remaining = remaining.slice(city.length).trim();
+    }
+
+    return {
+        region: regionParts.join(' · ') || '--',
+        detail: remaining || fullAddress,
+        fullAddress,
+    };
 }
 
 function detailedDirection(directionDeg?: number, providerLabel?: string) {
@@ -501,6 +529,8 @@ function VehicleTransportDetails({
         ? detailRoutes[cycleIndex % detailRoutes.length]
         : undefined;
     const targetTone = routeTone(targetRoute, roadGroup.routes);
+    const fromAddress = splitAdministrativeAddress(targetRoute?.from);
+    const toAddress = splitAdministrativeAddress(targetRoute?.to);
 
     useEffect(() => {
         onActiveVehicleChange?.(targetRoute?.lineId ?? null);
@@ -553,6 +583,20 @@ function VehicleTransportDetails({
                 </div>
 
                 <div className="no-scrollbar mt-3 flex min-h-0 flex-1 flex-col overflow-y-auto rounded border border-white/8 bg-slate-900/55 px-3 py-3">
+                    <div className="mb-3 grid grid-cols-2 gap-2">
+                        <div className="min-w-0 rounded border border-sky-300/10 bg-sky-300/[0.04] px-2.5 py-2">
+                            <div className="text-[9px] text-slate-500">始发省市</div>
+                            <div className="mt-1 truncate text-[11px] font-medium text-sky-200" title={fromAddress.region}>
+                                {fromAddress.region}
+                            </div>
+                        </div>
+                        <div className="min-w-0 rounded border border-emerald-300/10 bg-emerald-300/[0.04] px-2.5 py-2">
+                            <div className="text-[9px] text-slate-500">目的省市</div>
+                            <div className="mt-1 truncate text-[11px] font-medium text-emerald-200" title={toAddress.region}>
+                                {toAddress.region}
+                            </div>
+                        </div>
+                    </div>
                     <div className="grid grid-cols-[1rem_1fr] gap-x-3">
                         <div className="flex flex-col items-center py-1">
                             <span className="h-2.5 w-2.5 rounded-full border-2 border-sky-200 bg-sky-500 shadow-[0_0_10px_rgba(56,189,248,0.7)]" />
@@ -562,14 +606,14 @@ function VehicleTransportDetails({
                         <div className="flex min-h-0 flex-col justify-between gap-2">
                             <div>
                                 <div className="text-[10px] text-slate-500">起点</div>
-                                <div className="mt-1 line-clamp-1 text-sm font-medium leading-5 text-sky-100" title={targetRoute?.from || '--'}>
-                                    {targetRoute?.from || '--'}
+                                <div className="mt-1 line-clamp-2 text-sm font-medium leading-5 text-sky-100" title={fromAddress.fullAddress}>
+                                    {fromAddress.detail}
                                 </div>
                             </div>
                             <div>
                                 <div className="text-[10px] text-slate-500">目的地</div>
-                                <div className="mt-1 line-clamp-1 text-sm font-medium leading-5 text-emerald-100" title={targetRoute?.to || '--'}>
-                                    {targetRoute?.to || '--'}
+                                <div className="mt-1 line-clamp-2 text-sm font-medium leading-5 text-emerald-100" title={toAddress.fullAddress}>
+                                    {toAddress.detail}
                                 </div>
                             </div>
                         </div>
