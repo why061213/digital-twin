@@ -7,7 +7,7 @@ type DailyOrderStatistics = {
     deliveryTotalTons: number;
     dispatchedVehicleCount: number;
     totalOrderCount: number;
-    completedOrderCount: number;
+    arrivedVehicleCount: number;
     windowStartedAt?: string;
     lastUpdatedAt?: string | null;
 };
@@ -17,7 +17,7 @@ const EMPTY_STATISTICS: DailyOrderStatistics = {
     deliveryTotalTons: 0,
     dispatchedVehicleCount: 0,
     totalOrderCount: 0,
-    completedOrderCount: 0,
+    arrivedVehicleCount: 0,
 };
 
 function KpiCards() {
@@ -75,7 +75,7 @@ function KpiCards() {
         { label: '当日配送总量', value: statistics.deliveryTotalTons, unit: '吨' },
         { label: '派发车辆数量', value: statistics.dispatchedVehicleCount, unit: '辆' },
         { label: '总订单量', value: statistics.totalOrderCount, unit: '单' },
-        { label: '已完成订单', value: statistics.completedOrderCount, unit: '单' },
+        { label: '已到达车辆', value: statistics.arrivedVehicleCount, unit: '辆' },
     ];
 
     return (
