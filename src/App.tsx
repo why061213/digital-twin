@@ -3,20 +3,12 @@ import DashboardPage from './pages/Dashboard/DashboardPage'
 import { DashboardVerificationGate } from './pages/Dashboard/components/DashboardVerificationGate';
 import {
   clearDashboardSession,
-  getDashboardSession,
   startDashboardSessionMaintenance,
 } from './pages/Dashboard/services/dashboardAuth';
 
 function App() {
   const [verified, setVerified] = useState(false);
-  const [pathname, setPathname] = useState(() => {
-    const current = window.location.pathname;
-    if (current !== '/verify' && !getDashboardSession()) {
-      window.history.replaceState(null, '', '/verify');
-      return '/verify';
-    }
-    return current;
-  });
+  const [pathname, setPathname] = useState(() => window.location.pathname);
   const navigate = useCallback((path: string) => {
     window.history.replaceState(null, '', path);
     setPathname(path);
@@ -37,7 +29,7 @@ function App() {
     return startDashboardSessionMaintenance(() => {
       clearDashboardSession();
       setVerified(false);
-      navigate('/verify');
+      navigate('/');
     });
   }, [navigate, verified]);
 
