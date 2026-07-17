@@ -81,6 +81,20 @@ function cloneTruckTemplate(template: THREE.Object3D) {
     return clone;
 }
 
+function vehicleLocatorColor(laneColor: number, lineId: string) {
+    const color = new THREE.Color(laneColor);
+    const hsl = { h: 0, s: 0, l: 0 };
+    color.getHSL(hsl);
+    const variant = Array.from(lineId).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 5;
+    const lightnessOffset = [-0.08, -0.04, 0, 0.05, 0.1][variant];
+    color.setHSL(
+        hsl.h,
+        THREE.MathUtils.clamp(hsl.s * 0.92 + 0.08, 0.58, 1),
+        THREE.MathUtils.clamp(hsl.l + lightnessOffset, 0.42, 0.72),
+    );
+    return color;
+}
+
 function trackKeyFor(id: string, coords: [number, number][], info: RoadObjectInfo) {
     if (info.pathKey) return info.pathKey;
     return coords.map(([lng, lat]) => `${lng.toFixed(4)},${lat.toFixed(4)}`).join('|') || id;
@@ -256,13 +270,15 @@ export function useRoadControls(
         const model = cloneTruckTemplate(template);
         model.scale.setScalar(TRUCK_MODEL_SCALE);
         model.position.y = TRUCK_MODEL_Y_OFFSET;
+        const laneColor = colorForOrder(vehicle.orderId);
+        const locatorColor = vehicleLocatorColor(laneColor, vehicle.lineId);
 
         const locator = new THREE.Mesh(
             new THREE.RingGeometry(4.2, 4.8, 64),
             new THREE.MeshBasicMaterial({
-                color: 0x67e8f9,
+                color: locatorColor,
                 transparent: true,
-                opacity: 0.78,
+                opacity: 0.88,
                 side: THREE.DoubleSide,
                 depthWrite: false,
             }),
@@ -275,7 +291,7 @@ export function useRoadControls(
         vehicle.bar.add(visual);
         vehicle.truckVisual = visual;
         return visual;
-    }, []);
+    }, [colorForOrder]);
 
     const upgradeVehicle = useCallback(async (vehicle: VehicleBarState) => {
         const generation = highlightGenerationRef.current;
