@@ -417,8 +417,12 @@ function AutoScrollList({
 
     return (
         <div ref={scrollRef} className="no-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
-            {children}
-            {enabled && <div aria-hidden="true">{children}</div>}
+            {enabled ? (
+                <>
+                    <div className="pb-2">{children}</div>
+                    <div aria-hidden="true" className="pb-2">{children}</div>
+                </>
+            ) : children}
         </div>
     );
 }
