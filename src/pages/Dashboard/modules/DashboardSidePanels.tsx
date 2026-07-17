@@ -287,36 +287,6 @@ function routeProgress(route: RouteOrder) {
     return 0;
 }
 
-function routeEtaText(route: RouteOrder, progress: number) {
-    if (progress >= 100 || route.status.includes('完成') || route.status === 'finished') {
-        return '已到达';
-    }
-
-    const routeLengthKm = Number(routeDisplayData(route).routeLengthKm);
-    const speedKmh = Number(routeDisplayData(route).speedKmh);
-    if (!Number.isFinite(routeLengthKm) || routeLengthKm <= 0 || !Number.isFinite(speedKmh) || speedKmh <= 0) {
-        return '预计 --';
-    }
-
-    const remainingKm = routeLengthKm * Math.max(0, 1 - progress / 100);
-    const minutes = Math.max(1, Math.round((remainingKm / speedKmh) * 60));
-    if (minutes >= 60) {
-        const hours = Math.floor(minutes / 60);
-        const restMinutes = minutes % 60;
-        return `预计 ${hours}h${restMinutes ? `${restMinutes}m` : ''}`;
-    }
-    return `预计 ${minutes}m`;
-}
-
-function routeDistanceText(route: RouteOrder, progress: number) {
-    const routeLengthKm = Number(routeDisplayData(route).routeLengthKm);
-    if (!Number.isFinite(routeLengthKm) || routeLengthKm <= 0) {
-        return '-- km';
-    }
-    const traveledKm = routeLengthKm * Math.min(Math.max(progress, 0), 100) / 100;
-    return `${traveledKm.toFixed(0)} / ${routeLengthKm.toFixed(0)} km`;
-}
-
 type OrderSummary = {
     id: string;
     name: string;
@@ -859,13 +829,12 @@ function RoadGroupRightPanels({
                     <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-950/90 ring-1 ring-white/5">
                         <div className="h-full rounded-full bg-gradient-to-r from-cyan-300 via-sky-400 to-emerald-300 shadow-[0_0_10px_rgba(34,211,238,0.45)] transition-all duration-500" style={{ width: `${progress}%` }} />
                     </div>
-                    <span className="w-20 text-right text-[10px] tabular-nums text-slate-400">
-                        {routeDistanceText(route, progress)}
+                    <span className="w-10 text-right text-[10px] font-medium tabular-nums text-slate-300">
+                        {progress}%
                     </span>
                 </div>
-                <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
-                    <span>{routeEtaText(route, progress)}</span>
-                    <span>
+                <div className="mt-2 flex items-center justify-end text-[10px] text-slate-400">
+                    <span className="tabular-nums">
                         {Number.isFinite(Number(routeDisplayData(route).speedKmh))
                             ? `${Math.round(Number(routeDisplayData(route).speedKmh))} km/h`
                             : '-- km/h'}
