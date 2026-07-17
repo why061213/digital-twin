@@ -116,6 +116,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
     const generationRef = useRef(0);
     const topologySignatureRef = useRef('');
     const backendGroupsRef = useRef<Rm2GroupDTO[]>([]);
+    const sceneReplayRequiredRef = useRef(true);
     const playNodeRef = useRef<(node: ChainNode) => Promise<void>>(async () => {});
 
     const stopTimer = useCallback(() => {
@@ -203,7 +204,8 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 throw new Error(`RM2 structure/groups snapshot mismatch: ${JSON.stringify(mismatchDetails)}`);
             }
 
-            const visibleGroupId = activeGroupIdRef.current;
+            const restartPlayback = sceneReplayRequiredRef.current;
+            const visibleGroupId = restartPlayback ? null : activeGroupIdRef.current;
             const structureLeafIds = new Set(structure.leafGroupIds);
             const responseGroupById = new Map(response.groups.map((group) => [group.groupId, group]));
             const structurallyAcceptedGroups = structure.leafGroupIds.flatMap((groupId) => {
@@ -222,7 +224,8 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
             });
             const nextTopologySignature = topologySignature(structure, filteredGroups);
             if (nextTopologySignature === topologySignatureRef.current
-                && response.snapshotVersion === snapshotVersionRef.current) {
+                && response.snapshotVersion === snapshotVersionRef.current
+                && !restartPlayback) {
                 return;
             }
             const groupDiff = diffGroupIds(backendGroupsRef.current, response.groups);
@@ -253,6 +256,14 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 rejectedGroups: [...response.diagnostics.rejectedGroups, ...structureRejectedGroups],
             });
             chainRef.current = buildPlaybackChain(structure, filteredGroups);
+            sceneReplayRequiredRef.current = false;
+
+            if (restartPlayback) {
+                console.info('[RM2 playback restart]', {
+                    snapshotVersion: response.snapshotVersion,
+                    headGroupId: chainRef.current.headLeaf?.groupId ?? null,
+                });
+            }
 
             if (!chainRef.current.headLeaf) {
                 currentNodeRef.current = null;
@@ -500,6 +511,11 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
             groupsRequestRef.current?.abort();
             groupRequestRef.current?.abort();
             stopTimer();
+            sceneReplayRequiredRef.current = true;
+            currentNodeRef.current = null;
+            activeGroupIdRef.current = null;
+            activeRouteLineIdsRef.current.clear();
+            activeRoutesRef.current.clear();
             return;
         }
 
@@ -519,7 +535,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
             }
             stopTimer();
         };
-    }, [refreshRm2, sceneReady, stopTimer, view]);
+    }, [activeRoutesRef, refreshRm2, sceneReady, stopTimer, view]);
 
     useEffect(() => () => {
         groupsRequestRef.current?.abort();
