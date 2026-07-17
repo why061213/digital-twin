@@ -43,6 +43,7 @@ const UNIFIED_COLORS = [
 const TRUCK_MODEL_URL = '/models/rm2-truck.glb';
 const TRUCK_MODEL_SCALE = 1;
 const TRUCK_MODEL_Y_OFFSET = -0.31;
+const TRUCK_IDLE_VISUAL_SCALE = 0.14;
 const VEHICLE_UPGRADE_MS = 420;
 const NORTH_UP_MAX_FIT_DISTANCE = 320;
 const NORTH_UP_VIEW_DIRECTION = new THREE.Vector3(0, 0.82, -0.58).normalize();
@@ -276,17 +277,11 @@ export function useRoadControls(
         const baseOpacity = typeof vehicle.bar.userData.baseOpacity === 'number'
             ? vehicle.bar.userData.baseOpacity
             : 0.95;
-        material.opacity = baseOpacity * (1 - progress);
+        material.opacity = vehicle.truckVisual ? 0 : baseOpacity * (1 - progress);
         material.needsUpdate = true;
-        vehicle.truckVisual?.scale.setScalar(Math.max(0.001, progress));
-    }, []);
-
-    const removeTruckVisual = useCallback((vehicle: VehicleBarState) => {
-        if (!vehicle.truckVisual) return;
-        cancelTruckHeadingAnimation(vehicle);
-        vehicle.bar.remove(vehicle.truckVisual);
-        disposeObject3D(vehicle.truckVisual);
-        vehicle.truckVisual = undefined;
+        vehicle.truckVisual?.scale.setScalar(
+            THREE.MathUtils.lerp(TRUCK_IDLE_VISUAL_SCALE, 1, progress),
+        );
     }, []);
 
     const animateVehicleUpgrade = useCallback((vehicle: VehicleBarState, target: 0 | 1) => {
@@ -308,11 +303,10 @@ export function useRoadControls(
             }
             vehicle.upgradeAnimationFrame = undefined;
             vehicle.upgradeProgress = target;
-            if (target === 0) removeTruckVisual(vehicle);
             applyUpgradeVisual(vehicle);
         };
         vehicle.upgradeAnimationFrame = requestAnimationFrame(step);
-    }, [applyUpgradeVisual, removeTruckVisual]);
+    }, [applyUpgradeVisual]);
 
     const createTruckVisual = useCallback((template: THREE.Object3D, vehicle: VehicleBarState) => {
         const visual = new THREE.Group();
@@ -335,12 +329,30 @@ export function useRoadControls(
         locator.rotation.x = Math.PI / 2;
         locator.position.y = TRUCK_MODEL_Y_OFFSET + 0.03;
         locator.renderOrder = 43;
+        locator.visible = false;
         visual.add(model, locator);
-        visual.scale.setScalar(0.001);
+        visual.userData.locator = locator;
+        visual.scale.setScalar(TRUCK_IDLE_VISUAL_SCALE);
         vehicle.bar.add(visual);
         vehicle.truckVisual = visual;
         return visual;
     }, [colorForOrder]);
+
+    const ensureVehicleTruck = useCallback(async (vehicle: VehicleBarState) => {
+        try {
+            const template = await loadTruckTemplate();
+            const current = findVehicle(vehicle.lineId);
+            if (current?.vehicle !== vehicle) return;
+            if (!vehicle.truckVisual) createTruckVisual(template, vehicle);
+            setVehicleBarTransform(current.road, vehicle, 0);
+            applyUpgradeVisual(vehicle);
+        } catch (error) {
+            console.warn('[RM2 truck model] load failed; keeping vehicle bar', {
+                lineId: vehicle.lineId,
+                error,
+            });
+        }
+    }, [applyUpgradeVisual, createTruckVisual, findVehicle]);
 
     const upgradeVehicle = useCallback(async (vehicle: VehicleBarState) => {
         const generation = highlightGenerationRef.current;
@@ -355,6 +367,8 @@ export function useRoadControls(
             const current = findVehicle(vehicle.lineId);
             if (!current) return;
             setVehicleBarTransform(current.road, vehicle, 0);
+            const locator = vehicle.truckVisual?.userData.locator;
+            if (locator instanceof THREE.Object3D) locator.visible = true;
             animateVehicleUpgrade(vehicle, 1);
         } catch (error) {
             console.warn('[RM2 truck model] load failed; keeping vehicle bar', {
@@ -365,6 +379,8 @@ export function useRoadControls(
     }, [animateVehicleUpgrade, createTruckVisual, findVehicle]);
 
     const downgradeVehicle = useCallback((vehicle: VehicleBarState) => {
+        const locator = vehicle.truckVisual?.userData.locator;
+        if (locator instanceof THREE.Object3D) locator.visible = false;
         if (!vehicle.truckVisual) {
             vehicle.upgradeProgress = 0;
             applyUpgradeVisual(vehicle);
@@ -442,7 +458,9 @@ export function useRoadControls(
                 // 2. 透明度
                 const baseOpacity = isLead ? 1.0 : 0.85;
                 vehicle.bar.userData.baseOpacity = baseOpacity;
-                material.opacity = baseOpacity * (1 - clamp01(vehicle.upgradeProgress));
+                material.opacity = vehicle.truckVisual
+                    ? 0
+                    : baseOpacity * (1 - clamp01(vehicle.upgradeProgress));
 
                 // 3. 缩放（领头车辆稍大）
                 const baseScale = vehicle.upgradeProgress > 0
@@ -656,11 +674,12 @@ export function useRoadControls(
         lane.vehicles.set(lineId, vehicle);
         road.lineIds.add(lineId);
         refs.lineTrackMapRef.current.set(lineId, road.pathKey);
+        void ensureVehicleTruck(vehicle);
         if (highlightedLineIdRef.current === lineId) {
             void upgradeVehicle(vehicle);
         }
         return vehicle;
-    }, [refs.lineTrackMapRef, upgradeVehicle]);
+    }, [ensureVehicleTruck, refs.lineTrackMapRef, upgradeVehicle]);
 
     const addRoadPath = useCallback(
         (id: string, coords: [number, number][], info: RoadObjectInfo = {}) => {
