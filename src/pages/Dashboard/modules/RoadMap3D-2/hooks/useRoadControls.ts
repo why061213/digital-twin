@@ -159,6 +159,54 @@ function pointAndTangentAtProgress(road: RoadState, progress: number) {
     return { point, tangent };
 }
 
+function cancelTruckHeadingAnimation(vehicle: VehicleBarState) {
+    const visual = vehicle.truckVisual;
+    const animationFrame = visual?.userData.headingAnimationFrame;
+    if (typeof animationFrame === 'number') cancelAnimationFrame(animationFrame);
+    if (visual) visual.userData.headingAnimationFrame = undefined;
+}
+
+function animateTruckHeading(vehicle: VehicleBarState, targetWorldHeading: number) {
+    const visual = vehicle.truckVisual;
+    if (!visual) return;
+
+    cancelTruckHeadingAnimation(vehicle);
+    const savedHeading = visual.userData.worldHeading;
+    if (typeof savedHeading !== 'number' || !Number.isFinite(savedHeading)) {
+        visual.userData.worldHeading = targetWorldHeading;
+        visual.rotation.y = targetWorldHeading - vehicle.bar.rotation.y;
+        return;
+    }
+
+    const angleDelta = Math.atan2(
+        Math.sin(targetWorldHeading - savedHeading),
+        Math.cos(targetWorldHeading - savedHeading),
+    );
+    if (Math.abs(angleDelta) < THREE.MathUtils.degToRad(0.5)) {
+        visual.userData.worldHeading = targetWorldHeading;
+        visual.rotation.y = targetWorldHeading - vehicle.bar.rotation.y;
+        return;
+    }
+
+    const startedAt = performance.now();
+    const duration = THREE.MathUtils.clamp(Math.abs(angleDelta) / Math.PI * 850, 180, 850);
+    const step = () => {
+        const progress = Math.min(1, (performance.now() - startedAt) / duration);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const worldHeading = savedHeading + angleDelta * eased;
+        visual.userData.worldHeading = worldHeading;
+        visual.rotation.y = worldHeading - vehicle.bar.rotation.y;
+        if (progress < 1) {
+            visual.userData.headingAnimationFrame = requestAnimationFrame(step);
+            return;
+        }
+        visual.userData.headingAnimationFrame = undefined;
+        visual.userData.worldHeading = targetWorldHeading;
+        visual.rotation.y = targetWorldHeading - vehicle.bar.rotation.y;
+    };
+    visual.userData.headingAnimationFrame = requestAnimationFrame(step);
+}
+
 function setVehicleBarTransform(
     road: RoadState,
     vehicle: VehicleBarState,
@@ -179,7 +227,7 @@ function setVehicleBarTransform(
         const worldHeading = Number.isFinite(providerDirection)
             ? -THREE.MathUtils.degToRad(providerDirection)
             : pathHeading;
-        vehicle.truckVisual.rotation.y = worldHeading - vehicle.bar.rotation.y;
+        animateTruckHeading(vehicle, worldHeading);
     }
 }
 
@@ -235,6 +283,7 @@ export function useRoadControls(
 
     const removeTruckVisual = useCallback((vehicle: VehicleBarState) => {
         if (!vehicle.truckVisual) return;
+        cancelTruckHeadingAnimation(vehicle);
         vehicle.bar.remove(vehicle.truckVisual);
         disposeObject3D(vehicle.truckVisual);
         vehicle.truckVisual = undefined;
@@ -502,6 +551,7 @@ export function useRoadControls(
                 if (vehicle.upgradeAnimationFrame !== undefined) {
                     cancelAnimationFrame(vehicle.upgradeAnimationFrame);
                 }
+                cancelTruckHeadingAnimation(vehicle);
             });
         });
         refs.sceneRef.current?.remove(road.group);
