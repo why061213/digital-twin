@@ -49,6 +49,51 @@ function routeDisplayData(route: RouteOrder): RouteDisplayData {
     return route as RouteDisplayData;
 }
 
+const ROUTE_TONES = [
+    {
+        border: 'border-l-sky-300',
+        plate: 'text-sky-100',
+        dot: 'bg-sky-300',
+        glow: 'shadow-sky-950/30',
+        surface: 'bg-sky-400/8',
+    },
+    {
+        border: 'border-l-amber-300',
+        plate: 'text-amber-100',
+        dot: 'bg-amber-300',
+        glow: 'shadow-amber-950/30',
+        surface: 'bg-amber-400/8',
+    },
+    {
+        border: 'border-l-emerald-300',
+        plate: 'text-emerald-100',
+        dot: 'bg-emerald-300',
+        glow: 'shadow-emerald-950/30',
+        surface: 'bg-emerald-400/8',
+    },
+    {
+        border: 'border-l-rose-300',
+        plate: 'text-rose-100',
+        dot: 'bg-rose-300',
+        glow: 'shadow-rose-950/30',
+        surface: 'bg-rose-400/8',
+    },
+] as const;
+
+function routeColorKey(route?: RouteOrder) {
+    return route?.orderId?.trim() || route?.lineId || 'default-route';
+}
+
+function routeTone(route?: RouteOrder, groupRoutes: RouteOrder[] = []) {
+    const colorKey = routeColorKey(route);
+    const orderKeys = Array.from(new Set(groupRoutes.map(routeColorKey)));
+    const orderIndex = orderKeys.indexOf(colorKey);
+    const toneIndex = orderIndex >= 0
+        ? orderIndex % ROUTE_TONES.length
+        : Array.from(colorKey).reduce((sum, char) => sum + char.charCodeAt(0), 0) % ROUTE_TONES.length;
+    return ROUTE_TONES[toneIndex];
+}
+
 function compactPositionAddress(address?: string) {
     if (!address) return '--';
     const segments = address.split(/[\s,，]+/).map((part) => part.trim()).filter(Boolean);
@@ -463,6 +508,7 @@ function VehicleTransportDetails({
     const targetRoute = detailRoutes.length > 0
         ? detailRoutes[cycleIndex % detailRoutes.length]
         : undefined;
+    const targetTone = routeTone(targetRoute, roadGroup.routes);
 
     useEffect(() => {
         onActiveVehicleChange?.(targetRoute?.lineId ?? null);
@@ -483,11 +529,12 @@ function VehicleTransportDetails({
     return (
         <Panel title="车辆运输详情" className="h-full min-h-0">
             <div key={targetRoute?.lineId ?? 'empty'} className="vehicle-detail-swap flex h-full min-h-0 flex-col">
-                <div className="flex items-center justify-between gap-3 rounded border border-sky-300/20 bg-sky-400/8 px-3 py-3 shadow-[inset_3px_0_0_rgba(125,211,252,0.8)]">
+                <div className={`flex items-center justify-between gap-3 rounded border border-white/10 border-l-2 ${targetTone.border} ${targetTone.surface} px-3 py-3 shadow-lg ${targetTone.glow}`}>
                     <div className="min-w-0">
                         <div className="text-[10px] text-slate-400">当前展示车辆</div>
-                        <div className="mt-1 truncate text-lg font-semibold text-sky-100" title={targetRoute?.plate || '--'}>
-                            {targetRoute?.plate || '--'}
+                        <div className={`mt-1 flex min-w-0 items-center gap-2 truncate text-lg font-semibold ${targetTone.plate}`} title={targetRoute?.plate || '--'}>
+                            <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${targetTone.dot} shadow-[0_0_10px_currentColor]`} />
+                            <span className="truncate">{targetRoute?.plate || '--'}</span>
                         </div>
                         <div className="mt-1 max-w-52 truncate text-[9px] tabular-nums text-slate-500" title={targetRoute?.orderId || '--'}>
                             订单 {targetRoute?.orderId || '--'}
@@ -685,14 +732,7 @@ function RoadGroupRightPanels({
 
     const renderRouteCard = (route: RouteOrder, keySuffix = '') => {
         const progress = routeProgress(route);
-        const tones = [
-            { border: 'border-l-sky-300', plate: 'text-sky-100', dot: 'bg-sky-300', glow: 'shadow-sky-950/30' },
-            { border: 'border-l-amber-300', plate: 'text-amber-100', dot: 'bg-amber-300', glow: 'shadow-amber-950/30' },
-            { border: 'border-l-emerald-300', plate: 'text-emerald-100', dot: 'bg-emerald-300', glow: 'shadow-emerald-950/30' },
-            { border: 'border-l-rose-300', plate: 'text-rose-100', dot: 'bg-rose-300', glow: 'shadow-rose-950/30' },
-        ];
-        const toneIndex = Array.from(route.lineId).reduce((sum, char) => sum + char.charCodeAt(0), 0) % tones.length;
-        const tone = tones[toneIndex];
+        const tone = routeTone(route, routes);
         return (
             <div
                 key={`${route.lineId}${keySuffix}`}
