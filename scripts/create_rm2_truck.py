@@ -24,6 +24,7 @@ def clear_scene():
 
 def material(name, color, metallic=0.0, roughness=0.5, emission=None):
     mat = bpy.data.materials.new(name)
+    mat.diffuse_color = color
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
     bsdf.inputs["Base Color"].default_value = color
@@ -229,6 +230,14 @@ def build_truck():
     scene.render.filepath = PREVIEW_PATH
     scene.view_settings.look = "Medium High Contrast"
     scene.world.color = (0.008, 0.012, 0.02)
+
+    # Persist a colored viewport when the .blend file is opened interactively.
+    for screen in bpy.data.screens:
+        for area in screen.areas:
+            if area.type != "VIEW_3D":
+                continue
+            area.spaces.active.shading.type = "MATERIAL"
+            area.spaces.active.shading.color_type = "MATERIAL"
 
     bpy.ops.wm.save_as_mainfile(filepath=BLEND_PATH)
     bpy.ops.render.render(write_still=True)
