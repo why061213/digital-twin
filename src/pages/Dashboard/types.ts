@@ -1,6 +1,6 @@
 import type { RoadPathMessage, RouteOrder as RealtimeRouteOrder } from './hooks/useDashboardRealtime';
 
-export type ViewMode = 'warehouse' | 'chinaMap' | 'roadMap' | 'roadMap2';
+export type ViewMode = 'chinaMap' | 'roadMap' | 'roadMap2';
 export type LonLat = [number, number];
 export type RoadGroupStrategy = 'business-priority' | 'by-order' | 'by-path' | 'by-route';
 export type RouteOrder = RealtimeRouteOrder;

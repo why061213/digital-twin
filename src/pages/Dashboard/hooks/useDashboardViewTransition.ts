@@ -9,7 +9,7 @@ type UseDashboardViewTransitionParams = {
 export function useDashboardViewTransition({
     onBeforeViewChange,
 }: UseDashboardViewTransitionParams = {}) {
-    const [view, setView] = useState<ViewMode>('warehouse');
+    const [view, setView] = useState<ViewMode>('chinaMap');
     const [chinaMapSession, setChinaMapSession] = useState(0);
     const [isPreparingChinaMap, setIsPreparingChinaMap] = useState(false);
     const [isRevealingChinaMap, setIsRevealingChinaMap] = useState(false);

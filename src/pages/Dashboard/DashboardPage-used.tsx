@@ -62,7 +62,7 @@ function DashboardPage() {
     const roadGroupKeepCurrentEmptyRef = useRef(false);
     const staleRoadGroupFallbackIdRef = useRef<string | null>(null);
     const pendingNextGroupIdRef = useRef<string | null>(null);
-    const [view, setView] = useState<ViewMode>('warehouse');
+    const [view, setView] = useState<ViewMode>('chinaMap');
     const [routeOrders, setRouteOrders] = useState<RouteOrder[]>([]);
     const [roadGroups, setRoadGroups] = useState<RoadGroupSummary[]>([]);
     const [activeRoadGroupId, setActiveRoadGroupId] = useState<string | null>(null);

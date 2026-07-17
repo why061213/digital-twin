@@ -25,7 +25,7 @@ import {
 
 function DashboardPage() {
     const [isDispatching, setIsDispatching] = useState(false);
-    const [view, setView] = useState<ViewMode>('warehouse');
+    const [view, setView] = useState<ViewMode>('chinaMap');
     const [isRoadMapVisualReady, setIsRoadMapVisualReady] = useState(false);
     const [isRoadMap2VisualReady, setIsRoadMap2VisualReady] = useState(false);
     const mapRef = useRef<ChinaMap3DHandle>(null);

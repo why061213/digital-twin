@@ -1,5 +1,4 @@
 import type { RefObject } from 'react';
-import Warehouse3D from '../modules/Warehouse3D';
 import ChinaMap3D from '../modules/ChinaMap3D';
 import type { ChinaMap3DHandle } from '../modules/ChinaMap3D';
 import RoadMap3D1 from '../modules/RoadMap3D-1';
@@ -19,7 +18,7 @@ type DashboardCenterPanelProps = {
     onWarehouseTourStateChange: (state: {
         mode: 'overview' | 'focus';
         cityName?: string;
-        displayData?: Record<string, any>;
+        displayData?: Record<string, unknown>;
     }) => void;
 };
 
@@ -34,9 +33,6 @@ export function DashboardCenterPanel({
     onWarehouseTourStateChange,
 }: DashboardCenterPanelProps) {
     // 只挂载当前活动场景：卸载会触发各自的 Three.js cleanup，避免 RAF/Timer/WebGL 累积。
-    if (view === 'warehouse') {
-        return <div className="absolute inset-0"><Warehouse3D /></div>;
-    }
     if (view === 'chinaMap') {
         return (
             <div className="absolute inset-0">
