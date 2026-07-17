@@ -32,6 +32,9 @@ function DashboardPage() {
     const mapRef = useRef<ChinaMap3DHandle>(null);
     const roadMapRef = useRef<RoadMap3D1Handle>(null);
     const roadMap2Ref = useRef<RoadMap3D2Handle>(null);
+    const handleActiveRm1VehicleChange = useCallback((lineId: string | null) => {
+        roadMapRef.current?.setHighlightedVehicle(lineId);
+    }, []);
     const handleActiveRm2VehicleChange = useCallback((lineId: string | null) => {
         roadMap2Ref.current?.setHighlightedVehicle(lineId);
     }, []);
@@ -372,9 +375,13 @@ function DashboardPage() {
                         mode={sidePanelMode}
                         warehouseFocus={warehouseFocus}
                         roadGroup={displayedRoadPanelState}
-                        roadPanelVariant={view === 'roadMap2' ? 'vehicle' : 'aggregate'}
+                        roadPanelVariant="vehicle"
                         isRoadGroupFading={view === 'roadMap' ? isRoadGroupFading : false}
-                        onActiveVehicleChange={view === 'roadMap2' ? handleActiveRm2VehicleChange : undefined}
+                        onActiveVehicleChange={view === 'roadMap2'
+                            ? handleActiveRm2VehicleChange
+                            : view === 'roadMap'
+                                ? handleActiveRm1VehicleChange
+                                : undefined}
                     />
                     {roadGroupQueue}
                     {rm2GroupQueue}

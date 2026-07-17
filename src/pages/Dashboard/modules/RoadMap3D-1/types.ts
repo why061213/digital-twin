@@ -6,6 +6,7 @@ export type RoadMap3DHandle = {
     removeRoadPath: (id: string) => void;
     clearRoads: () => void;
     updateTruckPosition: (lineId: string, position: [number, number], info?: RoadObjectInfo) => void;
+    setHighlightedVehicle: (lineId: string | null) => void;
     refreshAllPositions: () => void;
 };
 
@@ -33,6 +34,9 @@ export type VehicleBarState = {
     progress: number;
     currentCoords: [number, number];
     info: RoadObjectInfo;
+    upgradeProgress: number;
+    upgradeAnimationFrame?: number;
+    truckVisual?: THREE.Group;
 };
 
 export type OrderLaneState = {

@@ -1,5 +1,6 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mapPosition } from '../geo';
 import { disposeObject3D, clamp01, makePathCurve, indexCount } from '../utils';
 import { ROAD_LIFT, TRUCK_LIFT, PATH_SAMPLE_COUNT, CAMERA_TILT_RATIO } from '../constants';
@@ -38,6 +39,58 @@ const UNIFIED_COLORS = [
     0xff00ff,   // 品红色
     0x00ff00,   // 纯绿色
 ];
+
+const TRUCK_MODEL_URL = '/models/rm2-truck.glb';
+const TRUCK_MODEL_SCALE = 1;
+const TRUCK_MODEL_Y_OFFSET = -0.31;
+const VEHICLE_UPGRADE_MS = 420;
+let truckTemplatePromise: Promise<THREE.Object3D> | null = null;
+
+function loadTruckTemplate(): Promise<THREE.Object3D> {
+    if (!truckTemplatePromise) {
+        truckTemplatePromise = new Promise<THREE.Object3D>((resolve, reject) => {
+            new GLTFLoader().load(
+                TRUCK_MODEL_URL,
+                (gltf) => resolve(gltf.scene),
+                undefined,
+                reject,
+            );
+        }).catch((error) => {
+            truckTemplatePromise = null;
+            throw error;
+        });
+    }
+    return truckTemplatePromise;
+}
+
+function cloneTruckTemplate(template: THREE.Object3D) {
+    const clone = template.clone(true);
+    clone.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return;
+        object.geometry = object.geometry.clone();
+        object.material = Array.isArray(object.material)
+            ? object.material.map((material) => material.clone())
+            : object.material.clone();
+        object.castShadow = false;
+        object.receiveShadow = false;
+        object.renderOrder = 44;
+    });
+    return clone;
+}
+
+function vehicleLocatorColor(laneColor: number, lineId: string) {
+    const color = new THREE.Color(laneColor);
+    const hsl = { h: 0, s: 0, l: 0 };
+    color.getHSL(hsl);
+    const variant = Array.from(lineId).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 5;
+    const lightnessOffset = [-0.08, -0.04, 0, 0.05, 0.1][variant];
+    color.setHSL(
+        hsl.h,
+        THREE.MathUtils.clamp(hsl.s * 0.92 + 0.08, 0.58, 1),
+        THREE.MathUtils.clamp(hsl.l + lightnessOffset, 0.42, 0.72),
+    );
+    return color;
+}
 
 function trackKeyFor(id: string, coords: [number, number][], info: RoadObjectInfo) {
     if (info.pathKey) return info.pathKey;
@@ -109,6 +162,51 @@ function pointAndTangentAtProgress(road: RoadState, progress: number) {
     return { point, tangent };
 }
 
+function cancelTruckHeadingAnimation(vehicle: VehicleBarState) {
+    const visual = vehicle.truckVisual;
+    const animationFrame = visual?.userData.headingAnimationFrame;
+    if (typeof animationFrame === 'number') cancelAnimationFrame(animationFrame);
+    if (visual) visual.userData.headingAnimationFrame = undefined;
+}
+
+function animateTruckHeading(vehicle: VehicleBarState, targetWorldHeading: number) {
+    const visual = vehicle.truckVisual;
+    if (!visual) return;
+    cancelTruckHeadingAnimation(vehicle);
+    const savedHeading = visual.userData.worldHeading;
+    if (typeof savedHeading !== 'number' || !Number.isFinite(savedHeading)) {
+        visual.userData.worldHeading = targetWorldHeading;
+        visual.rotation.y = targetWorldHeading - vehicle.bar.rotation.y;
+        return;
+    }
+    const angleDelta = Math.atan2(
+        Math.sin(targetWorldHeading - savedHeading),
+        Math.cos(targetWorldHeading - savedHeading),
+    );
+    if (Math.abs(angleDelta) < THREE.MathUtils.degToRad(0.5)) {
+        visual.userData.worldHeading = targetWorldHeading;
+        visual.rotation.y = targetWorldHeading - vehicle.bar.rotation.y;
+        return;
+    }
+    const startedAt = performance.now();
+    const duration = THREE.MathUtils.clamp(Math.abs(angleDelta) / Math.PI * 850, 180, 850);
+    const step = () => {
+        const progress = Math.min(1, (performance.now() - startedAt) / duration);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const worldHeading = savedHeading + angleDelta * eased;
+        visual.userData.worldHeading = worldHeading;
+        visual.rotation.y = worldHeading - vehicle.bar.rotation.y;
+        if (progress < 1) {
+            visual.userData.headingAnimationFrame = requestAnimationFrame(step);
+            return;
+        }
+        visual.userData.headingAnimationFrame = undefined;
+        visual.userData.worldHeading = targetWorldHeading;
+        visual.rotation.y = targetWorldHeading - vehicle.bar.rotation.y;
+    };
+    visual.userData.headingAnimationFrame = requestAnimationFrame(step);
+}
+
 function setVehicleBarTransform(road: RoadState, lane: OrderLaneState, vehicle: VehicleBarState) {
     const { point, tangent } = pointAndTangentAtProgress(road, vehicle.progress);
     const laneCount = Math.max(1, road.orders.size);
@@ -120,11 +218,21 @@ function setVehicleBarTransform(road: RoadState, lane: OrderLaneState, vehicle: 
 
     vehicle.bar.position.copy(position);
     vehicle.bar.rotation.y = -Math.atan2(normal.z, normal.x);
+    if (vehicle.truckVisual) {
+        const pathHeading = Math.atan2(tangent.x, tangent.z);
+        const providerDirection = Number(vehicle.info.directionDeg);
+        const worldHeading = Number.isFinite(providerDirection)
+            ? -THREE.MathUtils.degToRad(providerDirection)
+            : pathHeading;
+        animateTruckHeading(vehicle, worldHeading);
+    }
 }
 
 export function useRoadControls(
     refs: ReturnType<typeof useRoadMapRefs>,
 ) {
+    const highlightedLineIdRef = useRef<string | null>(null);
+    const highlightGenerationRef = useRef(0);
     const easeInOutCubic = useCallback((value: number) => (
         value < 0.5
             ? 4 * value * value * value
@@ -134,6 +242,131 @@ export function useRoadControls(
     const paintGreenRoad = useCallback((tube: THREE.Mesh, progress: number, tubularSegments: number, radialSegments: number) => {
         drawTubeProgress(tube, progress, tubularSegments, radialSegments);
     }, []);
+
+    const findVehicle = useCallback((lineId: string) => {
+        const trackKey = refs.lineTrackMapRef.current.get(lineId);
+        const road = trackKey ? refs.roadsMapRef.current.get(trackKey) : undefined;
+        if (!road) return null;
+        for (const lane of road.orders.values()) {
+            const vehicle = lane.vehicles.get(lineId);
+            if (vehicle) return { road, lane, vehicle };
+        }
+        return null;
+    }, [refs.lineTrackMapRef, refs.roadsMapRef]);
+
+    const applyUpgradeVisual = useCallback((vehicle: VehicleBarState) => {
+        const progress = clamp01(vehicle.upgradeProgress);
+        const material = vehicle.bar.material as THREE.MeshBasicMaterial;
+        const baseOpacity = typeof vehicle.bar.userData.baseOpacity === 'number'
+            ? vehicle.bar.userData.baseOpacity
+            : 0.95;
+        material.opacity = baseOpacity * (1 - progress);
+        material.needsUpdate = true;
+        vehicle.truckVisual?.scale.setScalar(Math.max(0.001, progress));
+    }, []);
+
+    const removeTruckVisual = useCallback((vehicle: VehicleBarState) => {
+        if (!vehicle.truckVisual) return;
+        cancelTruckHeadingAnimation(vehicle);
+        vehicle.bar.remove(vehicle.truckVisual);
+        disposeObject3D(vehicle.truckVisual);
+        vehicle.truckVisual = undefined;
+    }, []);
+
+    const animateVehicleUpgrade = useCallback((vehicle: VehicleBarState, target: 0 | 1) => {
+        if (vehicle.upgradeAnimationFrame !== undefined) {
+            cancelAnimationFrame(vehicle.upgradeAnimationFrame);
+        }
+        const startProgress = vehicle.upgradeProgress;
+        const startedAt = performance.now();
+        const step = () => {
+            const elapsed = Math.min(1, (performance.now() - startedAt) / VEHICLE_UPGRADE_MS);
+            const eased = elapsed < 0.5
+                ? 4 * elapsed * elapsed * elapsed
+                : 1 - Math.pow(-2 * elapsed + 2, 3) / 2;
+            vehicle.upgradeProgress = THREE.MathUtils.lerp(startProgress, target, eased);
+            applyUpgradeVisual(vehicle);
+            if (elapsed < 1) {
+                vehicle.upgradeAnimationFrame = requestAnimationFrame(step);
+                return;
+            }
+            vehicle.upgradeAnimationFrame = undefined;
+            vehicle.upgradeProgress = target;
+            if (target === 0) removeTruckVisual(vehicle);
+            applyUpgradeVisual(vehicle);
+        };
+        vehicle.upgradeAnimationFrame = requestAnimationFrame(step);
+    }, [applyUpgradeVisual, removeTruckVisual]);
+
+    const createTruckVisual = useCallback((template: THREE.Object3D, vehicle: VehicleBarState, laneColor: number) => {
+        const visual = new THREE.Group();
+        const model = cloneTruckTemplate(template);
+        model.scale.setScalar(TRUCK_MODEL_SCALE);
+        model.position.y = TRUCK_MODEL_Y_OFFSET;
+        const locatorColor = vehicleLocatorColor(laneColor, vehicle.lineId);
+        const locator = new THREE.Mesh(
+            new THREE.RingGeometry(4.2, 4.8, 64),
+            new THREE.MeshBasicMaterial({
+                color: locatorColor,
+                transparent: true,
+                opacity: 0.88,
+                side: THREE.DoubleSide,
+                depthWrite: false,
+            }),
+        );
+        locator.rotation.x = Math.PI / 2;
+        locator.position.y = TRUCK_MODEL_Y_OFFSET + 0.03;
+        locator.renderOrder = 43;
+        visual.add(model, locator);
+        visual.scale.setScalar(0.001);
+        vehicle.bar.add(visual);
+        vehicle.truckVisual = visual;
+    }, []);
+
+    const upgradeVehicle = useCallback(async (vehicle: VehicleBarState) => {
+        const generation = highlightGenerationRef.current;
+        try {
+            const template = await loadTruckTemplate();
+            const current = findVehicle(vehicle.lineId);
+            if (generation !== highlightGenerationRef.current
+                || highlightedLineIdRef.current !== vehicle.lineId
+                || current?.vehicle !== vehicle) {
+                return;
+            }
+            if (!vehicle.truckVisual) createTruckVisual(template, vehicle, current.lane.color);
+            setVehicleBarTransform(current.road, current.lane, vehicle);
+            animateVehicleUpgrade(vehicle, 1);
+        } catch (error) {
+            console.warn('[RM1 truck model] load failed; keeping vehicle bar', {
+                lineId: vehicle.lineId,
+                error,
+            });
+        }
+    }, [animateVehicleUpgrade, createTruckVisual, findVehicle]);
+
+    const downgradeVehicle = useCallback((vehicle: VehicleBarState) => {
+        if (!vehicle.truckVisual) {
+            vehicle.upgradeProgress = 0;
+            applyUpgradeVisual(vehicle);
+            return;
+        }
+        animateVehicleUpgrade(vehicle, 0);
+    }, [animateVehicleUpgrade, applyUpgradeVisual]);
+
+    const setHighlightedVehicle = useCallback((lineId: string | null) => {
+        if (highlightedLineIdRef.current === lineId) return;
+        const previousLineId = highlightedLineIdRef.current;
+        highlightedLineIdRef.current = lineId;
+        highlightGenerationRef.current += 1;
+        if (previousLineId) {
+            const previous = findVehicle(previousLineId);
+            if (previous) downgradeVehicle(previous.vehicle);
+        }
+        if (lineId) {
+            const next = findVehicle(lineId);
+            if (next) void upgradeVehicle(next.vehicle);
+        }
+    }, [downgradeVehicle, findVehicle, upgradeVehicle]);
 
     const updateOrderVisuals = useCallback((road: RoadState) => {
         const orderCount = Math.max(1, road.orders.size);
@@ -174,12 +407,16 @@ export function useRoadControls(
                 }
 
                 // 2. 透明度
-                material.opacity = isLead ? 1.0 : 0.85;
+                const baseOpacity = isLead ? 1.0 : 0.85;
+                vehicle.bar.userData.baseOpacity = baseOpacity;
+                material.opacity = baseOpacity * (1 - clamp01(vehicle.upgradeProgress));
 
                 // 3. 缩放（领头车辆稍大）
-                const baseScale = isLead
-                    ? { x: 1.08, y: 1.22, z: 1.08 }
-                    : { x: 0.65, y: 0.80, z: 0.65 };
+                const baseScale = vehicle.upgradeProgress > 0
+                    ? { x: 1, y: 1, z: 1 }
+                    : isLead
+                        ? { x: 1.08, y: 1.22, z: 1.08 }
+                        : { x: 0.65, y: 0.80, z: 0.65 };
                 vehicle.baseScale.set(baseScale.x, baseScale.y, baseScale.z);
                 vehicle.bar.scale.copy(vehicle.baseScale);
 
@@ -271,6 +508,14 @@ export function useRoadControls(
         const trackKey = refs.lineTrackMapRef.current.get(id) ?? id;
         const road = refs.roadsMapRef.current.get(trackKey);
         if (!road) return;
+        road.orders.forEach((lane) => {
+            lane.vehicles.forEach((vehicle) => {
+                if (vehicle.upgradeAnimationFrame !== undefined) {
+                    cancelAnimationFrame(vehicle.upgradeAnimationFrame);
+                }
+                cancelTruckHeadingAnimation(vehicle);
+            });
+        });
         refs.sceneRef.current?.remove(road.group);
         disposeObject3D(road.group);
         refs.roadsMapRef.current.delete(trackKey);
@@ -278,6 +523,9 @@ export function useRoadControls(
     }, [refs]);
 
     const clearRoads = useCallback(() => {
+        // Preserve the requested line across an atomic same-group rebuild. The newly
+        // created vehicle bar upgrades itself when that line is registered again.
+        highlightGenerationRef.current += 1;
         Array.from(refs.roadsMapRef.current.keys()).forEach((id) => clearRoad(id));
         refs.roadsMapRef.current.clear();
         refs.lineTrackMapRef.current.clear();
@@ -344,12 +592,16 @@ export function useRoadControls(
             progress: 0,
             currentCoords: road.currentCoords,
             info,
+            upgradeProgress: 0,
         };
         lane.vehicles.set(lineId, vehicle);
         road.lineIds.add(lineId);
         refs.lineTrackMapRef.current.set(lineId, road.pathKey);
+        if (highlightedLineIdRef.current === lineId) {
+            void upgradeVehicle(vehicle);
+        }
         return vehicle;
-    }, [refs.lineTrackMapRef]);
+    }, [refs.lineTrackMapRef, upgradeVehicle]);
 
     const addRoadPath = useCallback(
         (id: string, coords: [number, number][], info: RoadObjectInfo = {}) => {
@@ -453,6 +705,10 @@ export function useRoadControls(
         road.orders.forEach((lane) => {
             const vehicle = lane.vehicles.get(id);
             if (!vehicle) return;
+            if (vehicle.upgradeAnimationFrame !== undefined) {
+                cancelAnimationFrame(vehicle.upgradeAnimationFrame);
+            }
+            cancelTruckHeadingAnimation(vehicle);
             lane.vehicles.delete(id);
             road.group.remove(vehicle.bar);
             disposeObject3D(vehicle.bar);
@@ -546,5 +802,6 @@ export function useRoadControls(
         paintGreenRoad,
         updateProgressFromTruck,
         focusAllRoads,
+        setHighlightedVehicle,
     };
 }
