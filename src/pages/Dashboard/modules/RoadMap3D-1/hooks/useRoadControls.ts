@@ -305,7 +305,7 @@ export function useRoadControls(
         model.position.y = TRUCK_MODEL_Y_OFFSET;
         const locatorColor = vehicleLocatorColor(laneColor, vehicle.lineId);
         const locator = new THREE.Mesh(
-            new THREE.RingGeometry(4.2, 4.8, 64),
+            new THREE.RingGeometry(1.05, 1.2, 64),
             new THREE.MeshBasicMaterial({
                 color: locatorColor,
                 transparent: true,
