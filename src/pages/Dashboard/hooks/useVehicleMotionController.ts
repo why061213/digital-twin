@@ -62,7 +62,7 @@ type Options = {
 
 const WS_FLUSH_MS = 300;
 const ARRIVAL_RECHECK_DELAY_MS = 5_000;
-const ROUTE_CORRIDOR_TOLERANCE_KM = 1;
+const ROUTE_CORRIDOR_TOLERANCE_KM = 2;
 
 function isTrustedRealPosition(message: TruckPositionMessage) {
     const source = message.source?.trim().toLowerCase() ?? '';
