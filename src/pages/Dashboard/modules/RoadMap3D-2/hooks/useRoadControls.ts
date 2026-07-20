@@ -6,6 +6,7 @@ import { disposeObject3D, clamp01, makePathCurve, indexCount } from '../utils';
 import { ROAD_LIFT, TRUCK_LIFT, PATH_SAMPLE_COUNT } from '../constants';
 import type { RoadState, RoadObjectInfo, OrderLaneState, VehicleBarState } from '../types';
 import type { useRoadMapRefs } from './useRoadMapRefs';
+import { createRouteVisualLayers } from '../../routeVisuals';
 
 // const ORDER_COLORS = [
 //     0x22c55e,
@@ -739,7 +740,11 @@ export function useRoadControls(
             labelAnchor.z += 0.95;
 
             const group = new THREE.Group();
-            group.add(grayTube, selectionTube);
+            group.add(
+                createRouteVisualLayers(pathCurve, tubularSegments, radialSegments, samples, 'rm2'),
+                grayTube,
+                selectionTube,
+            );
             scene.add(group);
 
             const road: RoadState = {
