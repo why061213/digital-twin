@@ -7,7 +7,7 @@ import { ROAD_LIFT, TRUCK_LIFT, PATH_SAMPLE_COUNT, CAMERA_TILT_RATIO } from '../
 import type { RoadState, RoadObjectInfo, OrderLaneState, VehicleBarState } from '../types';
 import type { useRoadMapRefs } from './useRoadMapRefs';
 import { createRouteVisualLayers } from '../../routeVisuals';
-import { updateVehicleSceneLabel } from '../../vehicleSceneLabels';
+import { syncVehicleAlertRipple } from '../../vehicleAlertRipples';
 
 // const ORDER_COLORS = [
 //     0x22c55e,
@@ -351,7 +351,6 @@ export function useRoadControls(
             setVehicleBarTransform(current.road, current.lane, vehicle);
             const locator = vehicle.truckVisual?.userData.locator;
             if (locator instanceof THREE.Object3D) locator.visible = true;
-            updateVehicleSceneLabel(vehicle, 'rm1', current.lane.color, true);
             animateVehicleUpgrade(vehicle, 1);
         } catch (error) {
             console.warn('[RM1 truck model] load failed; keeping vehicle bar', {
@@ -364,14 +363,13 @@ export function useRoadControls(
     const downgradeVehicle = useCallback((vehicle: VehicleBarState) => {
         const locator = vehicle.truckVisual?.userData.locator;
         if (locator instanceof THREE.Object3D) locator.visible = false;
-        updateVehicleSceneLabel(vehicle, 'rm1', findVehicle(vehicle.lineId)?.lane.color ?? 0x00ff88, false);
         if (!vehicle.truckVisual) {
             vehicle.upgradeProgress = 0;
             applyUpgradeVisual(vehicle);
             return;
         }
         animateVehicleUpgrade(vehicle, 0);
-    }, [animateVehicleUpgrade, applyUpgradeVisual, findVehicle]);
+    }, [animateVehicleUpgrade, applyUpgradeVisual]);
 
     const setHighlightedVehicle = useCallback((lineId: string | null) => {
         if (highlightedLineIdRef.current === lineId) return;
@@ -446,9 +444,7 @@ export function useRoadControls(
                 vehicle.bar.renderOrder = isLead ? 36 : 18 + (vehicleIndex % 8);
 
                 setVehicleBarTransform(road, lane, vehicle);
-                if (highlightedLineIdRef.current === vehicle.lineId) {
-                    updateVehicleSceneLabel(vehicle, 'rm1', lane.color, true);
-                }
+                syncVehicleAlertRipple(vehicle);
             });
         });
     }, []);

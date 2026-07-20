@@ -26,6 +26,9 @@ export type ActiveRoute = RouteOrder & {
     driverName?: string;
     address?: string;
     stateStr?: string;
+    alarmStr?: string;
+    alarmSeverity?: 'none' | 'warning' | 'critical';
+    online?: boolean;
     directionDeg?: number;
     directionLabel?: string;
     nextCalibrationAt: number;

@@ -235,10 +235,22 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
     const activeRoutesRef = useRef<Map<string, RenderRouteDTO>>(new Map());
 
     const mapAdapter = useMemo(() => ({
-        updateVehicle: (lineId: string, position: [number, number], info: { speedKmh: number | null; status: string; routeLengthKm?: number }) => {
+        updateVehicle: (lineId: string, position: [number, number], info: {
+            speedKmh: number | null;
+            status: string;
+            routeLengthKm?: number;
+            stateStr?: string;
+            alarmStr?: string;
+            alarmSeverity?: 'none' | 'warning' | 'critical';
+            online?: boolean;
+        }) => {
             roadMapRef.current?.updateTruckPosition(lineId, position, {
                 speedKmh: info.speedKmh,
                 status: info.status,
+                stateStr: info.stateStr,
+                alarmStr: info.alarmStr,
+                alarmSeverity: info.alarmSeverity,
+                online: info.online,
             });
         },
         removeVehicle: (lineId: string) => roadMapRef.current?.removeRoadPath(lineId),
@@ -246,7 +258,15 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             lineId: string,
             coordinates: [number, number][],
             position: [number, number],
-            info: { speedKmh: number | null; status: string; routeLengthKm?: number },
+            info: {
+                speedKmh: number | null;
+                status: string;
+                routeLengthKm?: number;
+                stateStr?: string;
+                alarmStr?: string;
+                alarmSeverity?: 'none' | 'warning' | 'critical';
+                online?: boolean;
+            },
         ) => {
             const roadMap = roadMapRef.current;
             const route = activeRoutesRef.current.get(lineId);
@@ -260,6 +280,10 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
                 speedKmh: info.speedKmh,
                 routeLengthKm: info.routeLengthKm ?? route.routeLengthKm,
                 orderId: route.orderId,
+                stateStr: info.stateStr,
+                alarmStr: info.alarmStr,
+                alarmSeverity: info.alarmSeverity,
+                online: info.online,
                 // 越界车辆从共享道路中独立出来，后续改路复用同一个稳定轨道键。
                 pathKey: `${route.pathKey}::adaptive::${lineId}`,
             };

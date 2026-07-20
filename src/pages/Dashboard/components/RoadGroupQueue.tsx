@@ -11,7 +11,7 @@ export function RoadGroupQueue({ groups, activeGroupId, isLoading, onSelectGroup
     if (groups.length === 0) return null;
 
     return (
-        <div className="absolute left-4 top-4 z-40 flex max-w-[calc(100%-2rem)] gap-2 overflow-x-auto rounded-md border border-white/10 bg-slate-950/65 p-2 text-xs text-slate-300 shadow-xl backdrop-blur-md pointer-events-auto">
+        <div className="absolute left-1/2 top-24 z-40 flex max-w-[46%] -translate-x-1/2 gap-2 overflow-x-auto rounded-md border border-white/10 bg-slate-950/65 p-2 text-xs text-slate-300 shadow-xl backdrop-blur-md pointer-events-auto">
             {groups.map((group) => (
                 <button
                     key={group.groupId}

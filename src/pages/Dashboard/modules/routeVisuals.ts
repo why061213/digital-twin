@@ -166,7 +166,7 @@ function createEndpointLabel(
         depthWrite: false,
     });
     const sprite = new THREE.Sprite(material);
-    const baseScale = mode === 'rm2' ? [14.2, 1.95] : [7.4, 1.02];
+    const baseScale = mode === 'rm2' ? [22, 3.02] : [11.5, 1.58];
     const referenceDistance = mode === 'rm2' ? 115 : 180;
     const offset = mode === 'rm2' ? 3.7 : 1.85;
     const offsetVariant = Array.from(value ?? prefix)

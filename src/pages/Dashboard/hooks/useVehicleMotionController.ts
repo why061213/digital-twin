@@ -29,6 +29,10 @@ type MotionRenderInfo = {
     speedKmh: number | null;
     status: string;
     routeLengthKm?: number;
+    stateStr?: string;
+    alarmStr?: string;
+    alarmSeverity?: 'none' | 'warning' | 'critical';
+    online?: boolean;
 };
 
 type RouteSeed = {
@@ -100,6 +104,10 @@ export function useVehicleMotionController(options: Options) {
             return true;
         }
         if (!message.position) return false;
+        route.stateStr = message.stateStr ?? route.stateStr;
+        route.alarmStr = message.alarmStr ?? route.alarmStr;
+        route.alarmSeverity = message.alarmSeverity ?? route.alarmSeverity;
+        route.online = message.online ?? route.online;
         const now = performance.now();
         const routeNodes = route.routeNodes ?? route.coordinates;
         const corridor = inspectRouteCorridor(
@@ -142,6 +150,10 @@ export function useVehicleMotionController(options: Options) {
                     speedKmh: route.speedKmh,
                     status: route.status,
                     routeLengthKm: route.routeLengthKm,
+                    stateStr: route.stateStr,
+                    alarmStr: route.alarmStr,
+                    alarmSeverity: route.alarmSeverity,
+                    online: route.online,
                 },
             );
             console.info('[RM2 motion] adapted route to real position', {
@@ -294,7 +306,14 @@ export function useVehicleMotionController(options: Options) {
             const now = performance.now();
             const arrivalCandidates: string[] = [];
             activeRoutesRef.current.forEach((route) => {
-                options.mapAdapter.updateVehicle(route.lineId, predictedPosition(route, now), { speedKmh: route.speedKmh, status: route.status });
+                options.mapAdapter.updateVehicle(route.lineId, predictedPosition(route, now), {
+                    speedKmh: route.speedKmh,
+                    status: route.status,
+                    stateStr: route.stateStr,
+                    alarmStr: route.alarmStr,
+                    alarmSeverity: route.alarmSeverity,
+                    online: route.online,
+                });
                 const reachedPredictedEnd = route.pathLength > 0
                     && predictedDistance(route, now) >= route.pathLength - 0.0001;
                 if (reachedPredictedEnd && !route.arrivalCheckRequested && now >= route.nextCalibrationAt) {

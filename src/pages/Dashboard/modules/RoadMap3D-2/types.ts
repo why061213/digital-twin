@@ -33,6 +33,9 @@ export type RoadObjectInfo = {
     driverName?: string;
     address?: string;
     stateStr?: string;
+    alarmStr?: string;
+    alarmSeverity?: 'none' | 'warning' | 'critical';
+    online?: boolean;
     directionLabel?: string;
     manualMarker?: boolean;
 };
@@ -48,8 +51,8 @@ export type VehicleBarState = {
     upgradeProgress: number;
     upgradeAnimationFrame?: number;
     truckVisual?: THREE.Group;
-    sceneLabel?: THREE.Sprite;
-    sceneLabelSignature?: string;
+    alertRipple?: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
+    alertSeverity?: 'none' | 'warning' | 'critical';
 };
 
 export type OrderLaneState = {

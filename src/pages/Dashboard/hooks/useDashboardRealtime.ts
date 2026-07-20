@@ -65,6 +65,9 @@ export type TruckPositionMessage = {
     driverName?: string;
     address?: string;
     stateStr?: string;
+    alarmStr?: string;
+    alarmSeverity?: 'none' | 'warning' | 'critical';
+    online?: boolean;
     directionDeg?: number;
     directionLabel?: string;
     sequence?: number;
@@ -126,6 +129,9 @@ export type RouteOrder = {
     driverName?: string;
     address?: string;
     stateStr?: string;
+    alarmStr?: string;
+    alarmSeverity?: 'none' | 'warning' | 'critical';
+    online?: boolean;
     directionDeg?: number;
     directionLabel?: string;
 };

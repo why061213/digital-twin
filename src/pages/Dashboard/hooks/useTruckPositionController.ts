@@ -65,6 +65,9 @@ function positionDetailsPatch(message: TruckPositionMessage) {
         ...(message.driverName !== undefined ? { driverName: message.driverName } : {}),
         ...(message.address !== undefined ? { address: message.address } : {}),
         ...(message.stateStr !== undefined ? { stateStr: message.stateStr } : {}),
+        ...(message.alarmStr !== undefined ? { alarmStr: message.alarmStr } : {}),
+        ...(message.alarmSeverity !== undefined ? { alarmSeverity: message.alarmSeverity } : {}),
+        ...(message.online !== undefined ? { online: message.online } : {}),
         ...(message.directionDeg !== undefined ? { directionDeg: message.directionDeg } : {}),
         ...(message.directionLabel !== undefined ? { directionLabel: message.directionLabel } : {}),
     };
@@ -100,6 +103,10 @@ export function useTruckPositionController({
             orderName: route.orderName,
             pathKey: route.pathKey,
             directionDeg: route.directionDeg,
+            stateStr: route.stateStr,
+            alarmStr: route.alarmStr,
+            alarmSeverity: route.alarmSeverity,
+            online: route.online,
         });
     }, [roadMapRef]);
 
@@ -117,6 +124,10 @@ export function useTruckPositionController({
             orderName: route.orderName,
             pathKey: route.pathKey,
             directionDeg: route.directionDeg,
+            stateStr: route.stateStr,
+            alarmStr: route.alarmStr,
+            alarmSeverity: route.alarmSeverity,
+            online: route.online,
         });
     }, [roadMapRef]);
 

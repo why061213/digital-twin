@@ -574,7 +574,7 @@ function VehicleTransportDetails({
                             </div>
                             <div className="rounded border border-emerald-300/15 bg-emerald-300/[0.045] px-2.5 py-2">
                                 <div className="text-[10px] font-medium text-emerald-300/70">目的地</div>
-                                <div className="mt-1 line-clamp-2 text-[15px] font-semibold leading-5 text-emerald-50" title={toAddress.fullAddress}>
+                                <div className="mt-1 break-words text-[15px] font-semibold leading-5 text-emerald-50" title={toAddress.fullAddress}>
                                     {toAddress.detail}
                                 </div>
                             </div>
