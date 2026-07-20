@@ -125,10 +125,9 @@ function createEndpointMarker(
     return marker;
 }
 
-function compactEndpoint(value: string | undefined) {
-    const normalized = value?.replace(/\s+/g, '').trim();
-    if (!normalized) return '位置待确认';
-    return normalized.length > 16 ? `${normalized.slice(0, 16)}...` : normalized;
+function fullEndpoint(value: string | undefined) {
+    const normalized = value?.replace(/\s+/g, ' ').trim();
+    return normalized || '位置待确认';
 }
 
 function createEndpointLabel(
@@ -137,11 +136,16 @@ function createEndpointLabel(
     value: string | undefined,
     color: string,
     mode: 'rm1' | 'rm2',
-    identity: string,
     laneIndex: number,
 ) {
     const canvas = document.createElement('canvas');
-    canvas.width = 640;
+    const label = `${prefix} · ${fullEndpoint(value)}`;
+    const fontWeight = prefix === '终点' ? 600 : 500;
+    const font = `${fontWeight} 22px "Microsoft YaHei", sans-serif`;
+    const measuringContext = canvas.getContext('2d');
+    if (!measuringContext) return new THREE.Group();
+    measuringContext.font = font;
+    canvas.width = Math.max(320, Math.ceil(44 + measuringContext.measureText(label).width + 28));
     canvas.height = 88;
     const context = canvas.getContext('2d');
     if (!context) return new THREE.Group();
@@ -150,16 +154,11 @@ function createEndpointLabel(
     context.beginPath();
     context.arc(22, 44, prefix === '终点' ? 8 : 6, 0, Math.PI * 2);
     context.fill();
-    context.font = `${prefix === '终点' ? 600 : 500} 22px "Microsoft YaHei", sans-serif`;
+    context.font = font;
     context.lineWidth = 7;
     context.strokeStyle = 'rgba(2, 8, 20, 0.92)';
-    const heading = `${prefix} · ${identity}`;
-    context.strokeText(heading, 44, 54);
-    context.fillText(heading, 44, 54);
-    context.fillStyle = prefix === '终点' ? '#fef3c7' : '#dbeafe';
-    context.font = `${prefix === '终点' ? 600 : 400} 21px "Microsoft YaHei", sans-serif`;
-    context.strokeText(compactEndpoint(value), 198, 54);
-    context.fillText(compactEndpoint(value), 198, 54);
+    context.strokeText(label, 44, 54);
+    context.fillText(label, 44, 54);
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -172,7 +171,8 @@ function createEndpointLabel(
         depthWrite: false,
     });
     const sprite = new THREE.Sprite(material);
-    const baseScale = mode === 'rm2' ? [22, 3.02] : [11.5, 1.58];
+    const baseHeight = mode === 'rm2' ? 3.02 : 1.58;
+    const baseScale = [baseHeight * (canvas.width / canvas.height), baseHeight];
     const referenceDistance = mode === 'rm2' ? 115 : 180;
     const offset = mode === 'rm2' ? 3.7 : 1.85;
     const offsetVariant = Array.from(value ?? prefix)
@@ -207,15 +207,14 @@ export function createRouteEndpointLayer(
 ) {
     const preset = PRESETS[mode];
     const layer = new THREE.Group();
-    const identity = compactEndpoint(info.orderId || info.orderName || `订单${laneIndex + 1}`);
     const markerScale = preset.markerScale * (1 + laneIndex * 0.18);
     const start = createEndpointMarker(samples[0], markerScale, color, 10 + laneIndex);
     const end = createEndpointMarker(samples[samples.length - 1], markerScale, color, 10 + laneIndex);
     const startLabel = createEndpointLabel(
-        samples[0], '起点', info.from, colorText(color), mode, identity, laneIndex,
+        samples[0], '起点', info.from, colorText(color), mode, laneIndex,
     );
     const endLabel = createEndpointLabel(
-        samples[samples.length - 1], '终点', info.to, colorText(color), mode, identity, laneIndex,
+        samples[samples.length - 1], '终点', info.to, colorText(color), mode, laneIndex,
     );
     layer.add(start, end, startLabel, endLabel);
     return layer;
