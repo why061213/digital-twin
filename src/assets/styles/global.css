@@ -78,9 +78,12 @@
 
 .overflow-marquee {
     display: block;
+    width: 100%;
+    max-width: 100%;
     min-width: 0;
     overflow: hidden;
     white-space: nowrap;
+    contain: inline-size;
 }
 
 .overflow-marquee.is-overflowing {

@@ -577,7 +577,7 @@ function VehicleTransportDetails({
 
     return (
         <Panel title="车辆运输详情" className="h-full min-h-0">
-            <div key={targetRoute?.lineId ?? 'empty'} className="vehicle-detail-swap flex h-full min-h-0 flex-col">
+            <div key={targetRoute?.lineId ?? 'empty'} className="vehicle-detail-swap flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
                 <div
                     className="flex items-center justify-between gap-3 rounded border border-white/10 border-l-2 px-3 py-3 shadow-lg"
                     style={{
@@ -610,8 +610,8 @@ function VehicleTransportDetails({
                     </div>
                 </div>
 
-                <div className="no-scrollbar mt-3 flex min-h-0 flex-1 flex-col overflow-y-auto rounded border border-white/8 bg-slate-900/55 px-3 py-3">
-                    <div className="mb-3 grid grid-cols-[0.85fr_1.15fr] gap-2">
+                <div className="no-scrollbar mt-3 flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto rounded border border-white/8 bg-slate-900/55 px-3 py-3">
+                    <div className="mb-3 grid min-w-0 grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] gap-2">
                         <div className="min-w-0 rounded border border-white/8 bg-white/[0.025] px-2.5 py-2">
                             <div className="text-[9px] text-slate-500">始发省市</div>
                             <OverflowMarquee value={fromAddress.region} className="mt-1 text-[11px] font-medium text-slate-300" />
@@ -624,64 +624,64 @@ function VehicleTransportDetails({
                             <OverflowMarquee value={toAddress.region} className="mt-1 text-xs font-semibold text-emerald-100" />
                         </div>
                     </div>
-                    <div className="grid grid-cols-[1rem_1fr] gap-x-3">
+                    <div className="grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] gap-x-3 overflow-hidden">
                         <div className="flex flex-col items-center py-1">
                             <span className="h-2.5 w-2.5 rounded-full border-2 border-sky-200 bg-sky-500 shadow-[0_0_10px_rgba(56,189,248,0.7)]" />
                             <span className="my-1 min-h-5 w-px flex-1 bg-gradient-to-b from-sky-300/70 to-emerald-300/70" />
                             <span className="h-2.5 w-2.5 rounded-full border-2 border-emerald-200 bg-emerald-500 shadow-[0_0_10px_rgba(52,211,153,0.65)]" />
                         </div>
-                        <div className="flex min-h-0 flex-col justify-between gap-2">
-                            <div className="opacity-75">
+                        <div className="flex min-h-0 min-w-0 flex-col justify-between gap-2 overflow-hidden">
+                            <div className="min-w-0 overflow-hidden opacity-75">
                                 <div className="text-[10px] text-slate-500">起点</div>
                                 <OverflowMarquee value={fromAddress.detail} className="mt-1 text-xs font-medium leading-5 text-slate-300" />
                             </div>
-                            <div className="rounded border border-emerald-300/15 bg-emerald-300/[0.045] px-2.5 py-2">
+                            <div className="min-w-0 overflow-hidden rounded border border-emerald-300/15 bg-emerald-300/[0.045] px-2.5 py-2">
                                 <div className="text-[10px] font-medium text-emerald-300/70">目的地</div>
                                 <OverflowMarquee value={toAddress.detail} className="mt-1 text-[15px] font-semibold leading-5 text-emerald-50" />
                             </div>
                         </div>
                     </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2 border-t border-white/8 pt-3 text-xs">
-                        <div className="rounded bg-white/[0.035] px-2.5 py-2">
+                    <div className="mt-3 grid min-w-0 grid-cols-[repeat(2,minmax(0,1fr))] gap-2 border-t border-white/8 pt-3 text-xs">
+                        <div className="min-w-0 overflow-hidden rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">速度</div>
                             <div className="mt-1 font-semibold tabular-nums text-amber-100">
                                 {Number.isFinite(Number(targetRoute?.speedKmh)) ? `${Math.round(Number(targetRoute?.speedKmh))} km/h` : '--'}
                             </div>
                         </div>
-                        <div className="rounded bg-white/[0.035] px-2.5 py-2">
+                        <div className="min-w-0 overflow-hidden rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">驾驶员</div>
                             <OverflowMarquee value={targetRoute?.driverName || '--'} className="mt-1 font-semibold text-sky-100" />
                         </div>
-                        <div className="rounded bg-white/[0.035] px-2.5 py-2">
+                        <div className="min-w-0 overflow-hidden rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">路线长度</div>
                             <div className="mt-1 font-semibold tabular-nums text-cyan-100">
                                 {Number.isFinite(Number(targetRoute?.routeLengthKm)) ? `${Number(targetRoute?.routeLengthKm).toFixed(1)} km` : '--'}
                             </div>
                         </div>
-                        <div className="rounded bg-white/[0.035] px-2.5 py-2">
+                        <div className="min-w-0 overflow-hidden rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">重量</div>
                             <OverflowMarquee value={routeCargoWeight(targetRoute)} className="mt-1 font-semibold tabular-nums text-amber-100" />
                         </div>
-                        <div className="rounded bg-white/[0.035] px-2.5 py-2">
+                        <div className="min-w-0 overflow-hidden rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">货物内容</div>
                             <OverflowMarquee value={routeCargoContent(targetRoute)} className="mt-1 font-medium text-sky-100" />
                         </div>
-                        <div className="rounded bg-white/[0.035] px-2.5 py-2">
+                        <div className="min-w-0 overflow-hidden rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">经纬度</div>
                             <OverflowMarquee value={coordinateText(targetRoute?.currentPosition)} className="mt-1 font-medium tabular-nums text-slate-200" />
                         </div>
-                        <div className="col-span-2 rounded bg-white/[0.035] px-2.5 py-2">
+                        <div className="col-span-2 min-w-0 overflow-hidden rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">方向</div>
                             <OverflowMarquee
                                 value={detailedDirection(targetRoute?.directionDeg, targetRoute?.directionLabel)}
                                 className="mt-1 font-medium text-cyan-100"
                             />
                         </div>
-                        <div className="col-span-2 rounded bg-white/[0.035] px-2.5 py-2">
+                        <div className="col-span-2 min-w-0 overflow-hidden rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">当前位置</div>
                             <OverflowMarquee value={compactPositionAddress(targetRoute?.address)} className="mt-1 text-slate-200" />
                         </div>
-                        <div className="col-span-2 rounded bg-white/[0.035] px-2.5 py-2">
+                        <div className="col-span-2 min-w-0 overflow-hidden rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">车辆状态</div>
                             <OverflowMarquee value={combinedVehicleState(targetRoute)} className={`mt-1 leading-5 ${stateTone}`} />
                         </div>
