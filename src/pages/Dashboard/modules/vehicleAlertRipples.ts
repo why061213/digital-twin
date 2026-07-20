@@ -37,8 +37,8 @@ function createRippleMaterial(severity: Exclude<VehicleAlarmSeverity, 'none'>) {
         uniforms: {
             uTime: { value: 0 },
             uPeriod: { value: critical ? 3 : 5 },
-            uColor: { value: new THREE.Color(critical ? 0xff1744 : 0xff5a36) },
-            uIntensity: { value: critical ? 1 : 0.76 },
+            uColor: { value: new THREE.Color(critical ? 0xff1744 : 0xffb000) },
+            uIntensity: { value: critical ? 1 : 0.88 },
         },
         vertexShader: `
             varying vec2 vUv;
