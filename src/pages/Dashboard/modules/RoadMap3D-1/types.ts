@@ -23,6 +23,10 @@ export type RoadObjectInfo = {
     orderName?: string;
     pathKey?: string;
     directionDeg?: number;
+    driverName?: string;
+    address?: string;
+    stateStr?: string;
+    directionLabel?: string;
     manualMarker?: boolean;
 };
 
@@ -37,6 +41,8 @@ export type VehicleBarState = {
     upgradeProgress: number;
     upgradeAnimationFrame?: number;
     truckVisual?: THREE.Group;
+    sceneLabel?: THREE.Sprite;
+    sceneLabelSignature?: string;
 };
 
 export type OrderLaneState = {

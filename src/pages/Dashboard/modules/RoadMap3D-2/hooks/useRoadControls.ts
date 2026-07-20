@@ -7,6 +7,7 @@ import { ROAD_LIFT, TRUCK_LIFT, PATH_SAMPLE_COUNT } from '../constants';
 import type { RoadState, RoadObjectInfo, OrderLaneState, VehicleBarState } from '../types';
 import type { useRoadMapRefs } from './useRoadMapRefs';
 import { createRouteVisualLayers } from '../../routeVisuals';
+import { updateVehicleSceneLabel } from '../../vehicleSceneLabels';
 
 // const ORDER_COLORS = [
 //     0x22c55e,
@@ -370,6 +371,7 @@ export function useRoadControls(
             setVehicleBarTransform(current.road, vehicle, 0);
             const locator = vehicle.truckVisual?.userData.locator;
             if (locator instanceof THREE.Object3D) locator.visible = true;
+            updateVehicleSceneLabel(vehicle, 'rm2', colorForOrder(vehicle.orderId), true);
             animateVehicleUpgrade(vehicle, 1);
         } catch (error) {
             console.warn('[RM2 truck model] load failed; keeping vehicle bar', {
@@ -382,6 +384,7 @@ export function useRoadControls(
     const downgradeVehicle = useCallback((vehicle: VehicleBarState) => {
         const locator = vehicle.truckVisual?.userData.locator;
         if (locator instanceof THREE.Object3D) locator.visible = false;
+        updateVehicleSceneLabel(vehicle, 'rm2', colorForOrder(vehicle.orderId), false);
         if (!vehicle.truckVisual) {
             vehicle.upgradeProgress = 0;
             applyUpgradeVisual(vehicle);
@@ -482,6 +485,9 @@ export function useRoadControls(
                     && Math.abs(vehicle.progress - leadVehicle.progress) < 0.012;
                 const trailOffset = overlapsLead ? Math.min(0.7, (followerOrder + 1) * 0.35) : 0;
                 setVehicleBarTransform(road, vehicle, trailOffset);
+                if (highlightedLineIdRef.current === vehicle.lineId) {
+                    updateVehicleSceneLabel(vehicle, 'rm2', lane.color, true);
+                }
             });
         });
     }, []);
@@ -741,7 +747,7 @@ export function useRoadControls(
 
             const group = new THREE.Group();
             group.add(
-                createRouteVisualLayers(pathCurve, tubularSegments, radialSegments, samples, 'rm2'),
+                createRouteVisualLayers(pathCurve, tubularSegments, radialSegments, samples, 'rm2', info),
                 grayTube,
                 selectionTube,
             );

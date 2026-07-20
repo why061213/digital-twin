@@ -4,6 +4,7 @@ import type { EChartsOption } from 'echarts';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { RouteOrder } from '../hooks/useDashboardRealtime';
+import { routeColorKey, routeTone } from './routePresentation';
 
 export type WarehouseFocusState = {
     cityName: string;
@@ -49,43 +50,6 @@ const CITY_PREFIX_PATTERN = /^(.{2,12}?(?:自治州|地区|盟|市))/;
 
 function routeDisplayData(route: RouteOrder): RouteDisplayData {
     return route as RouteDisplayData;
-}
-
-const ROUTE_TONES = [
-    {
-        color: '#00ff88',
-        surface: 'rgba(0, 255, 136, 0.08)',
-        glow: 'rgba(0, 255, 136, 0.18)',
-    },
-    {
-        color: '#00ccff',
-        surface: 'rgba(0, 204, 255, 0.08)',
-        glow: 'rgba(0, 204, 255, 0.18)',
-    },
-    {
-        color: '#ffaa00',
-        surface: 'rgba(255, 170, 0, 0.08)',
-        glow: 'rgba(255, 170, 0, 0.18)',
-    },
-    {
-        color: '#ff44aa',
-        surface: 'rgba(255, 68, 170, 0.08)',
-        glow: 'rgba(255, 68, 170, 0.18)',
-    },
-] as const;
-
-function routeColorKey(route?: RouteOrder) {
-    return route?.orderId?.trim() || route?.lineId || 'default-route';
-}
-
-function routeTone(route?: RouteOrder, groupRoutes: RouteOrder[] = []) {
-    const colorKey = routeColorKey(route);
-    const orderKeys = Array.from(new Set(groupRoutes.map(routeColorKey)));
-    const orderIndex = orderKeys.indexOf(colorKey);
-    const toneIndex = orderIndex >= 0
-        ? orderIndex % ROUTE_TONES.length
-        : Array.from(colorKey).reduce((sum, char) => sum + char.charCodeAt(0), 0) % ROUTE_TONES.length;
-    return ROUTE_TONES[toneIndex];
 }
 
 function compactPositionAddress(address?: string) {
@@ -356,12 +320,31 @@ function AutoScrollList({
     children: ReactNode;
 }) {
     const scrollRef = useRef<HTMLDivElement | null>(null);
+    const contentRef = useRef<HTMLDivElement | null>(null);
+    const [isOverflowing, setIsOverflowing] = useState(false);
+    const shouldLoop = enabled || isOverflowing;
+
+    useLayoutEffect(() => {
+        const container = scrollRef.current;
+        const content = contentRef.current;
+        if (!container || !content) return;
+
+        const updateOverflow = () => {
+            setIsOverflowing(content.scrollHeight > container.clientHeight + 1);
+        };
+        updateOverflow();
+
+        const observer = new ResizeObserver(updateOverflow);
+        observer.observe(container);
+        observer.observe(content);
+        return () => observer.disconnect();
+    }, [children, resetKey]);
 
     useEffect(() => {
         const container = scrollRef.current;
         if (!container) return;
         container.scrollTop = 0;
-        if (!enabled) return;
+        if (!shouldLoop) return;
 
         let animationFrame = 0;
         let previousTime = performance.now();
@@ -383,16 +366,12 @@ function AutoScrollList({
 
         animationFrame = window.requestAnimationFrame(tick);
         return () => window.cancelAnimationFrame(animationFrame);
-    }, [enabled, resetKey, speedPxPerSecond]);
+    }, [resetKey, shouldLoop, speedPxPerSecond]);
 
     return (
         <div ref={scrollRef} className="no-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
-            {enabled ? (
-                <>
-                    <div className="pb-2">{children}</div>
-                    <div aria-hidden="true" className="pb-2">{children}</div>
-                </>
-            ) : children}
+            <div ref={contentRef} className={shouldLoop ? 'pb-2' : undefined}>{children}</div>
+            {shouldLoop && <div aria-hidden="true" className="pb-2">{children}</div>}
         </div>
     );
 }
@@ -774,7 +753,7 @@ function RoadGroupRightPanels({
         return orderDifference || routeProgress(b) - routeProgress(a);
     });
     const visibleUnfinished = sortedUnfinished.slice(0, 40);
-    const shouldAutoScroll = visibleUnfinished.length > 4;
+    const shouldAutoScroll = visibleUnfinished.length >= 4;
     const recentFinished = finishedRoutes.slice(-4);
     const orderSummaries = variant === 'vehicle'
         ? buildOrderSummaries(routes, roadGroup.orderIds ?? []).slice(0, 3)

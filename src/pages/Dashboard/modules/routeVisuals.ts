@@ -16,6 +16,11 @@ type RouteVisualPreset = {
     screenGlowWidth: number;
 };
 
+type RouteEndpointInfo = {
+    from?: string;
+    to?: string;
+};
+
 const PRESETS: Record<'rm1' | 'rm2', RouteVisualPreset> = {
     rm1: {
         foundationRadius: 0.32,
@@ -117,6 +122,69 @@ function createEndpointMarker(
     return marker;
 }
 
+function compactEndpoint(value: string | undefined) {
+    const normalized = value?.replace(/\s+/g, '').trim();
+    if (!normalized) return '位置待确认';
+    return normalized.length > 16 ? `${normalized.slice(0, 16)}...` : normalized;
+}
+
+function createEndpointLabel(
+    point: THREE.Vector3,
+    prefix: '起点' | '终点',
+    value: string | undefined,
+    color: string,
+    mode: 'rm1' | 'rm2',
+) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 88;
+    const context = canvas.getContext('2d');
+    if (!context) return new THREE.Group();
+
+    context.fillStyle = color;
+    context.beginPath();
+    context.arc(22, 44, prefix === '终点' ? 8 : 6, 0, Math.PI * 2);
+    context.fill();
+    context.font = `${prefix === '终点' ? 600 : 500} 24px "Microsoft YaHei", sans-serif`;
+    context.lineWidth = 7;
+    context.strokeStyle = 'rgba(2, 8, 20, 0.92)';
+    context.strokeText(prefix, 44, 54);
+    context.fillText(prefix, 44, 54);
+    context.fillStyle = prefix === '终点' ? '#fef3c7' : '#dbeafe';
+    context.font = `${prefix === '终点' ? 600 : 400} 23px "Microsoft YaHei", sans-serif`;
+    context.strokeText(compactEndpoint(value), 112, 54);
+    context.fillText(compactEndpoint(value), 112, 54);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    const material = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(material);
+    const baseScale = mode === 'rm2' ? [14.2, 1.95] : [7.4, 1.02];
+    const referenceDistance = mode === 'rm2' ? 115 : 180;
+    const offset = mode === 'rm2' ? 3.7 : 1.85;
+    const offsetVariant = Array.from(value ?? prefix)
+        .reduce((sum, character) => sum + character.charCodeAt(0), 0) % 3 - 1;
+    sprite.scale.set(baseScale[0], baseScale[1], 1);
+    sprite.position.copy(point);
+    sprite.position.x += (prefix === '起点' ? -offset : offset) + offsetVariant * (mode === 'rm2' ? 1.1 : 0.55);
+    sprite.position.y += (mode === 'rm2' ? 0.86 : 0.42) + offsetVariant * (mode === 'rm2' ? 0.34 : 0.16);
+    sprite.renderOrder = 58;
+    const worldPosition = new THREE.Vector3();
+    sprite.onBeforeRender = (_renderer, _scene, camera) => {
+        const distance = camera.position.distanceTo(sprite.getWorldPosition(worldPosition));
+        const distanceScale = THREE.MathUtils.clamp(distance / referenceDistance, 0.88, 2.25);
+        sprite.scale.set(baseScale[0] * distanceScale, baseScale[1] * distanceScale, 1);
+    };
+    return sprite;
+}
+
 function createFlowMaterial(repeats: number) {
     return new THREE.ShaderMaterial({
         uniforms: {
@@ -157,6 +225,7 @@ export function createRouteVisualLayers(
     radialSegments: number,
     samples: THREE.Vector3[],
     mode: 'rm1' | 'rm2',
+    info: RouteEndpointInfo = {},
 ) {
     const preset = PRESETS[mode];
     const layers = new THREE.Group();
@@ -230,6 +299,8 @@ export function createRouteVisualLayers(
 
     const start = createEndpointMarker(samples[0], preset.markerScale, 0x67e8f9, 10);
     const end = createEndpointMarker(samples[samples.length - 1], preset.markerScale, 0xfbbf24, 10);
-    layers.add(screenGlow, screenCore, foundation, leftEdge, rightEdge, flow, start, end);
+    const startLabel = createEndpointLabel(samples[0], '起点', info.from, '#67e8f9', mode);
+    const endLabel = createEndpointLabel(samples[samples.length - 1], '终点', info.to, '#fbbf24', mode);
+    layers.add(screenGlow, screenCore, foundation, leftEdge, rightEdge, flow, start, end, startLabel, endLabel);
     return layers;
 }
