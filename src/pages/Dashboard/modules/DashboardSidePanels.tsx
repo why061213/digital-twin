@@ -2,7 +2,7 @@ import Panel from '@/components/Layout/Panel';
 import EChart from '@/components/Charts/EChart';
 import type { EChartsOption } from 'echarts';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import type { RouteOrder } from '../hooks/useDashboardRealtime';
 import { routeColorKey, routeTone } from './routePresentation';
 
@@ -308,6 +308,54 @@ function uniqueRouteCount(routes: RouteOrder[]) {
     return new Set(routes.map(routeIdentity)).size;
 }
 
+function OverflowMarquee({
+    value,
+    className = '',
+}: {
+    value: string | number | null | undefined;
+    className?: string;
+}) {
+    const text = String(value ?? '--');
+    const viewportRef = useRef<HTMLDivElement | null>(null);
+    const contentRef = useRef<HTMLSpanElement | null>(null);
+    const [scrollDistance, setScrollDistance] = useState(0);
+
+    useLayoutEffect(() => {
+        const viewport = viewportRef.current;
+        const content = contentRef.current;
+        if (!viewport || !content) return;
+
+        const measure = () => {
+            const overflow = content.scrollWidth - viewport.clientWidth;
+            setScrollDistance(overflow > 1 ? Math.ceil(overflow + 8) : 0);
+        };
+        measure();
+
+        const observer = new ResizeObserver(measure);
+        observer.observe(viewport);
+        observer.observe(content);
+        return () => observer.disconnect();
+    }, [text]);
+
+    const durationSeconds = Math.max(7, Math.min(22, 5 + scrollDistance / 20));
+    const style = {
+        '--overflow-marquee-distance': `${scrollDistance}px`,
+        '--overflow-marquee-duration': `${durationSeconds}s`,
+    } as CSSProperties;
+
+    return (
+        <div
+            ref={viewportRef}
+            className={`overflow-marquee ${scrollDistance > 0 ? 'is-overflowing' : ''} ${className}`}
+            title={text}
+        >
+            <span className="overflow-marquee__track" style={style}>
+                <span ref={contentRef} className="overflow-marquee__content">{text}</span>
+            </span>
+        </div>
+    );
+}
+
 function AutoScrollList({
     enabled,
     resetKey,
@@ -527,9 +575,10 @@ function VehicleTransportDetails({
                             />
                             <span className="truncate">{targetRoute?.plate || '--'}</span>
                         </div>
-                        <div className="mt-1 max-w-52 truncate text-[9px] tabular-nums text-slate-500" title={targetRoute?.orderId || '--'}>
-                            订单 {targetRoute?.orderId || '--'}
-                        </div>
+                        <OverflowMarquee
+                            value={`订单 ${targetRoute?.orderId || '--'}`}
+                            className="mt-1 max-w-52 text-[9px] tabular-nums text-slate-500"
+                        />
                     </div>
                     <div className="shrink-0 text-right">
                         <div className="text-[10px] tabular-nums text-slate-500">
@@ -545,18 +594,14 @@ function VehicleTransportDetails({
                     <div className="mb-3 grid grid-cols-[0.85fr_1.15fr] gap-2">
                         <div className="min-w-0 rounded border border-white/8 bg-white/[0.025] px-2.5 py-2">
                             <div className="text-[9px] text-slate-500">始发省市</div>
-                            <div className="mt-1 truncate text-[11px] font-medium text-slate-300" title={fromAddress.region}>
-                                {fromAddress.region}
-                            </div>
+                            <OverflowMarquee value={fromAddress.region} className="mt-1 text-[11px] font-medium text-slate-300" />
                         </div>
                         <div className="min-w-0 rounded border border-emerald-300/25 bg-emerald-300/[0.07] px-2.5 py-2 shadow-[inset_0_0_18px_rgba(52,211,153,0.04)]">
                             <div className="flex items-center justify-between gap-2 text-[9px] text-emerald-200/65">
                                 <span>目的省市</span>
                                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.8)]" />
                             </div>
-                            <div className="mt-1 truncate text-xs font-semibold text-emerald-100" title={toAddress.region}>
-                                {toAddress.region}
-                            </div>
+                            <OverflowMarquee value={toAddress.region} className="mt-1 text-xs font-semibold text-emerald-100" />
                         </div>
                     </div>
                     <div className="grid grid-cols-[1rem_1fr] gap-x-3">
@@ -568,15 +613,11 @@ function VehicleTransportDetails({
                         <div className="flex min-h-0 flex-col justify-between gap-2">
                             <div className="opacity-75">
                                 <div className="text-[10px] text-slate-500">起点</div>
-                                <div className="mt-1 line-clamp-2 text-xs font-medium leading-5 text-slate-300" title={fromAddress.fullAddress}>
-                                    {fromAddress.detail}
-                                </div>
+                                <OverflowMarquee value={fromAddress.detail} className="mt-1 text-xs font-medium leading-5 text-slate-300" />
                             </div>
                             <div className="rounded border border-emerald-300/15 bg-emerald-300/[0.045] px-2.5 py-2">
                                 <div className="text-[10px] font-medium text-emerald-300/70">目的地</div>
-                                <div className="mt-1 break-words text-[15px] font-semibold leading-5 text-emerald-50" title={toAddress.fullAddress}>
-                                    {toAddress.detail}
-                                </div>
+                                <OverflowMarquee value={toAddress.detail} className="mt-1 text-[15px] font-semibold leading-5 text-emerald-50" />
                             </div>
                         </div>
                     </div>
@@ -589,9 +630,7 @@ function VehicleTransportDetails({
                         </div>
                         <div className="rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">驾驶员</div>
-                            <div className="mt-1 truncate font-semibold text-sky-100" title={targetRoute?.driverName || '--'}>
-                                {targetRoute?.driverName || '--'}
-                            </div>
+                            <OverflowMarquee value={targetRoute?.driverName || '--'} className="mt-1 font-semibold text-sky-100" />
                         </div>
                         <div className="rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">路线长度</div>
@@ -601,39 +640,30 @@ function VehicleTransportDetails({
                         </div>
                         <div className="rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">重量</div>
-                            <div className="mt-1 truncate font-semibold tabular-nums text-amber-100" title={routeCargoWeight(targetRoute)}>
-                                {routeCargoWeight(targetRoute)}
-                            </div>
+                            <OverflowMarquee value={routeCargoWeight(targetRoute)} className="mt-1 font-semibold tabular-nums text-amber-100" />
                         </div>
                         <div className="rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">货物内容</div>
-                            <div className="mt-1 truncate font-medium text-sky-100" title={routeCargoContent(targetRoute)}>
-                                {routeCargoContent(targetRoute)}
-                            </div>
+                            <OverflowMarquee value={routeCargoContent(targetRoute)} className="mt-1 font-medium text-sky-100" />
                         </div>
                         <div className="rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">经纬度</div>
-                            <div className="mt-1 truncate font-medium tabular-nums text-slate-200" title={coordinateText(targetRoute?.currentPosition)}>
-                                {coordinateText(targetRoute?.currentPosition)}
-                            </div>
+                            <OverflowMarquee value={coordinateText(targetRoute?.currentPosition)} className="mt-1 font-medium tabular-nums text-slate-200" />
                         </div>
                         <div className="col-span-2 rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">方向</div>
-                            <div className="mt-1 font-medium text-cyan-100">
-                                {detailedDirection(targetRoute?.directionDeg, targetRoute?.directionLabel)}
-                            </div>
+                            <OverflowMarquee
+                                value={detailedDirection(targetRoute?.directionDeg, targetRoute?.directionLabel)}
+                                className="mt-1 font-medium text-cyan-100"
+                            />
                         </div>
                         <div className="col-span-2 rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">当前位置</div>
-                            <div className="mt-1 truncate text-slate-200" title={targetRoute?.address || '--'}>
-                                {compactPositionAddress(targetRoute?.address)}
-                            </div>
+                            <OverflowMarquee value={compactPositionAddress(targetRoute?.address)} className="mt-1 text-slate-200" />
                         </div>
                         <div className="col-span-2 rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">车辆状态</div>
-                            <div className="mt-1 line-clamp-2 leading-5 text-emerald-100" title={targetRoute?.stateStr || '--'}>
-                                {targetRoute?.stateStr || '--'}
-                            </div>
+                            <OverflowMarquee value={targetRoute?.stateStr || '--'} className="mt-1 leading-5 text-emerald-100" />
                         </div>
                     </div>
                 </div>
