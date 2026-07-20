@@ -104,7 +104,7 @@ function trackKeyFor(id: string, coords: [number, number][], info: RoadObjectInf
 }
 
 function orderKeyFor(lineId: string, info: RoadObjectInfo) {
-    return info.orderFamilyId ?? info.orderId ?? `order-${lineId}`;
+    return info.colorKey ?? info.orderFamilyId ?? info.orderId ?? `order-${lineId}`;
 }
 
 function drawTubeProgress(tube: THREE.Mesh, progress: number, tubularSegments: number, radialSegments: number) {
@@ -246,8 +246,11 @@ export function useRoadControls(
         const existing = orderColorByIdRef.current.get(orderId);
         if (existing !== undefined) return existing;
 
-        const color = UNIFIED_COLORS[nextOrderColorIndexRef.current % UNIFIED_COLORS.length];
-        nextOrderColorIndexRef.current += 1;
+        const branch = orderId.startsWith('branch:');
+        const color = branch
+            ? UNIFIED_COLORS[3 + (Array.from(orderId).reduce((sum, char) => sum + char.charCodeAt(0), 0) % (UNIFIED_COLORS.length - 3))]
+            : UNIFIED_COLORS[nextOrderColorIndexRef.current % 3];
+        if (!branch) nextOrderColorIndexRef.current += 1;
         orderColorByIdRef.current.set(orderId, color);
         return color;
     }, []);

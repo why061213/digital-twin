@@ -38,6 +38,7 @@ type RouteDisplayData = RouteOrder & {
     pathLength?: unknown;
     calibratedDistance?: unknown;
     routeLengthKm?: unknown;
+    fallbackDuration?: unknown;
     speedKmh?: unknown;
     orderId?: unknown;
     orderTotalTons?: unknown;
@@ -315,6 +316,20 @@ function routeIdentity(route: RouteOrder) {
 
 function uniqueRouteCount(routes: RouteOrder[]) {
     return new Set(routes.map(routeIdentity)).size;
+}
+
+function routeRemainingText(route: RouteOrder, progress: number) {
+    const totalKm = Number(route.routeLengthKm);
+    const distance = Number.isFinite(totalKm)
+        ? `${Math.max(0, totalKm * (1 - progress / 100)).toFixed(1)} km`
+        : '-- km';
+    const totalDurationMs = Number(route.travelDurationMs ?? routeDisplayData(route).fallbackDuration);
+    if (!Number.isFinite(totalDurationMs) || totalDurationMs <= 0) return `剩余 ${distance}`;
+    const remainingMinutes = Math.max(0, Math.round(totalDurationMs * (1 - progress / 100) / 60_000));
+    const hours = Math.floor(remainingMinutes / 60);
+    const minutes = remainingMinutes % 60;
+    const duration = hours > 0 ? `${hours}h${minutes}m` : `${minutes}m`;
+    return `剩余 ${distance} · 预计 ${duration}`;
 }
 
 function OverflowMarquee({
@@ -869,7 +884,10 @@ function RoadGroupRightPanels({
                         {progress}%
                     </span>
                 </div>
-                <div className="mt-2 flex items-center justify-end text-[10px] text-slate-400">
+                <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-slate-400">
+                    <span className="min-w-0 truncate tabular-nums" title={routeRemainingText(route, progress)}>
+                        {routeRemainingText(route, progress)}
+                    </span>
                     <span className="tabular-nums">
                         {Number.isFinite(Number(routeDisplayData(route).speedKmh))
                             ? `${Math.round(Number(routeDisplayData(route).speedKmh))} km/h`

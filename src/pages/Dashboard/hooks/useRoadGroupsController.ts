@@ -25,6 +25,24 @@ const ROAD_PATH_BUFFER_QUIET_MS = 650;
 const ROAD_PATH_BUFFER_MAX_WAIT_MS = 1600;
 const EMPTY_RM1_SNAPSHOT_RETRY_MS = 2_000;
 
+function assignRouteBranchColors(routes: RoadPathMessage[]) {
+    const primaryPathByBusinessLine = new Map<string, string>();
+    return routes.map((route) => {
+        const businessLine = route.orderFamilyId ?? route.orderId ?? route.lineId;
+        const pathKey = route.pathKey ?? route.lineId;
+        const primaryPath = primaryPathByBusinessLine.get(businessLine);
+        if (!primaryPath) primaryPathByBusinessLine.set(businessLine, pathKey);
+        const isRouteBranch = Boolean(primaryPath && primaryPath !== pathKey);
+        return {
+            ...route,
+            isRouteBranch,
+            colorKey: isRouteBranch
+                ? `branch:${route.orderId ?? businessLine}:${businessLine}:${pathKey}`
+                : `main:${route.orderId ?? businessLine}`,
+        };
+    });
+}
+
 type UseRoadGroupsControllerOptions = {
     roadMapRef: RefObject<RoadMap3DHandle | null>;
     view: ViewMode;
@@ -260,7 +278,7 @@ export function useRoadGroupsController({
                 const previousIds = new Set(activeRoutesRef.current.keys());
                 const currentRoadMap = roadMapRef.current;
                 const needsFreshSceneRender = currentRoadMap !== null && renderedRoadMapRef.current !== currentRoadMap;
-                let routes = (data.routes ?? [])
+                let routes = assignRouteBranchColors(data.routes ?? [])
                     .map(createActiveRoute)
                     .filter((route): route is ActiveRoute => Boolean(route));
                 const shouldAnimateGroupSwap =

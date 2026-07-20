@@ -38,6 +38,8 @@ export type RoadObjectInfo = {
     online?: boolean;
     directionLabel?: string;
     manualMarker?: boolean;
+    colorKey?: string;
+    isRouteBranch?: boolean;
 };
 
 export type VehicleBarState = {

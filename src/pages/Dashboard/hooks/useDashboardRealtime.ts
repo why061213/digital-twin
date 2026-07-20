@@ -42,6 +42,8 @@ export type RoadPathMessage = {
     cargoUnit?: string;
     status?: string;
     vehicleId?: string;
+    colorKey?: string;
+    isRouteBranch?: boolean;
 };
 
 export type TruckPositionMessage = {
@@ -57,6 +59,8 @@ export type TruckPositionMessage = {
     groupId?: string;
     snapshotVersion?: string;
     vehicleId?: string;
+    colorKey?: string;
+    isRouteBranch?: boolean;
     plate?: string;
     source?: string;
     stale?: boolean;
@@ -70,6 +74,13 @@ export type TruckPositionMessage = {
     online?: boolean;
     directionDeg?: number;
     directionLabel?: string;
+    routeRevision?: number;
+    routeCoordinates?: [number, number][];
+    routeLengthKm?: number;
+    travelDurationMs?: number;
+    pathKey?: string;
+    routeDeviationCount?: number;
+    routeDeviationDistanceKm?: number;
     sequence?: number;
 };
 
@@ -119,12 +130,17 @@ export type RouteOrder = {
     toCoords: [number, number];
     currentPosition?: [number, number];
     routeLengthKm?: number;
+    travelDurationMs?: number;
+    pathKey?: string;
+    orderFamilyId?: string;
     orderTotalTons?: number;
     plate: string;
     cargo: string;
     cargoWeight?: number;
     cargoUnit?: string;
     status: string;
+    colorKey?: string;
+    isRouteBranch?: boolean;
     speedKmh?: number | null;
     driverName?: string;
     address?: string;

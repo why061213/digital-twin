@@ -12,6 +12,7 @@ export type ActiveRoute = RouteOrder & {
     orderTotalTons?: number;
     orderVehicleCount?: number;
     pathKey?: string;
+    routeRevision?: number;
     startedAt: number;
     fallbackDuration: number;
     coordinates: LonLat[];

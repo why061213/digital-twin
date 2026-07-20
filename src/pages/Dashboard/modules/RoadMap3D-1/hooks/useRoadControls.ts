@@ -101,13 +101,16 @@ function trackKeyFor(id: string, coords: [number, number][], info: RoadObjectInf
 }
 
 function orderKeyFor(lineId: string, info: RoadObjectInfo) {
-    return info.orderFamilyId ?? info.orderId ?? `order-${lineId}`;
+    return info.colorKey ?? info.orderFamilyId ?? info.orderId ?? `order-${lineId}`;
 }
 
 function orderColor(orderId: string, index: number) {
     let hash = 0;
     for (const char of orderId) hash += char.charCodeAt(0);
-    return UNIFIED_COLORS[(hash + index) % UNIFIED_COLORS.length];
+    if (orderId.startsWith('branch:')) {
+        return UNIFIED_COLORS[3 + ((hash + index) % (UNIFIED_COLORS.length - 3))];
+    }
+    return UNIFIED_COLORS[index % 3];
 }
 
 function drawTubeProgress(tube: THREE.Mesh, progress: number, tubularSegments: number, radialSegments: number) {

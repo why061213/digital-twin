@@ -70,6 +70,9 @@ function positionDetailsPatch(message: TruckPositionMessage) {
         ...(message.online !== undefined ? { online: message.online } : {}),
         ...(message.directionDeg !== undefined ? { directionDeg: message.directionDeg } : {}),
         ...(message.directionLabel !== undefined ? { directionLabel: message.directionLabel } : {}),
+        ...(message.routeLengthKm !== undefined ? { routeLengthKm: message.routeLengthKm } : {}),
+        ...(message.travelDurationMs !== undefined ? { fallbackDuration: message.travelDurationMs } : {}),
+        ...(message.pathKey !== undefined ? { pathKey: message.pathKey } : {}),
     };
 }
 
@@ -107,6 +110,8 @@ export function useTruckPositionController({
             alarmStr: route.alarmStr,
             alarmSeverity: route.alarmSeverity,
             online: route.online,
+            colorKey: route.colorKey,
+            isRouteBranch: route.isRouteBranch,
         });
     }, [roadMapRef]);
 
@@ -128,6 +133,8 @@ export function useTruckPositionController({
             alarmStr: route.alarmStr,
             alarmSeverity: route.alarmSeverity,
             online: route.online,
+            colorKey: route.colorKey,
+            isRouteBranch: route.isRouteBranch,
         });
     }, [roadMapRef]);
 
@@ -159,6 +166,8 @@ export function useTruckPositionController({
                     orderTotalTons: message.orderTotalTons ?? existing.orderTotalTons,
                     orderVehicleCount: message.orderVehicleCount ?? existing.orderVehicleCount,
                     pathKey: message.pathKey ?? existing.pathKey,
+                    colorKey: message.colorKey ?? existing.colorKey,
+                    isRouteBranch: message.isRouteBranch ?? existing.isRouteBranch,
                     plate: message.plate ?? existing.plate,
                     cargo: message.cargo ?? existing.cargo,
                     cargoWeight: message.cargoWeight ?? existing.cargoWeight,
@@ -197,6 +206,8 @@ export function useTruckPositionController({
                 orderTotalTons: message.orderTotalTons,
                 orderVehicleCount: message.orderVehicleCount,
                 pathKey: message.pathKey,
+                colorKey: message.colorKey,
+                isRouteBranch: message.isRouteBranch,
                 from: message.from ?? '起点',
                 to: message.to ?? '目的地',
                 fromCoords: message.coordinates[0],
@@ -327,6 +338,35 @@ export function useTruckPositionController({
             }
 
             const now = performance.now();
+            if (message.routeCoordinates && message.routeCoordinates.length >= 2
+                && Number(message.routeRevision) > Number(route.routeRevision ?? 0)) {
+                const correctedCoordinates = message.routeCoordinates;
+                const previousPathKey = route.pathKey;
+                route.routeRevision = message.routeRevision;
+                route.coordinates = correctedCoordinates;
+                route.fromCoords = correctedCoordinates[0];
+                route.toCoords = correctedCoordinates[correctedCoordinates.length - 1];
+                route.pathLength = pathLength(correctedCoordinates);
+                route.routeLengthKm = message.routeLengthKm ?? pathLengthKm(correctedCoordinates);
+                route.fallbackDuration = message.travelDurationMs ?? route.fallbackDuration;
+                route.pathKey = message.pathKey ?? route.pathKey;
+                if (message.pathKey && previousPathKey && message.pathKey !== previousPathKey) {
+                    const businessLine = route.orderFamilyId ?? route.orderId ?? route.lineId;
+                    route.isRouteBranch = true;
+                    route.colorKey = `branch:${route.orderId ?? businessLine}:${businessLine}:${message.pathKey}`;
+                }
+                route.calibratedDistance = message.position
+                    ? projectDistanceOnPath(correctedCoordinates, message.position)
+                    : 0;
+                route.calibratedAt = now;
+                route.pathSpeed = pathSpeedFromKmh(
+                    route.pathLength,
+                    route.routeLengthKm,
+                    route.speedKmh ?? FALLBACK_TRUCK_SPEED_KMH,
+                );
+                roadMapRef.current?.removeRoadPath(route.lineId);
+                syncRoadRoute(route);
+            }
             if (!forceCalibration && now < route.nextCalibrationAt) {
                 if (Object.keys(detailPatch).length > 0) {
                     setRouteOrders((prev) => {
@@ -355,13 +395,15 @@ export function useTruckPositionController({
                 const next = prev.map((item) => (item.lineId === route.lineId ? {
                     ...item,
                     ...detailPatch,
+                    colorKey: route.colorKey,
+                    isRouteBranch: route.isRouteBranch,
                     ...routeProgressPatch(route, now),
                 } : item));
                 routeOrdersRef.current = next;
                 return next;
             });
         },
-        [finishRoute, renderTruckPosition]
+        [finishRoute, renderTruckPosition, roadMapRef, syncRoadRoute]
     );
 
     const requestTruckPosition = useCallback(

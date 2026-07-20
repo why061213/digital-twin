@@ -4,9 +4,7 @@ import type { TruckPositionMessage, VehiclePositionsMessage } from './useDashboa
 import { POSITION_RENDER_TICK_MS } from '../constants';
 import {
     applyTruckPositionToRoute,
-    buildCentripetalRoute,
     inspectRouteCorridor,
-    insertRouteNode,
     pathLength,
     pathLengthKm,
     predictedDistance,
@@ -64,7 +62,7 @@ type Options = {
 
 const WS_FLUSH_MS = 300;
 const ARRIVAL_RECHECK_DELAY_MS = 5_000;
-const ROUTE_CORRIDOR_TOLERANCE_KM = 5;
+const ROUTE_CORRIDOR_TOLERANCE_KM = 1;
 
 function isTrustedRealPosition(message: TruckPositionMessage) {
     const source = message.source?.trim().toLowerCase() ?? '';
@@ -109,6 +107,32 @@ export function useVehicleMotionController(options: Options) {
         route.alarmSeverity = message.alarmSeverity ?? route.alarmSeverity;
         route.online = message.online ?? route.online;
         const now = performance.now();
+        if (message.routeCoordinates && message.routeCoordinates.length >= 2
+            && Number(message.routeRevision) > Number(route.routeRevision ?? 0)) {
+            const corrected = message.routeCoordinates;
+            route.routeRevision = message.routeRevision;
+            route.routeNodes = corrected.map((point) => [point[0], point[1]]);
+            route.coordinates = corrected;
+            route.pathLength = pathLength(corrected);
+            route.routeLengthKm = message.routeLengthKm ?? pathLengthKm(corrected);
+            route.fallbackDuration = message.travelDurationMs ?? route.fallbackDuration;
+            route.calibratedDistance = message.position
+                ? projectDistanceOnPath(corrected, message.position)
+                : 0;
+            route.calibratedAt = now;
+            route.pathSpeed = route.speedKmh !== null && route.routeLengthKm > 0
+                ? route.speedKmh / 3_600_000 * route.pathLength / route.routeLengthKm
+                : route.pathSpeed;
+            options.mapAdapter.replaceRoute?.(route.lineId, corrected, message.position ?? corrected[0], {
+                speedKmh: route.speedKmh,
+                status: route.status,
+                routeLengthKm: route.routeLengthKm,
+                stateStr: route.stateStr,
+                alarmStr: route.alarmStr,
+                alarmSeverity: route.alarmSeverity,
+                online: route.online,
+            });
+        }
         const routeNodes = route.routeNodes ?? route.coordinates;
         const corridor = inspectRouteCorridor(
             routeNodes,
@@ -116,54 +140,15 @@ export function useVehicleMotionController(options: Options) {
             ROUTE_CORRIDOR_TOLERANCE_KM,
         );
 
-        // 先基于旧路线吸收本次真实速度，再在必要时重建几何并重新标定距离。
-        applyTruckPositionToRoute(route, message, now);
-        if (options.scope === 'rm2'
-            && options.mapAdapter.replaceRoute
-            && isTrustedRealPosition(message)
-            && !corridor.inside) {
-            const nextNodes = insertRouteNode(
-                routeNodes,
-                message.position,
-                corridor.nearestSegmentIndex,
-            );
-            const nextCoordinates = buildCentripetalRoute(nextNodes);
-            const nextPathLength = pathLength(nextCoordinates);
-            const nextRouteLengthKm = pathLengthKm(nextCoordinates);
-            const calibratedDistance = projectDistanceOnPath(nextCoordinates, message.position);
-            const calibratedSpeed = route.speedKmh !== null && nextRouteLengthKm > 0
-                ? route.speedKmh / 3_600_000 * nextPathLength / nextRouteLengthKm
-                : route.pathSpeed;
-
-            route.routeNodes = nextNodes;
-            route.coordinates = nextCoordinates;
-            route.pathLength = nextPathLength;
-            route.routeLengthKm = nextRouteLengthKm;
-            route.calibratedDistance = calibratedDistance;
-            route.calibratedAt = now;
-            route.pathSpeed = calibratedSpeed;
-            options.mapAdapter.replaceRoute(
-                route.lineId,
-                nextCoordinates,
-                message.position,
-                {
-                    speedKmh: route.speedKmh,
-                    status: route.status,
-                    routeLengthKm: route.routeLengthKm,
-                    stateStr: route.stateStr,
-                    alarmStr: route.alarmStr,
-                    alarmSeverity: route.alarmSeverity,
-                    online: route.online,
-                },
-            );
-            console.info('[RM2 motion] adapted route to real position', {
+        if (isTrustedRealPosition(message) && !corridor.inside && !message.routeCoordinates) {
+            console.info('[RM2 motion] waiting for backend route correction', {
                 lineId: route.lineId,
                 distanceFromCorridorKm: Number(corridor.distanceKm.toFixed(3)),
                 toleranceKm: ROUTE_CORRIDOR_TOLERANCE_KM,
-                nodeCount: nextNodes.length,
-                sampledPointCount: nextCoordinates.length,
             });
+            return false;
         }
+        applyTruckPositionToRoute(route, message, now);
         return true;
     }, [options]);
 
