@@ -22,7 +22,8 @@ function Panel({ title, children, className = '' }: PanelProps) {
         >
             <div className="relative flex h-11 items-center gap-2 border-b border-white/8 px-4">
                 <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_16px_rgba(103,232,249,0.9)]" />
-                <span className="text-sm font-medium text-cyan-100">{title}</span>
+                <span className="text-sm font-semibold text-cyan-50">{title}</span>
+                <span className="h-px flex-1 bg-gradient-to-r from-cyan-300/25 to-transparent" />
             </div>
 
             <div className="relative h-[calc(100%-2.75rem)] p-3">

@@ -563,16 +563,19 @@ function VehicleTransportDetails({
                 </div>
 
                 <div className="no-scrollbar mt-3 flex min-h-0 flex-1 flex-col overflow-y-auto rounded border border-white/8 bg-slate-900/55 px-3 py-3">
-                    <div className="mb-3 grid grid-cols-2 gap-2">
-                        <div className="min-w-0 rounded border border-sky-300/10 bg-sky-300/[0.04] px-2.5 py-2">
+                    <div className="mb-3 grid grid-cols-[0.85fr_1.15fr] gap-2">
+                        <div className="min-w-0 rounded border border-white/8 bg-white/[0.025] px-2.5 py-2">
                             <div className="text-[9px] text-slate-500">始发省市</div>
-                            <div className="mt-1 truncate text-[11px] font-medium text-sky-200" title={fromAddress.region}>
+                            <div className="mt-1 truncate text-[11px] font-medium text-slate-300" title={fromAddress.region}>
                                 {fromAddress.region}
                             </div>
                         </div>
-                        <div className="min-w-0 rounded border border-emerald-300/10 bg-emerald-300/[0.04] px-2.5 py-2">
-                            <div className="text-[9px] text-slate-500">目的省市</div>
-                            <div className="mt-1 truncate text-[11px] font-medium text-emerald-200" title={toAddress.region}>
+                        <div className="min-w-0 rounded border border-emerald-300/25 bg-emerald-300/[0.07] px-2.5 py-2 shadow-[inset_0_0_18px_rgba(52,211,153,0.04)]">
+                            <div className="flex items-center justify-between gap-2 text-[9px] text-emerald-200/65">
+                                <span>目的省市</span>
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.8)]" />
+                            </div>
+                            <div className="mt-1 truncate text-xs font-semibold text-emerald-100" title={toAddress.region}>
                                 {toAddress.region}
                             </div>
                         </div>
@@ -584,15 +587,15 @@ function VehicleTransportDetails({
                             <span className="h-2.5 w-2.5 rounded-full border-2 border-emerald-200 bg-emerald-500 shadow-[0_0_10px_rgba(52,211,153,0.65)]" />
                         </div>
                         <div className="flex min-h-0 flex-col justify-between gap-2">
-                            <div>
+                            <div className="opacity-75">
                                 <div className="text-[10px] text-slate-500">起点</div>
-                                <div className="mt-1 line-clamp-2 text-sm font-medium leading-5 text-sky-100" title={fromAddress.fullAddress}>
+                                <div className="mt-1 line-clamp-2 text-xs font-medium leading-5 text-slate-300" title={fromAddress.fullAddress}>
                                     {fromAddress.detail}
                                 </div>
                             </div>
-                            <div>
-                                <div className="text-[10px] text-slate-500">目的地</div>
-                                <div className="mt-1 line-clamp-2 text-sm font-medium leading-5 text-emerald-100" title={toAddress.fullAddress}>
+                            <div className="rounded border border-emerald-300/15 bg-emerald-300/[0.045] px-2.5 py-2">
+                                <div className="text-[10px] font-medium text-emerald-300/70">目的地</div>
+                                <div className="mt-1 line-clamp-2 text-[15px] font-semibold leading-5 text-emerald-50" title={toAddress.fullAddress}>
                                     {toAddress.detail}
                                 </div>
                             </div>
@@ -781,6 +784,8 @@ function RoadGroupRightPanels({
         const progress = routeProgress(route);
         const tone = routeTone(route, routes);
         const isSelected = variant === 'vehicle' && route.lineId === activeVehicleLineId;
+        const fromAddress = splitAdministrativeAddress(route.from);
+        const toAddress = splitAdministrativeAddress(route.to);
         return (
             <button
                 type="button"
@@ -822,8 +827,10 @@ function RoadGroupRightPanels({
                         </span>
                     </span>
                 </div>
-                <div className="mt-2 truncate text-[11px] text-slate-300" title={`${route.from} → ${route.to}`}>
-                    {route.from} → {route.to}
+                <div className="mt-2 grid grid-cols-[minmax(0,0.8fr)_auto_minmax(0,1.2fr)] items-center gap-1.5 text-[11px]" title={`${route.from} → ${route.to}`}>
+                    <span className="truncate text-slate-500">{fromAddress.region}</span>
+                    <span className="text-slate-600">→</span>
+                    <span className="truncate font-medium text-emerald-100">{toAddress.detail || toAddress.region}</span>
                 </div>
                 <div className="mt-3 flex items-center gap-2">
                     <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-950/90 ring-1 ring-white/5">
@@ -946,7 +953,7 @@ function DashboardSidePanels({
     const roadPanelTransitionClass = isHoldingPreviousRoadGroup ? 'translate-y-1 opacity-60' : 'translate-y-0 opacity-100';
 
     return (
-        <div className={`pointer-events-none absolute inset-y-20 left-4 right-4 z-30 flex justify-between gap-4 transition-all duration-500 ${visible ? 'opacity-100' : 'opacity-0'}`}>
+        <div className={`pointer-events-none absolute inset-y-20 left-4 right-4 z-30 hidden justify-between gap-4 transition-all duration-500 lg:flex ${visible ? 'opacity-100' : 'opacity-0'}`}>
             <div className={`${visible ? 'pointer-events-auto translate-x-0' : 'pointer-events-none -translate-x-4'} flex min-h-0 ${panelWidthClass} flex-col gap-3 transition-transform duration-500`}>
                 {mode === 'warehouse_focus' && warehouseFocus && <WarehouseLeftPanels focus={warehouseFocus} />}
                 {mode === 'road_group_focus' && displayRoadGroup && (

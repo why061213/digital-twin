@@ -1,5 +1,8 @@
 /* Hallmark · pre-emit critique: P4 H4 E4 S5 R4 V4 */
 import * as THREE from 'three';
+import { Line2 } from 'three/examples/jsm/lines/Line2.js';
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 
 /* Hallmark: restrained route hierarchy for an operational map surface. */
 type RouteVisualPreset = {
@@ -9,6 +12,8 @@ type RouteVisualPreset = {
     edgeRadius: number;
     markerScale: number;
     flowRepeats: number;
+    screenCoreWidth: number;
+    screenGlowWidth: number;
 };
 
 const PRESETS: Record<'rm1' | 'rm2', RouteVisualPreset> = {
@@ -19,6 +24,8 @@ const PRESETS: Record<'rm1' | 'rm2', RouteVisualPreset> = {
         edgeRadius: 0.024,
         markerScale: 0.28,
         flowRepeats: 22,
+        screenCoreWidth: 5,
+        screenGlowWidth: 10,
     },
     rm2: {
         foundationRadius: 0.76,
@@ -27,8 +34,29 @@ const PRESETS: Record<'rm1' | 'rm2', RouteVisualPreset> = {
         edgeRadius: 0.055,
         markerScale: 0.62,
         flowRepeats: 18,
+        screenCoreWidth: 7,
+        screenGlowWidth: 14,
     },
 };
+
+function createScreenSpaceLine(samples: THREE.Vector3[], color: number, width: number, opacity: number) {
+    const geometry = new LineGeometry();
+    geometry.setPositions(samples.flatMap((point) => [point.x, point.y, point.z]));
+    const material = new LineMaterial({
+        color,
+        linewidth: width,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+        worldUnits: false,
+    });
+    const line = new Line2(geometry, material);
+    line.computeLineDistances();
+    line.onBeforeRender = (renderer) => {
+        material.resolution.set(renderer.domElement.width, renderer.domElement.height);
+    };
+    return line;
+}
 
 function offsetCurve(samples: THREE.Vector3[], offset: number) {
     const points = samples.map((point, index) => {
@@ -134,6 +162,11 @@ export function createRouteVisualLayers(
     const layers = new THREE.Group();
     layers.name = `route-visual-layers-${mode}`;
 
+    const screenGlow = createScreenSpaceLine(samples, 0x38bdf8, preset.screenGlowWidth, 0.12);
+    screenGlow.renderOrder = 0;
+    const screenCore = createScreenSpaceLine(samples, 0x07111d, preset.screenCoreWidth, 0.88);
+    screenCore.renderOrder = 1;
+
     const foundation = new THREE.Mesh(
         new THREE.TubeGeometry(
             pathCurve,
@@ -197,6 +230,6 @@ export function createRouteVisualLayers(
 
     const start = createEndpointMarker(samples[0], preset.markerScale, 0x67e8f9, 10);
     const end = createEndpointMarker(samples[samples.length - 1], preset.markerScale, 0xfbbf24, 10);
-    layers.add(foundation, leftEdge, rightEdge, flow, start, end);
+    layers.add(screenGlow, screenCore, foundation, leftEdge, rightEdge, flow, start, end);
     return layers;
 }

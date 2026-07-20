@@ -79,19 +79,19 @@ function KpiCards() {
     }, []);
 
     const kpiData = [
-        { label: '当日配送总量', value: statistics.deliveryTotalTons, unit: '吨' },
-        { label: '派发车辆数量', value: statistics.dispatchedVehicleCount, unit: '辆' },
-        { label: '总订单量', value: statistics.totalOrderCount, unit: '单' },
-        { label: '已到达车辆', value: statistics.arrivedVehicleCount, unit: '辆' },
+        { label: '当日配送总量', value: statistics.deliveryTotalTons, unit: '吨', tone: 'bg-cyan-300' },
+        { label: '派发车辆数量', value: statistics.dispatchedVehicleCount, unit: '辆', tone: 'bg-sky-300' },
+        { label: '总订单量', value: statistics.totalOrderCount, unit: '单', tone: 'bg-amber-300' },
+        { label: '已到达车辆', value: statistics.arrivedVehicleCount, unit: '辆', tone: 'bg-emerald-300' },
     ];
 
     return (
-        <div className="flex h-full items-center gap-8">
+        <div className="grid h-full grid-cols-4 items-center divide-x divide-white/8">
             {kpiData.map((item) => (
-                <div key={item.label} className="flex min-w-[100px] flex-col items-center">
-                    <span className="mb-1 text-xs tracking-widest text-cyan-400/60">{item.label}</span>
+                <div key={item.label} className="relative flex min-w-[8.5rem] flex-col items-start px-5 first:pl-0 last:pr-0">
+                    <span className="mb-0.5 text-[10px] text-slate-400">{item.label}</span>
                     <DigitalFlop value={item.value} unit={item.unit} />
-                    <div className="mt-1 h-0.5 w-8 bg-gradient-to-r from-transparent via-cyan-400/40 to-transparent" />
+                    <span className={`absolute bottom-0 left-5 h-px w-7 ${item.tone} opacity-65 first:left-0`} />
                 </div>
             ))}
         </div>
