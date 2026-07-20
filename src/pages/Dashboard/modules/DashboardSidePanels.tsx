@@ -5,6 +5,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'rea
 import type { CSSProperties, ReactNode } from 'react';
 import type { RouteOrder } from '../hooks/useDashboardRealtime';
 import { routeColorKey, routeTone } from './routePresentation';
+import { resolveVehicleAlarmSeverity } from './vehicleAlertRipples';
 
 export type WarehouseFocusState = {
     cityName: string;
@@ -114,6 +115,14 @@ function routeCargoWeight(route?: RouteOrder) {
 function coordinateText(position?: [number, number]) {
     if (!position || !position.every(Number.isFinite)) return '--';
     return `${position[0].toFixed(6)}, ${position[1].toFixed(6)}`;
+}
+
+function combinedVehicleState(route?: RouteOrder) {
+    const state = route?.stateStr?.trim() || '';
+    const alarm = route?.alarmStr?.trim() || '';
+    if (!alarm) return state || '--';
+    if (state.includes(alarm)) return state;
+    return `${state || '状态未知'} · 报警：${alarm}`;
 }
 
 function numberValue(value: unknown, fallback: number) {
@@ -327,7 +336,7 @@ function OverflowMarquee({
 
         const measure = () => {
             const overflow = content.scrollWidth - viewport.clientWidth;
-            setScrollDistance(overflow > 1 ? Math.ceil(overflow + 8) : 0);
+            setScrollDistance(overflow > 1 ? Math.ceil(overflow + 12) : 0);
         };
         measure();
 
@@ -536,6 +545,17 @@ function VehicleTransportDetails({
     const targetTone = routeTone(targetRoute, roadGroup.routes);
     const fromAddress = splitAdministrativeAddress(targetRoute?.from);
     const toAddress = splitAdministrativeAddress(targetRoute?.to);
+    const targetSeverity = resolveVehicleAlarmSeverity({
+        alarmStr: targetRoute?.alarmStr,
+        alarmSeverity: targetRoute?.alarmSeverity,
+        stateStr: targetRoute?.stateStr,
+        online: targetRoute?.online,
+    });
+    const stateTone = targetSeverity === 'critical'
+        ? 'text-red-300'
+        : targetSeverity === 'warning'
+            ? 'text-orange-300'
+            : 'text-emerald-100';
 
     useEffect(() => {
         onActiveVehicleChange?.(targetRoute?.lineId ?? null);
@@ -663,7 +683,7 @@ function VehicleTransportDetails({
                         </div>
                         <div className="col-span-2 rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">车辆状态</div>
-                            <OverflowMarquee value={targetRoute?.stateStr || '--'} className="mt-1 leading-5 text-emerald-100" />
+                            <OverflowMarquee value={combinedVehicleState(targetRoute)} className={`mt-1 leading-5 ${stateTone}`} />
                         </div>
                     </div>
                 </div>

@@ -16,16 +16,18 @@ type VehicleWithAlertRipple = {
     alertSeverity?: VehicleAlarmSeverity;
 };
 
-const CRITICAL_PATTERN = /紧急报警|碰撞报警|前向碰撞|行人碰撞|侧翻|危险预警|防劫|双手脱把|未检测到驾驶员|驾驶员异常/;
-const WARNING_PATTERN = /报警|预警|停车|停驶|静止|熄火|离线|失联|故障|异常|超速|疲劳|偏离|车距过近/;
+const CRITICAL_PATTERN = /无效定位|离线|失联|故障|异常|紧急报警|碰撞报警|前向碰撞|行人碰撞|侧翻|危险预警|防劫|双手脱把|未检测到驾驶员|驾驶员异常/;
+const WARNING_PATTERN = /停车超时|超速|疲劳|偏离|车距过近|预警|报警/;
 
 export function resolveVehicleAlarmSeverity(info: VehicleAlertInfo): VehicleAlarmSeverity {
+    if (info.alarmStr?.trim()) return 'critical';
+    const description = info.stateStr?.trim() ?? '';
+    if (CRITICAL_PATTERN.test(description)) return 'critical';
+    if (info.online === false) return 'critical';
+    if (WARNING_PATTERN.test(description)) return 'warning';
+    if (description) return 'none';
     if (info.alarmSeverity === 'critical') return 'critical';
     if (info.alarmSeverity === 'warning') return 'warning';
-    if (info.alarmSeverity === 'none') return 'none';
-    const description = `${info.alarmStr ?? ''} ${info.stateStr ?? ''}`.trim();
-    if (CRITICAL_PATTERN.test(description)) return 'critical';
-    if (info.online === false || WARNING_PATTERN.test(description)) return 'warning';
     return 'none';
 }
 
