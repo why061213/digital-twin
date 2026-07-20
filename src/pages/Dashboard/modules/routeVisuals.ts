@@ -207,7 +207,7 @@ export function createRouteEndpointLayer(
 ) {
     const preset = PRESETS[mode];
     const layer = new THREE.Group();
-    const identity = compactEndpoint(info.plate || info.orderName || info.orderId || `线路${laneIndex + 1}`);
+    const identity = compactEndpoint(info.orderId || info.orderName || `订单${laneIndex + 1}`);
     const markerScale = preset.markerScale * (1 + laneIndex * 0.18);
     const start = createEndpointMarker(samples[0], markerScale, color, 10 + laneIndex);
     const end = createEndpointMarker(samples[samples.length - 1], markerScale, color, 10 + laneIndex);
