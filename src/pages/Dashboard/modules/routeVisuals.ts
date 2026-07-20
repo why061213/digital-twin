@@ -19,6 +19,9 @@ type RouteVisualPreset = {
 type RouteEndpointInfo = {
     from?: string;
     to?: string;
+    plate?: string;
+    orderId?: string;
+    orderName?: string;
 };
 
 const PRESETS: Record<'rm1' | 'rm2', RouteVisualPreset> = {
@@ -134,6 +137,8 @@ function createEndpointLabel(
     value: string | undefined,
     color: string,
     mode: 'rm1' | 'rm2',
+    identity: string,
+    laneIndex: number,
 ) {
     const canvas = document.createElement('canvas');
     canvas.width = 640;
@@ -145,15 +150,16 @@ function createEndpointLabel(
     context.beginPath();
     context.arc(22, 44, prefix === '终点' ? 8 : 6, 0, Math.PI * 2);
     context.fill();
-    context.font = `${prefix === '终点' ? 600 : 500} 24px "Microsoft YaHei", sans-serif`;
+    context.font = `${prefix === '终点' ? 600 : 500} 22px "Microsoft YaHei", sans-serif`;
     context.lineWidth = 7;
     context.strokeStyle = 'rgba(2, 8, 20, 0.92)';
-    context.strokeText(prefix, 44, 54);
-    context.fillText(prefix, 44, 54);
+    const heading = `${prefix} · ${identity}`;
+    context.strokeText(heading, 44, 54);
+    context.fillText(heading, 44, 54);
     context.fillStyle = prefix === '终点' ? '#fef3c7' : '#dbeafe';
-    context.font = `${prefix === '终点' ? 600 : 400} 23px "Microsoft YaHei", sans-serif`;
-    context.strokeText(compactEndpoint(value), 112, 54);
-    context.fillText(compactEndpoint(value), 112, 54);
+    context.font = `${prefix === '终点' ? 600 : 400} 21px "Microsoft YaHei", sans-serif`;
+    context.strokeText(compactEndpoint(value), 198, 54);
+    context.fillText(compactEndpoint(value), 198, 54);
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -171,10 +177,13 @@ function createEndpointLabel(
     const offset = mode === 'rm2' ? 3.7 : 1.85;
     const offsetVariant = Array.from(value ?? prefix)
         .reduce((sum, character) => sum + character.charCodeAt(0), 0) % 3 - 1;
+    const laneSpread = [0, 1, -1][laneIndex % 3] ?? 0;
     sprite.scale.set(baseScale[0], baseScale[1], 1);
     sprite.position.copy(point);
     sprite.position.x += (prefix === '起点' ? -offset : offset) + offsetVariant * (mode === 'rm2' ? 1.1 : 0.55);
-    sprite.position.y += (mode === 'rm2' ? 0.86 : 0.42) + offsetVariant * (mode === 'rm2' ? 0.34 : 0.16);
+    sprite.position.y += (mode === 'rm2' ? 0.86 : 0.42)
+        + offsetVariant * (mode === 'rm2' ? 0.34 : 0.16)
+        + laneSpread * (mode === 'rm2' ? 1.05 : 0.48);
     sprite.renderOrder = 58;
     const worldPosition = new THREE.Vector3();
     sprite.onBeforeRender = (_renderer, _scene, camera) => {
@@ -183,6 +192,98 @@ function createEndpointLabel(
         sprite.scale.set(baseScale[0] * distanceScale, baseScale[1] * distanceScale, 1);
     };
     return sprite;
+}
+
+function colorText(color: number) {
+    return `#${new THREE.Color(color).getHexString()}`;
+}
+
+export function createRouteEndpointLayer(
+    samples: THREE.Vector3[],
+    mode: 'rm1' | 'rm2',
+    info: RouteEndpointInfo,
+    color: number,
+    laneIndex: number,
+) {
+    const preset = PRESETS[mode];
+    const layer = new THREE.Group();
+    const identity = compactEndpoint(info.plate || info.orderName || info.orderId || `线路${laneIndex + 1}`);
+    const markerScale = preset.markerScale * (1 + laneIndex * 0.18);
+    const start = createEndpointMarker(samples[0], markerScale, color, 10 + laneIndex);
+    const end = createEndpointMarker(samples[samples.length - 1], markerScale, color, 10 + laneIndex);
+    const startLabel = createEndpointLabel(
+        samples[0], '起点', info.from, colorText(color), mode, identity, laneIndex,
+    );
+    const endLabel = createEndpointLabel(
+        samples[samples.length - 1], '终点', info.to, colorText(color), mode, identity, laneIndex,
+    );
+    layer.add(start, end, startLabel, endLabel);
+    return layer;
+}
+
+export function createSharedProgressMaterial() {
+    return new THREE.ShaderMaterial({
+        uniforms: {
+            uTime: { value: 0 },
+            uProgress: { value: new THREE.Vector3() },
+            uColor0: { value: new THREE.Color(0x00ff88) },
+            uColor1: { value: new THREE.Color(0x00ccff) },
+            uColor2: { value: new THREE.Color(0xffaa00) },
+        },
+        vertexShader: `
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: `
+            uniform float uTime;
+            uniform vec3 uProgress;
+            uniform vec3 uColor0;
+            uniform vec3 uColor1;
+            uniform vec3 uColor2;
+            varying vec2 vUv;
+            void main() {
+                bool active0 = uProgress.x > 0.0001 && vUv.x <= uProgress.x;
+                bool active1 = uProgress.y > 0.0001 && vUv.x <= uProgress.y;
+                bool active2 = uProgress.z > 0.0001 && vUv.x <= uProgress.z;
+                float activeCount = (active0 ? 1.0 : 0.0)
+                    + (active1 ? 1.0 : 0.0)
+                    + (active2 ? 1.0 : 0.0);
+                if (activeCount < 0.5) discard;
+
+                float phase = fract(vUv.x * 26.0 - uTime * 0.48);
+                vec3 color = active0 ? uColor0 : (active1 ? uColor1 : uColor2);
+                if (activeCount > 2.5) {
+                    color = phase < 0.333 ? uColor0 : (phase < 0.666 ? uColor1 : uColor2);
+                } else if (activeCount > 1.5) {
+                    vec3 first = active0 ? uColor0 : uColor1;
+                    vec3 second = active2 ? uColor2 : uColor1;
+                    color = phase < 0.5 ? first : second;
+                }
+                float crown = 0.72 + 0.28 * pow(abs(sin(vUv.y * 3.14159265)), 4.0);
+                float pulse = 0.82 + 0.18 * sin((vUv.x * 38.0 - uTime * 3.6) * 3.14159265);
+                gl_FragColor = vec4(color * (0.9 + pulse * 0.18), crown * 0.96);
+            }
+        `,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+    });
+}
+
+export function updateSharedProgressMaterial(
+    material: THREE.ShaderMaterial,
+    lanes: Array<{ color: number; progress: number }>,
+) {
+    const visible = lanes.slice(0, 3);
+    const progresses = [0, 0, 0];
+    visible.forEach((lane, index) => {
+        progresses[index] = THREE.MathUtils.clamp(lane.progress, 0, 1);
+        (material.uniforms[`uColor${index}`].value as THREE.Color).setHex(lane.color);
+    });
+    material.uniforms.uProgress.value.set(progresses[0], progresses[1], progresses[2]);
 }
 
 function createFlowMaterial(repeats: number) {
@@ -225,7 +326,7 @@ export function createRouteVisualLayers(
     radialSegments: number,
     samples: THREE.Vector3[],
     mode: 'rm1' | 'rm2',
-    info: RouteEndpointInfo = {},
+    _info: RouteEndpointInfo = {},
 ) {
     const preset = PRESETS[mode];
     const layers = new THREE.Group();
@@ -297,10 +398,6 @@ export function createRouteVisualLayers(
         flowMaterial.uniforms.uTime.value = performance.now() / 1_000;
     };
 
-    const start = createEndpointMarker(samples[0], preset.markerScale, 0x67e8f9, 10);
-    const end = createEndpointMarker(samples[samples.length - 1], preset.markerScale, 0xfbbf24, 10);
-    const startLabel = createEndpointLabel(samples[0], '起点', info.from, '#67e8f9', mode);
-    const endLabel = createEndpointLabel(samples[samples.length - 1], '终点', info.to, '#fbbf24', mode);
-    layers.add(screenGlow, screenCore, foundation, leftEdge, rightEdge, flow, start, end, startLabel, endLabel);
+    layers.add(screenGlow, screenCore, foundation, leftEdge, rightEdge, flow);
     return layers;
 }

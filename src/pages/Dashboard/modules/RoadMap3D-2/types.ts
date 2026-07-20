@@ -61,6 +61,7 @@ export type OrderLaneState = {
     orderId: string;
     color: number;
     progressTube: THREE.Mesh;
+    endpointLayer: THREE.Group;
     vehicles: Map<string, VehicleBarState>;
     maxProgress: number;
     laneIndex: number;
@@ -72,6 +73,7 @@ export interface RoadState {
     pathCurve: THREE.CurvePath<THREE.Vector3>;
     grayTube: THREE.Mesh;
     selectionTube: THREE.Mesh;
+    sharedProgressTube: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
     samples: THREE.Vector3[];
     cumulativeLengths: number[];
     totalLength: number;

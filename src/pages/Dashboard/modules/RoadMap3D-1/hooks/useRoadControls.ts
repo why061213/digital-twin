@@ -6,7 +6,12 @@ import { disposeObject3D, clamp01, makePathCurve, indexCount } from '../utils';
 import { ROAD_LIFT, TRUCK_LIFT, PATH_SAMPLE_COUNT, CAMERA_TILT_RATIO } from '../constants';
 import type { RoadState, RoadObjectInfo, OrderLaneState, VehicleBarState } from '../types';
 import type { useRoadMapRefs } from './useRoadMapRefs';
-import { createRouteVisualLayers } from '../../routeVisuals';
+import {
+    createRouteEndpointLayer,
+    createRouteVisualLayers,
+    createSharedProgressMaterial,
+    updateSharedProgressMaterial,
+} from '../../routeVisuals';
 import { syncVehicleAlertRipple } from '../../vehicleAlertRipples';
 
 // const ORDER_COLORS = [
@@ -398,19 +403,30 @@ export function useRoadControls(
             road.grayTube.geometry = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, baseRadius, road.radialSegments, false);
             road.selectionTube.geometry.dispose();
             road.selectionTube.geometry = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, baseRadius + 0.075, road.radialSegments, false);
+            road.sharedProgressTube.geometry.dispose();
+            road.sharedProgressTube.geometry = new THREE.TubeGeometry(
+                road.pathCurve, road.tubularSegments, Math.max(0.075, baseRadius * 0.72), road.radialSegments, false,
+            );
             road.renderedOrderCount = orderCount;
         }
 
-        Array.from(road.orders.values()).forEach((lane, laneIndex) => {
-            lane.laneIndex = laneIndex;
+        const lanes = Array.from(road.orders.values());
+        lanes.forEach((lane) => {
             const vehicles = Array.from(lane.vehicles.values());
             lane.maxProgress = Math.max(0, ...vehicles.map((vehicle) => vehicle.progress));
+        });
+        updateSharedProgressMaterial(
+            road.sharedProgressTube.material,
+            lanes.map((lane) => ({ color: lane.color, progress: lane.maxProgress })),
+        );
+
+        lanes.forEach((lane, laneIndex) => {
+            lane.laneIndex = laneIndex;
+            const vehicles = Array.from(lane.vehicles.values());
             const leadVehicle = vehicles.reduce<VehicleBarState | null>((lead, vehicle) => {
                 if (!lead || vehicle.progress > lead.progress) return vehicle;
                 return lead;
             }, null);
-            lane.progressTube.position.y = 0.04 + laneIndex * 0.055;
-            drawTubeProgress(lane.progressTube, lane.maxProgress, road.tubularSegments, road.radialSegments);
             vehicles.forEach((vehicle, vehicleIndex) => {
                 const material = vehicle.bar.material as THREE.MeshBasicMaterial;
                 const isLead = vehicle === leadVehicle;
@@ -556,7 +572,7 @@ export function useRoadControls(
         refs.selectedRoadIdRef.current = null;
     }, [clearRoad, refs]);
 
-    const ensureOrderLane = useCallback((road: RoadState, orderId: string) => {
+    const ensureOrderLane = useCallback((road: RoadState, orderId: string, info: RoadObjectInfo) => {
         let lane = road.orders.get(orderId);
         if (lane) return lane;
 
@@ -575,12 +591,15 @@ export function useRoadControls(
         }));
         progressTube.renderOrder = 9 + laneIndex;
         progressTube.userData = { roadId: road.pathKey, objectType: '订单进度' };
-        road.group.add(progressTube);
+        progressTube.visible = false;
+        const endpointLayer = createRouteEndpointLayer(road.samples, 'rm1', info, color, laneIndex);
+        road.group.add(endpointLayer);
 
         lane = {
             orderId,
             color,
             progressTube,
+            endpointLayer,
             vehicles: new Map(),
             maxProgress: 0,
             laneIndex,
@@ -637,7 +656,7 @@ export function useRoadControls(
             const orderId = orderKeyFor(id, info);
             const existing = refs.roadsMapRef.current.get(pathKey);
             if (existing) {
-                const lane = ensureOrderLane(existing, orderId);
+                const lane = ensureOrderLane(existing, orderId, info);
                 ensureVehicleBar(existing, lane, id, info);
                 existing.info = { ...existing.info, ...info };
                 updateOrderVisuals(existing);
@@ -680,6 +699,18 @@ export function useRoadControls(
             selectionTube.renderOrder = 12;
             selectionTube.userData = { roadId: pathKey, objectType: '共享路线' };
 
+            const sharedProgressMaterial = createSharedProgressMaterial();
+            const sharedProgressTube = new THREE.Mesh(
+                new THREE.TubeGeometry(pathCurve, tubularSegments, 0.075, radialSegments, false),
+                sharedProgressMaterial,
+            );
+            sharedProgressTube.position.y = 0.035;
+            sharedProgressTube.renderOrder = 9;
+            sharedProgressTube.userData = { roadId: pathKey, objectType: '共享订单进度' };
+            sharedProgressTube.onBeforeRender = () => {
+                sharedProgressMaterial.uniforms.uTime.value = performance.now() / 1_000;
+            };
+
             const labelAnchor = samples[Math.floor(samples.length * 0.58)]?.clone() ?? samples[0].clone();
             labelAnchor.x += 1.25;
             labelAnchor.y = TRUCK_LIFT + 3.25;
@@ -689,6 +720,7 @@ export function useRoadControls(
             group.add(
                 createRouteVisualLayers(pathCurve, tubularSegments, radialSegments, samples, 'rm1', info),
                 grayTube,
+                sharedProgressTube,
                 selectionTube,
             );
             scene.add(group);
@@ -699,6 +731,7 @@ export function useRoadControls(
                 pathCurve,
                 grayTube,
                 selectionTube,
+                sharedProgressTube,
                 samples,
                 cumulativeLengths,
                 totalLength: cumulativeLengths[cumulativeLengths.length - 1] ?? 0,
@@ -714,7 +747,7 @@ export function useRoadControls(
             };
 
             refs.roadsMapRef.current.set(pathKey, road);
-            const lane = ensureOrderLane(road, orderId);
+            const lane = ensureOrderLane(road, orderId, info);
             ensureVehicleBar(road, lane, id, info);
             updateOrderVisuals(road);
             focusAllRoads();
@@ -742,8 +775,9 @@ export function useRoadControls(
             road.group.remove(vehicle.bar);
             disposeObject3D(vehicle.bar);
             if (lane.vehicles.size === 0) {
-                road.group.remove(lane.progressTube);
                 disposeObject3D(lane.progressTube);
+                road.group.remove(lane.endpointLayer);
+                disposeObject3D(lane.endpointLayer);
                 road.orders.delete(lane.orderId);
             }
         });
@@ -804,7 +838,7 @@ export function useRoadControls(
         const road = refs.roadsMapRef.current.get(trackKey);
         if (!road) return;
         const orderId = orderKeyFor(lineId, info);
-        const lane = ensureOrderLane(road, orderId);
+        const lane = ensureOrderLane(road, orderId, info);
         const vehicle = ensureVehicleBar(road, lane, lineId, info);
         vehicle.currentCoords = position;
         vehicle.info = { ...vehicle.info, ...info };
