@@ -544,14 +544,18 @@ function VehicleTransportDetails({
     onVehicleSelect: (lineId: string) => void;
     onActiveVehicleChange?: (lineId: string | null) => void;
 }) {
-    const detailRoutes = useMemo(() => {
+    const { runningRoutes, finishedRoutes, detailRoutes } = useMemo(() => {
         const running = roadGroup.routes.filter((route) => (
             route.status !== '已完成' && route.status !== 'finished'
         ));
         const finished = roadGroup.routes.filter((route) => (
             route.status === '已完成' || route.status === 'finished'
         ));
-        return [...running, ...finished];
+        return {
+            runningRoutes: running,
+            finishedRoutes: finished,
+            detailRoutes: [...running, ...finished],
+        };
     }, [roadGroup.routes]);
     const detailRouteIds = detailRoutes.map((route) => route.lineId).join('\u0000');
     const selectedIndex = detailRoutes.findIndex((route) => route.lineId === activeVehicleLineId);
@@ -581,14 +585,15 @@ function VehicleTransportDetails({
     }, [onActiveVehicleChange]);
 
     useEffect(() => {
-        if (detailRoutes.length <= 1) return;
+        // 组内只有一辆活跃车（或无活跃车）时，不尝试自动切换车辆
+        if (runningRoutes.length <= 1) return;
         const timer = window.setInterval(() => {
             const routeLineIds = detailRouteIds.split('\u0000').filter(Boolean);
             const nextIndex = (targetIndex + 1) % routeLineIds.length;
             onVehicleSelect(routeLineIds[nextIndex]);
         }, 15_000);
         return () => window.clearInterval(timer);
-    }, [activeVehicleLineId, detailRouteIds, detailRoutes.length, onVehicleSelect, targetIndex]);
+    }, [activeVehicleLineId, detailRouteIds, detailRoutes.length, onVehicleSelect, runningRoutes.length, targetIndex]);
 
     return (
         <Panel title="车辆运输详情" className="h-full min-h-0">
