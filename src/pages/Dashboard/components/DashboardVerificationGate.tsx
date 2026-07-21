@@ -26,6 +26,42 @@ const INITIAL_STATUS: BootstrapStatus = {
     serverTime: '',
 };
 
+function deniedFeedback(status: BootstrapStatus) {
+    switch (status.authorizationCode) {
+        case 'mac_whitelist_not_configured':
+            return {
+                title: '服务器尚未配置设备白名单',
+                detail: '当前后端启用了设备验证，但允许访问的 MAC 地址列表为空。',
+                action: '请管理员在后端配置 dashboard.access.allowed-mac-addresses 后重启服务。',
+            };
+        case 'device_mac_unresolved':
+            return {
+                title: '服务器无法识别当前设备',
+                detail: '后端未能从局域网邻居表取得该设备的 MAC 地址，常见原因是设备不在同一网段、尚未产生 ARP 记录或经过了代理。',
+                action: '请确认设备与服务器处于同一局域网；跨网段设备请使用已分发的访问密钥或设备令牌。',
+            };
+        case 'device_not_in_mac_whitelist':
+            return {
+                title: '当前设备未加入访问白名单',
+                detail: `服务器已识别设备${status.deviceIdentity ? `（${status.deviceIdentity}）` : ''}，但该 MAC 地址不在允许列表中。`,
+                action: '请管理员根据后端拒绝日志中的完整 MAC 地址更新 dashboard.access.allowed-mac-addresses。',
+            };
+        default:
+            return {
+                title: '当前设备被拒绝访问',
+                detail: status.message || '后端没有授权当前设备进入数字孪生大屏。',
+                action: '请检查设备白名单、访问密钥和局域网连接后重试。',
+            };
+    }
+}
+
+function connectionFailureMessage(error: unknown) {
+    if (error instanceof TypeError) {
+        return '无法连接验证服务：请确认后端已启动、局域网地址可达且反向代理配置正确。';
+    }
+    return error instanceof Error ? error.message : '后端验证服务暂未响应';
+}
+
 function StatusRow({ label, complete, active }: { label: string; complete: boolean; active: boolean }) {
     return (
         <div className="flex h-11 items-center justify-between border-b border-white/8 last:border-b-0">
@@ -93,7 +129,7 @@ export function DashboardVerificationGate({ onVerified, standalone = false }: Da
                 setStatus((current) => ({
                     ...current,
                     phase: 'connecting',
-                    message: error instanceof Error ? error.message : '后端暂未响应',
+                    message: connectionFailureMessage(error),
                 }));
                 timer = window.setTimeout(poll, 1500);
             }
@@ -126,6 +162,7 @@ export function DashboardVerificationGate({ onVerified, standalone = false }: Da
     };
 
     const unauthorized = status.phase === 'unauthorized';
+    const rejection = unauthorized ? deniedFeedback(status) : null;
     return (
         <main className="relative flex h-screen w-screen items-center justify-center overflow-hidden bg-[#050914] text-slate-100">
             <div className="pointer-events-none absolute inset-0 opacity-[0.08] [background-image:linear-gradient(rgba(148,163,184,0.5)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.5)_1px,transparent_1px)] [background-size:56px_56px]" />
@@ -145,8 +182,26 @@ export function DashboardVerificationGate({ onVerified, standalone = false }: Da
                 </div>
 
                 <div className="min-h-14">
-                    <p className={`text-sm ${unauthorized ? 'text-rose-300' : 'text-slate-300'}`}>{status.message}</p>
-                    {status.deviceIdentity && <p className="mt-2 text-xs text-slate-500">设备标识 {status.deviceIdentity}</p>}
+                    <p className={`text-sm ${unauthorized ? 'font-semibold text-rose-200' : 'text-slate-300'}`}>
+                        {rejection?.title ?? status.message}
+                    </p>
+                    {rejection && (
+                        <div className="mt-3 border border-rose-300/20 bg-rose-400/[0.065] px-3 py-3">
+                            <p className="text-xs leading-5 text-slate-300">{rejection.detail}</p>
+                            <p className="mt-2 border-t border-rose-200/10 pt-2 text-xs leading-5 text-rose-200">
+                                {rejection.action}
+                            </p>
+                            <dl className="mt-3 grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-[11px]">
+                                <dt className="text-slate-500">请求地址</dt>
+                                <dd className="truncate font-mono text-slate-300">{status.remoteAddress || '后端未返回'}</dd>
+                                <dt className="text-slate-500">设备标识</dt>
+                                <dd className="truncate font-mono text-slate-300">{status.deviceIdentity || '未识别'}</dd>
+                                <dt className="text-slate-500">拒绝代码</dt>
+                                <dd className="truncate font-mono text-rose-300/90">{status.authorizationCode || 'device_not_authorized'}</dd>
+                            </dl>
+                        </div>
+                    )}
+                    {!unauthorized && status.deviceIdentity && <p className="mt-2 text-xs text-slate-500">设备标识 {status.deviceIdentity}</p>}
                     {status.dataInitialized && (
                         <p className="mt-2 text-xs tabular-nums text-slate-500">
                             已接收 {status.rawCount} 条记录，生成 {status.routeCount} 条运输路线

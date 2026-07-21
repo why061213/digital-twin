@@ -59,8 +59,20 @@ function deviceHeaders(): HeadersInit | undefined {
     return deviceToken ? { 'X-Dashboard-Device-Token': deviceToken } : undefined;
 }
 
+async function authorizationFailure(response: Response, fallback: string) {
+    try {
+        const body = await response.json() as { message?: unknown; code?: unknown };
+        const message = typeof body.message === 'string' ? body.message.trim() : '';
+        const code = typeof body.code === 'string' ? body.code.trim() : '';
+        if (message) return code ? `${message}（${code}）` : message;
+    } catch {
+        // The fallback still provides a concrete HTTP status.
+    }
+    return `${fallback}（HTTP ${response.status}）`;
+}
+
 async function readSessionResponse(response: Response): Promise<DashboardSession> {
-    if (!response.ok) throw new Error(`Dashboard authorization failed: ${response.status}`);
+    if (!response.ok) throw new Error(await authorizationFailure(response, '设备认证失败'));
     const session = await response.json() as DashboardSession;
     if (!isSession(session)) throw new Error('Dashboard authorization returned an invalid session');
     return saveSession(session);
@@ -79,7 +91,7 @@ export async function adoptDashboardAccessKey(accessToken: string): Promise<Dash
     const response = await fetch(`${API_BASE_URL}/auth/session`, {
         headers: { Authorization: `Bearer ${normalized}` },
     });
-    if (!response.ok) throw new Error('访问密钥无效或已过期');
+    if (!response.ok) throw new Error(await authorizationFailure(response, '访问密钥无效或已过期'));
     const validation = await response.json() as SessionValidation;
     return saveSession({
         accessToken: normalized,

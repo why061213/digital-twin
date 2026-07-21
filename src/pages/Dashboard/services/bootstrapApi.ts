@@ -12,6 +12,8 @@ export type BootstrapStatus = {
     rawCount: number;
     routeCount: number;
     verificationMethod?: string;
+    authorizationCode?: string;
+    remoteAddress?: string | null;
     deviceIdentity?: string | null;
     retryAfterMs?: number;
     serverTime: string;
@@ -28,7 +30,21 @@ export async function fetchBootstrapStatus(signal?: AbortSignal): Promise<Bootst
         headers,
     });
     if (!response.ok) {
-        throw new Error(`Bootstrap status request failed: ${response.status}`);
+        let message = '';
+        try {
+            const body = await response.json() as { message?: unknown };
+            if (typeof body.message === 'string') message = body.message.trim();
+        } catch {
+            // Use the status-specific fallback below when the body is not JSON.
+        }
+        const fallback = response.status === 401
+            ? '验证会话无效或已经过期'
+            : response.status === 403
+                ? '后端拒绝当前设备访问'
+                : response.status >= 500
+                    ? '后端服务发生异常，请查看服务日志'
+                    : `验证状态请求失败（HTTP ${response.status}）`;
+        throw new Error(message || fallback);
     }
     return response.json() as Promise<BootstrapStatus>;
 }
