@@ -12,6 +12,14 @@ import { useRoadSelection } from './useRoadSelection';
 type MapLayer = {
     group: THREE.Group;
     boundaryMaterials: LineMaterial[];
+    regionLabels: MapRegionLabel[];
+};
+
+type MapRegionLabel = {
+    key: string;
+    level: 'city' | 'district';
+    sprite: THREE.Sprite;
+    aspect: number;
 };
 
 type MapLayerSlot = 'province' | 'direction';
@@ -30,6 +38,11 @@ type MapLayerState = {
 function disposeMapLayer(layer: MapLayer) {
     layer.group.removeFromParent();
     layer.group.traverse((child) => {
+        if (child instanceof THREE.Sprite) {
+            child.material.map?.dispose();
+            child.material.dispose();
+            return;
+        }
         if (!(child instanceof THREE.Mesh || child instanceof THREE.LineSegments || child instanceof THREE.Line)) return;
         child.geometry?.dispose();
         const material = child.material;
@@ -38,9 +51,90 @@ function disposeMapLayer(layer: MapLayer) {
     });
 }
 
+function polygonArea(ring: [number, number][]) {
+    let area = 0;
+    for (let index = 0; index < ring.length; index += 1) {
+        const current = ring[index];
+        const next = ring[(index + 1) % ring.length];
+        area += current[0] * next[1] - next[0] * current[1];
+    }
+    return area / 2;
+}
+
+function polygonCentroid(ring: [number, number][]): [number, number] | null {
+    const area = polygonArea(ring);
+    if (Math.abs(area) < 1e-6) return null;
+    let x = 0;
+    let y = 0;
+    for (let index = 0; index < ring.length; index += 1) {
+        const current = ring[index];
+        const next = ring[(index + 1) % ring.length];
+        const cross = current[0] * next[1] - next[0] * current[1];
+        x += (current[0] + next[0]) * cross;
+        y += (current[1] + next[1]) * cross;
+    }
+    return [x / (6 * area), y / (6 * area)];
+}
+
+function resolveRegionLabelPosition(properties: any, projectedRings: [number, number][][]) {
+    const sourceCenter = properties?.centroid ?? properties?.center;
+    if (Array.isArray(sourceCenter) && sourceCenter.length >= 2) {
+        const projected = projection([Number(sourceCenter[0]), Number(sourceCenter[1])]);
+        if (projected) return projected;
+    }
+
+    const largestRing = [...projectedRings]
+        .filter((ring) => ring.length >= 3)
+        .sort((left, right) => Math.abs(polygonArea(right)) - Math.abs(polygonArea(left)))[0];
+    return largestRing ? polygonCentroid(largestRing) : null;
+}
+
+function createRegionLabel(name: string, level: 'city' | 'district') {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+
+    const fontSize = level === 'city' ? 34 : 30;
+    const fontWeight = level === 'city' ? 700 : 600;
+    const font = `${fontWeight} ${fontSize}px "Microsoft YaHei", "PingFang SC", sans-serif`;
+    context.font = font;
+    const textWidth = Math.ceil(context.measureText(name).width);
+    canvas.width = Math.max(96, textWidth + 32);
+    canvas.height = 64;
+
+    context.font = font;
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.lineJoin = 'round';
+    context.strokeStyle = 'rgba(4, 15, 27, 0.94)';
+    context.lineWidth = level === 'city' ? 8 : 7;
+    context.strokeText(name, canvas.width / 2, canvas.height / 2);
+    context.fillStyle = level === 'city' ? '#7dd3fc' : '#dbe7f3';
+    context.fillText(name, canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    const material = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        opacity: 0,
+        toneMapped: false,
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.center.set(0.5, 0.5);
+    sprite.renderOrder = 20;
+    return { sprite, aspect: canvas.width / canvas.height };
+}
+
 function buildMapLayer(geoJson: any, container: HTMLDivElement): MapLayer {
     const group = new THREE.Group();
+    const geometryGroup = new THREE.Group();
     const boundaryMaterials: LineMaterial[] = [];
+    const regionLabels: MapRegionLabel[] = [];
     const districtParentAdcodes = new Set<number>(
         geoJson.features
             .filter((feature: any) => feature.properties?._boundaryLevel === 'district')
@@ -64,11 +158,13 @@ function buildMapLayer(geoJson: any, container: HTMLDivElement): MapLayer {
         else if (geometry.type === 'MultiLineString') rings = geometry.coordinates;
 
         const cityGroup = new THREE.Group();
+        const projectedRings: [number, number][][] = [];
         rings.forEach((ring) => {
             const projectedRing = ring
                 .map(([lng, lat]) => projection([lng, lat]))
                 .filter((point): point is [number, number] => point !== null);
             if (projectedRing.length < 2) return;
+            projectedRings.push(projectedRing);
 
             const boundaryStyle = boundaryLevel === 'province'
                 ? { color: 0xfbbf24, width: 1.8, opacity: 0.9, z: -0.18, order: 6 }
@@ -140,37 +236,38 @@ function buildMapLayer(geoJson: any, container: HTMLDivElement): MapLayer {
             mesh.renderOrder = usesDistrictSurface ? 2 : 1;
             cityGroup.add(mesh);
 
-            // 区县名称标签（Plane 贴地平躺）
-            if (isDistrict && properties?.name) {
-                const cx = projectedRing.reduce((s, p) => s + p[0], 0) / projectedRing.length;
-                const cy = projectedRing.reduce((s, p) => s + p[1], 0) / projectedRing.length;
-                const textCanvas = document.createElement('canvas');
-                textCanvas.width = 128;
-                textCanvas.height = 32;
-                const tCtx = textCanvas.getContext('2d')!;
-                tCtx.fillStyle = '#6b7280';
-                tCtx.font = '18px sans-serif';
-                tCtx.textAlign = 'center';
-                tCtx.textBaseline = 'middle';
-                tCtx.fillText(properties.name, 64, 16);
-                const textTexture = new THREE.CanvasTexture(textCanvas);
-                textTexture.minFilter = THREE.LinearFilter;
-                const labelPlane = new THREE.Mesh(
-                    new THREE.PlaneGeometry(6, 1.5),
-                    new THREE.MeshBasicMaterial({ map: textTexture, transparent: true, depthWrite: false })
-                );
-                labelPlane.position.set(-cx, -cy, 0.12);
-                labelPlane.rotation.x = -Math.PI / 2;
-                labelPlane.renderOrder = 3;
-                cityGroup.add(labelPlane);
-            }
         });
-        group.add(cityGroup);
+        geometryGroup.add(cityGroup);
+
+        const labelLevel = isDistrict
+            ? 'district'
+            : (boundaryLevel === 'city' && !hasDistrictFill ? 'city' : null);
+        const labelPosition = labelLevel && properties?.name
+            ? resolveRegionLabelPosition(properties, projectedRings)
+            : null;
+        if (labelLevel && labelPosition) {
+            const label = createRegionLabel(String(properties.name), labelLevel);
+            if (label) {
+                label.sprite.position.set(
+                    -labelPosition[0] * MAP_HORIZONTAL_SCALE,
+                    0.72,
+                    -labelPosition[1] * MAP_HORIZONTAL_SCALE,
+                );
+                group.add(label.sprite);
+                regionLabels.push({
+                    key: `${labelLevel}:${properties?.adcode ?? properties.name}`,
+                    level: labelLevel,
+                    sprite: label.sprite,
+                    aspect: label.aspect,
+                });
+            }
+        }
     });
 
-    group.scale.set(MAP_HORIZONTAL_SCALE, MAP_HORIZONTAL_SCALE, 1);
-    group.rotation.x = Math.PI / 2;
-    return { group, boundaryMaterials };
+    geometryGroup.scale.set(MAP_HORIZONTAL_SCALE, MAP_HORIZONTAL_SCALE, 1);
+    geometryGroup.rotation.x = Math.PI / 2;
+    group.add(geometryGroup);
+    return { group, boundaryMaterials, regionLabels };
 }
 
 export function useRoadMapScene(
@@ -243,6 +340,32 @@ export function useRoadMapScene(
                 activeLayer: null, activeSignature: '', stagedLayer: null, stagedSignature: '',
                 generation: 0, request: null, pendingSignature: '', pendingPromise: null,
             },
+        };
+
+        const updateRegionLabels = () => {
+            const cameraHeight = Math.abs(camera.position.y);
+            const seenLabelKeys = new Set<string>();
+            (['province', 'direction'] as const).forEach((slot) => {
+                mapLayers[slot].activeLayer?.regionLabels.forEach((label) => {
+                    const duplicate = seenLabelKeys.has(label.key);
+                    seenLabelKeys.add(label.key);
+                    const fadeStart = label.level === 'city' ? 2200 : 1100;
+                    const fadeEnd = label.level === 'city' ? 4800 : 2400;
+                    const opacity = duplicate
+                        ? 0
+                        : 1 - THREE.MathUtils.smoothstep(cameraHeight, fadeStart, fadeEnd);
+                    label.sprite.visible = opacity > 0.03;
+                    label.sprite.material.opacity = opacity * (label.level === 'city' ? 0.95 : 0.82);
+
+                    const screenStableHeight = THREE.MathUtils.clamp(cameraHeight * 0.025, 13, 42)
+                        * (label.level === 'city' ? 1.12 : 1);
+                    label.sprite.scale.set(
+                        screenStableHeight * label.aspect,
+                        screenStableHeight,
+                        1,
+                    );
+                });
+            });
         };
 
         const orbitControls = new OrbitControls(camera, renderer.domElement);
@@ -376,6 +499,7 @@ export function useRoadMapScene(
             selectionRef.current.updateHoverPosition();
             orbitControls.update();
             controlsRef.current.updateVehicleScaleForCamera(camera.position.y);
+            updateRegionLabels();
             renderer.render(scene, camera);
         };
         animate();
