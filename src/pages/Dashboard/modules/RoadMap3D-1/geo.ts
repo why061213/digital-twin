@@ -9,8 +9,7 @@ export const projection = geoMercator()
     .translate([0, 0]);
 
 export async function loadCityGeoJson(): Promise<any> {
-    const { data: provData, remoteAvailable } = await loadNationalGeoSource();
-    if (!remoteAvailable) return provData;
+    const { data: provData } = await loadNationalGeoSource();
     const municipalityFeatures: any[] = [];
     const provinceAdcodes: number[] = [];
 

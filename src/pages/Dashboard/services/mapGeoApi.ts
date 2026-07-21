@@ -1,5 +1,6 @@
 const REMOTE_GEO_BASE_URL = 'https://geo.datav.aliyun.com/areas_v3/bound/';
 const LOCAL_CHINA_GEO_URL = '/map/china.json';
+const LOCAL_GEO_BASE_URL = '/map/bound/';
 const REMOTE_PROBE_TIMEOUT_MS = 2_000;
 
 type GeoJson = {
@@ -9,7 +10,6 @@ type GeoJson = {
 
 type NationalGeoSource = {
     data: GeoJson;
-    remoteAvailable: boolean;
 };
 
 let nationalGeoSourcePromise: Promise<NationalGeoSource> | null = null;
@@ -30,24 +30,24 @@ async function fetchJson(url: string, timeoutMs: number, signal?: AbortSignal): 
 }
 
 export function loadNationalGeoSource(): Promise<NationalGeoSource> {
-    nationalGeoSourcePromise ??= fetchJson(
-        `${REMOTE_GEO_BASE_URL}100000_full.json`,
-        REMOTE_PROBE_TIMEOUT_MS,
-    ).then((data) => ({ data, remoteAvailable: true }))
+    nationalGeoSourcePromise ??= fetchJson(LOCAL_CHINA_GEO_URL, 5_000)
+        .then((data) => ({ data }))
         .catch(async () => ({
-            data: await fetchJson(LOCAL_CHINA_GEO_URL, 5_000),
-            remoteAvailable: false,
+            data: await fetchJson(`${REMOTE_GEO_BASE_URL}100000_full.json`, REMOTE_PROBE_TIMEOUT_MS),
         }));
     return nationalGeoSourcePromise;
 }
 
 export async function loadDetailedGeoJson(adcode: number, signal?: AbortSignal): Promise<GeoJson | null> {
-    const source = await loadNationalGeoSource();
-    if (!source.remoteAvailable) return null;
     try {
-        return await fetchJson(`${REMOTE_GEO_BASE_URL}${adcode}_full.json`, 8_000, signal);
+        return await fetchJson(`${LOCAL_GEO_BASE_URL}${adcode}_full.json`, 5_000, signal);
     } catch (error) {
         if (signal?.aborted) throw error;
-        return null;
+        try {
+            return await fetchJson(`${REMOTE_GEO_BASE_URL}${adcode}_full.json`, 8_000, signal);
+        } catch (remoteError) {
+            if (signal?.aborted) throw remoteError;
+            return null;
+        }
     }
 }

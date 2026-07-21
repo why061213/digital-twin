@@ -6,8 +6,7 @@ import { loadDetailedGeoJson, loadNationalGeoSource } from '../../services/mapGe
 export const projection = geoMercator().center([104.5, 35]).scale(80).translate([0, 0]);
 
 export async function loadCityGeoJson(): Promise<any> {
-    const { data: provData, remoteAvailable } = await loadNationalGeoSource();
-    if (!remoteAvailable) return provData;
+    const { data: provData } = await loadNationalGeoSource();
     const municipalityFeatures: any[] = [];
     const provinceAdcodes: number[] = [];
 
