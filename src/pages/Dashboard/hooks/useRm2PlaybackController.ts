@@ -352,7 +352,8 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
 
             if (provinceChanged || directionChanged) {
                 roadMapRef.current?.clearRoads();
-                activeRoutesRef.current.clear();
+                // 不清空 activeRoutesRef：createActiveRoute 会复用已有路线的校准位置，
+                // 避免卡车短暂出现在路线起点。Map 最终会被新路线列表替换。
                 activeRouteLineIdsRef.current.clear();
                 setRouteOrders([]);
             }
