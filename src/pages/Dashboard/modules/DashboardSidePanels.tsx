@@ -640,12 +640,12 @@ function VehicleTransportDetails({
                         </div>
                     </div>
                     <div className="grid min-w-0 shrink-0 grid-cols-[1rem_minmax(0,1fr)] gap-x-3 overflow-hidden">
-                        <div className="flex h-[4.5rem] flex-col items-center py-1">
+                        <div className="flex h-[6rem] flex-col items-center py-1">
                             <span className="h-2.5 w-2.5 rounded-full border-2 border-sky-200 bg-sky-500 shadow-[0_0_10px_rgba(56,189,248,0.7)]" />
                             <span className="my-0.5 min-h-2 w-px flex-1 bg-gradient-to-b from-sky-300/70 to-emerald-300/70" />
                             <span className="h-2.5 w-2.5 rounded-full border-2 border-emerald-200 bg-emerald-500 shadow-[0_0_10px_rgba(52,211,153,0.65)]" />
                         </div>
-                        <div className="grid h-[4.5rem] min-w-0 grid-rows-2 gap-1 overflow-hidden">
+                        <div className="grid h-[6rem] min-w-0 grid-rows-2 gap-1 overflow-hidden">
                             <div className="flex min-w-0 items-center gap-2 overflow-hidden rounded border border-sky-300/10 bg-sky-300/[0.025] px-2.5 opacity-80">
                                 <div className="shrink-0 text-[10px] text-slate-500">起点</div>
                                 <OverflowMarquee value={fromAddress.detail} className="min-w-0 flex-1 text-xs font-medium leading-6 text-slate-300" />
@@ -883,17 +883,13 @@ function RoadGroupRightPanels({
                         {route.plate}
                     </span>
                     <span className="flex shrink-0 items-center gap-1.5">
-                        {(hasWarning || hasCriticalAlarm) && (
+                        {hasCriticalAlarm && (
                             <span
-                                className={`flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[9px] font-semibold ${
-                                    hasCriticalAlarm
-                                        ? 'border-red-300/40 bg-red-400/12 text-red-200'
-                                        : 'border-orange-300/40 bg-orange-400/12 text-orange-200'
-                                }`}
+                                className="flex items-center gap-1 rounded-sm border border-red-300/40 bg-red-400/12 px-1.5 py-0.5 text-[9px] font-semibold text-red-200"
                                 title={alarmDescription}
                             >
-                                <span className={`h-1.5 w-1.5 rounded-full ${hasCriticalAlarm ? 'bg-red-300' : 'bg-orange-300'}`} />
-                                {hasCriticalAlarm ? '严重报警' : '需关注'}
+                                <span className="h-1.5 w-1.5 rounded-full bg-red-300" />
+                                严重报警
                             </span>
                         )}
                         {isSelected && (
