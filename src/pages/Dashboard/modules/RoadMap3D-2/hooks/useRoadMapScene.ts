@@ -73,7 +73,7 @@ function buildMapLayer(geoJson: any, container: HTMLDivElement): MapLayer {
             const boundaryStyle = boundaryLevel === 'province'
                 ? { color: 0xfbbf24, width: 1.8, opacity: 0.9, z: -0.18, order: 6 }
                 : boundaryLevel === 'city'
-                    ? { color: 0x38bdf8, width: 1.35, opacity: 0.68, z: -0.12, order: 5 }
+                    ? { color: 0x38bdf8, width: 1.35, opacity: 0.40, z: -0.12, order: 5 }
                     : { color: 0x94a3b8, width: 0.75, opacity: 0.42, z: -0.07, order: 4 };
 
             const positions: number[] = [];
