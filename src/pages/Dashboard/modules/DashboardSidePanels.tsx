@@ -640,19 +640,19 @@ function VehicleTransportDetails({
                         </div>
                     </div>
                     <div className="grid min-w-0 shrink-0 grid-cols-[1rem_minmax(0,1fr)] gap-x-3 overflow-hidden">
-                        <div className="flex h-[12.5rem] flex-col items-center py-2">
+                        <div className="flex h-[4.5rem] flex-col items-center py-1">
                             <span className="h-2.5 w-2.5 rounded-full border-2 border-sky-200 bg-sky-500 shadow-[0_0_10px_rgba(56,189,248,0.7)]" />
-                            <span className="my-1 min-h-5 w-px flex-1 bg-gradient-to-b from-sky-300/70 to-emerald-300/70" />
+                            <span className="my-0.5 min-h-2 w-px flex-1 bg-gradient-to-b from-sky-300/70 to-emerald-300/70" />
                             <span className="h-2.5 w-2.5 rounded-full border-2 border-emerald-200 bg-emerald-500 shadow-[0_0_10px_rgba(52,211,153,0.65)]" />
                         </div>
-                        <div className="grid h-[12.5rem] min-w-0 grid-rows-2 gap-2 overflow-hidden">
-                            <div className="min-w-0 overflow-hidden rounded border border-sky-300/10 bg-sky-300/[0.025] px-2.5 py-2 opacity-80">
-                                <div className="text-[10px] text-slate-500">起点</div>
-                                <OverflowMarquee value={fromAddress.detail} className="mt-2 h-7 text-xs font-medium leading-7 text-slate-300" />
+                        <div className="grid h-[4.5rem] min-w-0 grid-rows-2 gap-1 overflow-hidden">
+                            <div className="flex min-w-0 items-center gap-2 overflow-hidden rounded border border-sky-300/10 bg-sky-300/[0.025] px-2.5 opacity-80">
+                                <div className="shrink-0 text-[10px] text-slate-500">起点</div>
+                                <OverflowMarquee value={fromAddress.detail} className="min-w-0 flex-1 text-xs font-medium leading-6 text-slate-300" />
                             </div>
-                            <div className="min-w-0 overflow-hidden rounded border border-emerald-300/15 bg-emerald-300/[0.045] px-2.5 py-2">
-                                <div className="text-[10px] font-medium text-emerald-300/70">目的地</div>
-                                <OverflowMarquee value={toAddress.detail || toAddress.fullAddress} className="mt-2 h-7 text-sm font-semibold leading-7 text-emerald-50" />
+                            <div className="flex min-w-0 items-center gap-2 overflow-hidden rounded border border-emerald-300/15 bg-emerald-300/[0.045] px-2.5">
+                                <div className="shrink-0 text-[10px] font-medium text-emerald-300/70">目的地</div>
+                                <OverflowMarquee value={toAddress.detail || toAddress.fullAddress} className="min-w-0 flex-1 text-xs font-semibold leading-6 text-emerald-50" />
                             </div>
                         </div>
                     </div>
