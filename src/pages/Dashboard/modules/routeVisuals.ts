@@ -296,7 +296,7 @@ export function createRouteEndpointLayer(
         samples[0], '起点', info.from, colorText(color), mode, laneIndex,
     );
     const endLabel = createEndpointLabel(
-        samples[samples.length - 1], '终点', info.to, '#ef4444', mode, laneIndex,
+        samples[samples.length - 1], '终点', info.to, colorText(color), mode, laneIndex,
     );
     layer.add(start, end, startLabel, endLabel);
     return layer;

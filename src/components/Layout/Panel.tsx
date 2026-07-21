@@ -10,11 +10,11 @@ function Panel({ title, children, className = '' }: PanelProps) {
     return (
         <section
             className={`
-                relative h-full overflow-hidden rounded-md border border-cyan-200/10
-                bg-slate-950/58 shadow-[0_18px_48px_rgba(2,8,23,0.42)]
-                backdrop-blur-md
+                relative h-full overflow-hidden rounded-md border border-cyan-100/15
+                bg-slate-950/44 shadow-[0_18px_48px_rgba(2,8,23,0.34)]
+                backdrop-blur-xl backdrop-saturate-125
                 before:pointer-events-none before:absolute before:inset-0 before:rounded-md
-                before:bg-[linear-gradient(135deg,rgba(34,211,238,0.12),transparent_32%,rgba(16,185,129,0.06))]
+                before:bg-[linear-gradient(135deg,rgba(125,211,252,0.11),transparent_34%,rgba(52,211,153,0.045))]
                 after:pointer-events-none after:absolute after:inset-x-4 after:top-0 after:h-px
                 after:bg-gradient-to-r after:from-transparent after:via-cyan-200/45 after:to-transparent
                 ${className}

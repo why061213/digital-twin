@@ -11,7 +11,7 @@ const DEFAULT_MAP_VIEW_TRANSITION_MS = 800;
 const DEFAULT_ROAD_GROUP_TRANSITION_MS = 420;
 const ROAD_GROUP_DISPLAY_MAX_MS = 30_000;
 
-export const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api').replace(/\/$/, '');
+export const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 
 function readPositiveEnv(key: string, fallback: number) {
     const raw = import.meta.env[key];

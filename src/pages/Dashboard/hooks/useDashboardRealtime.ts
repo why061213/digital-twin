@@ -184,7 +184,8 @@ const RECONNECT_MAX_DELAY_MS = 10_000;
 function buildRealtimeUrl() {
     const accessToken = getDashboardAccessToken();
     if (!accessToken) return null;
-    const baseUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws';
+    const defaultProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const baseUrl = import.meta.env.VITE_WS_URL || `${defaultProtocol}//${window.location.host}/ws`;
     const normalizedBase = String(baseUrl).replace(/\/$/, '');
     const endpoint = normalizedBase.endsWith('/realtime') ? normalizedBase : `${normalizedBase}/realtime`;
     const url = new URL(endpoint);
