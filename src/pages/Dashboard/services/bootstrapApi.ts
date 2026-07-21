@@ -2,6 +2,8 @@ import { API_BASE_URL } from '../constants';
 import { getDashboardAccessToken } from './dashboardAuth';
 
 export type BootstrapStatus = {
+    instanceId?: string;
+    processStartedAt?: string;
     ready: boolean;
     backendReady: boolean;
     dataInitialized: boolean;
