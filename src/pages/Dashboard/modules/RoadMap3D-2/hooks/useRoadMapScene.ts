@@ -357,7 +357,7 @@ export function useRoadMapScene(
                     label.sprite.visible = opacity > 0.03;
                     label.sprite.material.opacity = opacity * (label.level === 'city' ? 0.95 : 0.82);
 
-                    const screenStableHeight = THREE.MathUtils.clamp(cameraHeight * 0.025, 13, 42)
+                    const screenStableHeight = THREE.MathUtils.clamp(cameraHeight * 0.003, 1.5, 5)
                         * (label.level === 'city' ? 1.12 : 1);
                     label.sprite.scale.set(
                         screenStableHeight * label.aspect,
