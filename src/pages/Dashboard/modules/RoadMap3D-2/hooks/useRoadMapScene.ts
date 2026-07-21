@@ -9,6 +9,7 @@ import { useRoadMapRefs } from './useRoadMapRefs';
 import { useRoadControls } from './useRoadControls';
 import { useRoadSelection } from './useRoadSelection';
 
+type MapLayer = {
     group: THREE.Group;
     boundaryMaterials: LineMaterial[];
 };
