@@ -226,8 +226,20 @@ export function positionAtDistance(coordinates: LonLat[], targetDistance: number
     return coordinates[coordinates.length - 1];
 }
 
-export function projectDistanceOnPath(coordinates: LonLat[], point: LonLat) {
+export function projectDistanceOnPath(coordinates: LonLat[], point: LonLat, hintDistance = -1) {
     if (coordinates.length < 2) return 0;
+
+    const totalKm = pathLengthKm(coordinates);
+    if (totalKm <= 0) return 0;
+
+    // 窗口约束：只搜索 hintDistance ±30% 范围内的线段，避免 U 形路线贴错边
+    let windowStart = 0;
+    let windowEnd = totalKm;
+    const useWindow = hintDistance >= 0 && hintDistance < totalKm;
+    if (useWindow) {
+        windowStart = Math.max(0, hintDistance - totalKm * 0.3);
+        windowEnd = Math.min(totalKm, hintDistance + totalKm * 0.3);
+    }
 
     let walked = 0;
     let nearestDistance = 0;
@@ -236,10 +248,18 @@ export function projectDistanceOnPath(coordinates: LonLat[], point: LonLat) {
     for (let i = 1; i < coordinates.length; i++) {
         const start = coordinates[i - 1];
         const end = coordinates[i];
+        const segmentKm = distanceKm(start, end);
+        const segStart = walked;
+        const segEnd = walked + segmentKm;
+
+        // 窗口约束
+        if (useWindow && segEnd < windowStart) { walked = segEnd; continue; }
+        if (useWindow && segStart > windowEnd) break;
+
         const abX = end[0] - start[0];
         const abY = end[1] - start[1];
         const segmentLengthSq = abX * abX + abY * abY;
-        if (segmentLengthSq <= 0) continue;
+        if (segmentLengthSq <= 0) { walked = segEnd; continue; }
 
         const apX = point[0] - start[0];
         const apY = point[1] - start[1];
@@ -252,10 +272,15 @@ export function projectDistanceOnPath(coordinates: LonLat[], point: LonLat) {
 
         if (currentDistanceSq < nearestDistanceSq) {
             nearestDistanceSq = currentDistanceSq;
-            nearestDistance = walked + Math.sqrt(segmentLengthSq) * segmentProgress;
+            nearestDistance = walked + segmentKm * segmentProgress;
         }
 
-        walked += Math.sqrt(segmentLengthSq);
+        walked = segEnd;
+    }
+
+    // 窗口内没找到足够近的点，回退全图搜索
+    if (useWindow && nearestDistanceSq > 0.0001) {
+        return projectDistanceOnPath(coordinates, point, -1);
     }
 
     return nearestDistance;
@@ -297,7 +322,7 @@ export function routeProgressPatch(route: ActiveRoute, now: number) {
 export function applyTruckPositionToRoute(route: ActiveRoute, message: TruckPositionMessage, now: number) {
     if (!message.position) return;
     const elapsedSinceLastCalibration = now - route.calibratedAt;
-    const nextDistance = projectDistanceOnPath(route.coordinates, message.position);
+    const nextDistance = projectDistanceOnPath(route.coordinates, message.position, route.calibratedDistance);
     const measuredPathSpeed = elapsedSinceLastCalibration >= MIN_MEASURED_SPEED_INTERVAL_MS
         ? Math.max(0, (nextDistance - route.calibratedDistance) / elapsedSinceLastCalibration)
         : null;

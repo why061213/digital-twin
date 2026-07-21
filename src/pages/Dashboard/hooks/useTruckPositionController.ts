@@ -181,7 +181,7 @@ export function useTruckPositionController({
                     fallbackDuration,
                     coordinates: message.coordinates,
                     calibratedAt: now,
-                    calibratedDistance: projectDistanceOnPath(message.coordinates, currentPosition),
+                    calibratedDistance: projectDistanceOnPath(message.coordinates, currentPosition, existing.calibratedDistance),
                     pathSpeed,
                     pathLength: totalPathLength,
                     speedKmh,
