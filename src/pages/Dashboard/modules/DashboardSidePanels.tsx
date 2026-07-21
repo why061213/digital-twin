@@ -830,6 +830,24 @@ function RoadGroupRightPanels({
         const isSelected = variant === 'vehicle' && route.lineId === activeVehicleLineId;
         const fromAddress = splitAdministrativeAddress(route.from);
         const toAddress = splitAdministrativeAddress(route.to);
+        const alarmSeverity = resolveVehicleAlarmSeverity({
+            alarmStr: route.alarmStr,
+            alarmSeverity: route.alarmSeverity,
+            stateStr: route.stateStr,
+            online: route.online,
+        });
+        const hasWarning = alarmSeverity === 'warning';
+        const hasCriticalAlarm = alarmSeverity === 'critical';
+        const alarmColor = hasCriticalAlarm ? '#fb7185' : hasWarning ? '#fb923c' : null;
+        const alarmGlow = hasCriticalAlarm
+            ? 'rgba(244,63,94,0.24)'
+            : hasWarning ? 'rgba(249,115,22,0.18)' : null;
+        const statusClass = hasCriticalAlarm
+            ? 'border-red-300/35 bg-red-400/10 text-red-200'
+            : hasWarning
+                ? 'border-orange-300/35 bg-orange-400/10 text-orange-200'
+                : 'border-emerald-300/25 bg-emerald-300/8 text-emerald-200';
+        const alarmDescription = route.alarmStr || route.stateStr || '';
         return (
             <button
                 type="button"
@@ -837,16 +855,23 @@ function RoadGroupRightPanels({
                 disabled={variant !== 'vehicle'}
                 aria-pressed={variant === 'vehicle' ? isSelected : undefined}
                 onClick={() => onVehicleSelect(route.lineId)}
-                className={`w-full rounded border border-l-2 px-3 py-3 text-left text-xs transition-[background-color,border-color,box-shadow] duration-200 ${
+                className={`relative w-full overflow-hidden rounded border border-l-2 px-3 py-3 text-left text-xs transition-[background-color,border-color,box-shadow] duration-200 ${
                     isSelected
                         ? 'border-white/20 bg-white/[0.045]'
                         : 'border-white/10 bg-slate-900/82'
                 } ${variant === 'vehicle' ? 'cursor-pointer hover:border-white/20 hover:bg-slate-800/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70' : ''}`}
                 style={{
                     borderLeftColor: tone.color,
-                    boxShadow: isSelected
-                        ? `inset 0 0 0 1px ${tone.glow}, 0 3px 8px ${tone.glow}`
-                        : `0 2px 6px ${tone.glow}`,
+                    borderTopColor: alarmColor ?? undefined,
+                    borderRightColor: alarmColor ?? undefined,
+                    borderBottomColor: alarmColor ?? undefined,
+                    backgroundImage: alarmGlow
+                        ? `linear-gradient(270deg, ${alarmGlow}, transparent 48%)`
+                        : undefined,
+                    boxShadow: [
+                        isSelected ? `inset 0 0 0 1px ${tone.glow}, 0 3px 8px ${tone.glow}` : `0 2px 6px ${tone.glow}`,
+                        alarmGlow ? `inset -2px 0 0 ${alarmColor}, 0 0 12px ${alarmGlow}` : '',
+                    ].filter(Boolean).join(', '),
                 }}
             >
                 <div className="flex items-center justify-between gap-2">
@@ -858,6 +883,19 @@ function RoadGroupRightPanels({
                         {route.plate}
                     </span>
                     <span className="flex shrink-0 items-center gap-1.5">
+                        {(hasWarning || hasCriticalAlarm) && (
+                            <span
+                                className={`flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[9px] font-semibold ${
+                                    hasCriticalAlarm
+                                        ? 'border-red-300/40 bg-red-400/12 text-red-200'
+                                        : 'border-orange-300/40 bg-orange-400/12 text-orange-200'
+                                }`}
+                                title={alarmDescription}
+                            >
+                                <span className={`h-1.5 w-1.5 rounded-full ${hasCriticalAlarm ? 'bg-red-300' : 'bg-orange-300'}`} />
+                                {hasCriticalAlarm ? '严重报警' : '需关注'}
+                            </span>
+                        )}
                         {isSelected && (
                             <span
                                 className="rounded-sm border px-1.5 py-0.5 text-[9px] font-medium"
@@ -866,7 +904,7 @@ function RoadGroupRightPanels({
                                 当前
                             </span>
                         )}
-                        <span className="rounded border border-emerald-300/25 bg-emerald-300/8 px-2 py-0.5 text-[10px] text-emerald-200">
+                        <span className={`rounded border px-2 py-0.5 text-[10px] ${statusClass}`}>
                             {route.status}
                         </span>
                     </span>
