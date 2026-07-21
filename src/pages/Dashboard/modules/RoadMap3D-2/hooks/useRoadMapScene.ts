@@ -9,30 +9,6 @@ import { useRoadMapRefs } from './useRoadMapRefs';
 import { useRoadControls } from './useRoadControls';
 import { useRoadSelection } from './useRoadSelection';
 
-/** 用 Canvas 渲染一个文字 Sprite，用作地图区域名称标签 */
-function makeTextSprite(text: string, color: number): THREE.Sprite {
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 64;
-    const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
-    ctx.font = '22px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(text, 128, 32);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    const material = new THREE.SpriteMaterial({
-        map: texture,
-        transparent: true,
-    });
-    const sprite = new THREE.Sprite(material);
-    return sprite;
-}
-
-type MapLayer = {
     group: THREE.Group;
     boundaryMaterials: LineMaterial[];
 };
@@ -163,15 +139,29 @@ function buildMapLayer(geoJson: any, container: HTMLDivElement): MapLayer {
             mesh.renderOrder = usesDistrictSurface ? 2 : 1;
             cityGroup.add(mesh);
 
-            // 区县名称标签
+            // 区县名称标签（Plane 贴地平躺）
             if (isDistrict && properties?.name) {
                 const cx = projectedRing.reduce((s, p) => s + p[0], 0) / projectedRing.length;
                 const cy = projectedRing.reduce((s, p) => s + p[1], 0) / projectedRing.length;
-                const label = makeTextSprite(properties.name, 0x6b7280);
-                label.position.set(-cx, -cy, 0.05);
-                label.scale.set(4, 2, 1);
-                label.renderOrder = 3;
-                cityGroup.add(label);
+                const textCanvas = document.createElement('canvas');
+                textCanvas.width = 128;
+                textCanvas.height = 32;
+                const tCtx = textCanvas.getContext('2d')!;
+                tCtx.fillStyle = '#6b7280';
+                tCtx.font = '18px sans-serif';
+                tCtx.textAlign = 'center';
+                tCtx.textBaseline = 'middle';
+                tCtx.fillText(properties.name, 64, 16);
+                const textTexture = new THREE.CanvasTexture(textCanvas);
+                textTexture.minFilter = THREE.LinearFilter;
+                const labelPlane = new THREE.Mesh(
+                    new THREE.PlaneGeometry(6, 1.5),
+                    new THREE.MeshBasicMaterial({ map: textTexture, transparent: true, depthWrite: false })
+                );
+                labelPlane.position.set(-cx, -cy, 0.12);
+                labelPlane.rotation.x = -Math.PI / 2;
+                labelPlane.renderOrder = 3;
+                cityGroup.add(labelPlane);
             }
         });
         group.add(cityGroup);
