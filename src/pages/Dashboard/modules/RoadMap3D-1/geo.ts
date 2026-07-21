@@ -1,6 +1,7 @@
 import { geoMercator } from 'd3-geo';
 import * as THREE from 'three';
-import { BASE_URL, DIRECT_CITY_ADCODES } from './constants';
+import { DIRECT_CITY_ADCODES } from './constants';
+import { loadDetailedGeoJson, loadNationalGeoSource } from '../../services/mapGeoApi';
 
 export const projection = geoMercator()
     .center([104.5, 35])
@@ -8,8 +9,8 @@ export const projection = geoMercator()
     .translate([0, 0]);
 
 export async function loadCityGeoJson(): Promise<any> {
-    const provResp = await fetch(`${BASE_URL}100000_full.json`);
-    const provData = await provResp.json();
+    const { data: provData, remoteAvailable } = await loadNationalGeoSource();
+    if (!remoteAvailable) return provData;
     const municipalityFeatures: any[] = [];
     const provinceAdcodes: number[] = [];
 
@@ -26,9 +27,8 @@ export async function loadCityGeoJson(): Promise<any> {
     await Promise.all(
         provinceAdcodes.map(async (adcode) => {
             try {
-                const resp = await fetch(`${BASE_URL}${adcode}_full.json`);
-                const data = await resp.json();
-                if (data.features) cityFeatures.push(...data.features);
+                const data = await loadDetailedGeoJson(adcode);
+                if (data?.features) cityFeatures.push(...data.features);
             } catch {
                 // ignore
             }

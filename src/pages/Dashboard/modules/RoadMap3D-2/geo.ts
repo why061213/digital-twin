@@ -1,7 +1,8 @@
 import { geoMercator } from 'd3-geo';
 import * as THREE from 'three';
 import { union, type MultiPolygon, type Polygon } from 'polygon-clipping';
-import { BASE_URL, DIRECT_CITY_ADCODES } from './constants';
+import { DIRECT_CITY_ADCODES } from './constants';
+import { loadDetailedGeoJson, loadNationalGeoSource } from '../../services/mapGeoApi';
 
 // RM2 地图水平缩放系数
 export const MAP_HORIZONTAL_SCALE = 100;
@@ -52,10 +53,8 @@ let provinceSourcesPromise: Promise<Map<number, any>> | null = null;
 
 async function loadProvinceSources() {
     if (!provinceSourcesPromise) {
-        provinceSourcesPromise = fetch(`${BASE_URL}100000_full.json`)
-            .then(async (response) => {
-                if (!response.ok) throw new Error(`Failed to load China boundary: ${response.status}`);
-                const data = await response.json();
+        provinceSourcesPromise = loadNationalGeoSource()
+            .then(({ data }) => {
                 return new Map<number, any>(
                     data.features.map((feature: any) => [Number(feature.properties.adcode), feature])
                 );
@@ -70,9 +69,8 @@ async function loadProvinceSources() {
 
 async function fetchBoundaryFeatures(adcode: number, signal?: AbortSignal): Promise<any[]> {
     try {
-        const response = await fetch(`${BASE_URL}${adcode}_full.json`, { signal });
-        if (!response.ok) return [];
-        const data = await response.json();
+        const data = await loadDetailedGeoJson(adcode, signal);
+        if (!data) return [];
         return Array.isArray(data.features) ? data.features : [];
     } catch (error) {
         if ((error as DOMException).name === 'AbortError') throw error;
