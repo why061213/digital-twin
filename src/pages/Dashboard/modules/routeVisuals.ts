@@ -89,17 +89,18 @@ function createEndpointMarker(
     radius: number,
     color: number,
     renderOrder: number,
+    mode: 'rm1' | 'rm2',
 ) {
     const marker = new THREE.Group();
     marker.position.copy(point);
-    marker.position.y += radius * 0.42;
+    marker.position.y += radius * 0.08;
 
     const halo = new THREE.Mesh(
-        new THREE.RingGeometry(radius * 1.45, radius * 1.78, 32),
+        new THREE.RingGeometry(radius * 0.72, radius * 1.08, 32),
         new THREE.MeshBasicMaterial({
             color,
             transparent: true,
-            opacity: 0.22,
+            opacity: 0.3,
             side: THREE.DoubleSide,
             depthWrite: false,
             blending: THREE.AdditiveBlending,
@@ -108,21 +109,100 @@ function createEndpointMarker(
     halo.rotation.x = -Math.PI / 2;
     halo.renderOrder = renderOrder;
 
-    const core = new THREE.Mesh(
-        new THREE.CircleGeometry(radius * 0.52, 24),
+    const stemHeight = radius * 2.15;
+    const stem = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius * 0.085, radius * 0.12, stemHeight, 12),
         new THREE.MeshBasicMaterial({
             color,
             transparent: true,
-            opacity: 0.86,
-            side: THREE.DoubleSide,
+            opacity: 0.92,
             depthWrite: false,
         }),
     );
-    core.rotation.x = -Math.PI / 2;
-    core.position.y = radius * 0.015;
-    core.renderOrder = renderOrder + 1;
-    marker.add(halo, core);
+    stem.position.y = stemHeight / 2;
+    stem.renderOrder = renderOrder + 1;
+
+    const pinShape = new THREE.Shape();
+    pinShape.moveTo(0, -radius * 0.96);
+    pinShape.bezierCurveTo(
+        -radius * 0.18, -radius * 0.64,
+        -radius * 0.72, -radius * 0.22,
+        -radius * 0.72, radius * 0.3,
+    );
+    pinShape.bezierCurveTo(
+        -radius * 0.72, radius * 0.78,
+        -radius * 0.4, radius * 1.08,
+        0, radius * 1.08,
+    );
+    pinShape.bezierCurveTo(
+        radius * 0.4, radius * 1.08,
+        radius * 0.72, radius * 0.78,
+        radius * 0.72, radius * 0.3,
+    );
+    pinShape.bezierCurveTo(
+        radius * 0.72, -radius * 0.22,
+        radius * 0.18, -radius * 0.64,
+        0, -radius * 0.96,
+    );
+
+    const pin = new THREE.Mesh(
+        new THREE.ShapeGeometry(pinShape, 8),
+        new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: 0.98,
+            side: THREE.DoubleSide,
+            depthTest: false,
+            depthWrite: false,
+        }),
+    );
+    pin.position.y = stemHeight + radius * 0.82;
+    pin.renderOrder = renderOrder + 3;
+
+    const pinCore = new THREE.Mesh(
+        new THREE.CircleGeometry(radius * 0.23, 20),
+        new THREE.MeshBasicMaterial({
+            color: 0xf8fafc,
+            transparent: true,
+            opacity: 0.96,
+            side: THREE.DoubleSide,
+            depthTest: false,
+            depthWrite: false,
+        }),
+    );
+    pinCore.position.set(0, pin.position.y + radius * 0.28, radius * 0.012);
+    pinCore.renderOrder = renderOrder + 4;
+
+    const worldPosition = new THREE.Vector3();
+    const referenceDistance = mode === 'rm2' ? 120 : 190;
+    pin.onBeforeRender = (_renderer, _scene, camera) => {
+        pin.quaternion.copy(camera.quaternion);
+        pinCore.quaternion.copy(camera.quaternion);
+        const distance = camera.position.distanceTo(marker.getWorldPosition(worldPosition));
+        marker.scale.setScalar(THREE.MathUtils.clamp(distance / referenceDistance, 0.92, 1.75));
+    };
+
+    marker.add(halo, stem, pin, pinCore);
     return marker;
+}
+
+function endpointMarkerPoint(
+    samples: THREE.Vector3[],
+    atStart: boolean,
+    laneIndex: number,
+    markerScale: number,
+) {
+    const index = atStart ? 0 : samples.length - 1;
+    const neighbourIndex = atStart ? Math.min(1, samples.length - 1) : Math.max(0, samples.length - 2);
+    const point = samples[index].clone();
+    const tangent = atStart
+        ? samples[neighbourIndex].clone().sub(point)
+        : point.clone().sub(samples[neighbourIndex]);
+    if (tangent.lengthSq() < 0.000001) tangent.set(1, 0, 0);
+    tangent.normalize();
+    const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+    const laneOffset = [0, 1, -1][laneIndex % 3] ?? 0;
+    return point.addScaledVector(normal, laneOffset * markerScale * 1.45);
 }
 
 function fullEndpoint(value: string | undefined) {
@@ -208,13 +288,15 @@ export function createRouteEndpointLayer(
     const preset = PRESETS[mode];
     const layer = new THREE.Group();
     const markerScale = preset.markerScale * (1 + laneIndex * 0.18);
-    const start = createEndpointMarker(samples[0], markerScale, color, 10 + laneIndex);
-    const end = createEndpointMarker(samples[samples.length - 1], markerScale, color, 10 + laneIndex);
+    const startPoint = endpointMarkerPoint(samples, true, laneIndex, markerScale);
+    const endPoint = endpointMarkerPoint(samples, false, laneIndex, markerScale);
+    const start = createEndpointMarker(startPoint, markerScale, color, 10 + laneIndex, mode);
+    const end = createEndpointMarker(endPoint, markerScale, 0xef4444, 10 + laneIndex, mode);
     const startLabel = createEndpointLabel(
         samples[0], '起点', info.from, colorText(color), mode, laneIndex,
     );
     const endLabel = createEndpointLabel(
-        samples[samples.length - 1], '终点', info.to, colorText(color), mode, laneIndex,
+        samples[samples.length - 1], '终点', info.to, '#ef4444', mode, laneIndex,
     );
     layer.add(start, end, startLabel, endLabel);
     return layer;
@@ -327,6 +409,7 @@ export function createRouteVisualLayers(
     mode: 'rm1' | 'rm2',
     _info: RouteEndpointInfo = {},
 ) {
+    void _info;
     const preset = PRESETS[mode];
     const layers = new THREE.Group();
     layers.name = `route-visual-layers-${mode}`;
