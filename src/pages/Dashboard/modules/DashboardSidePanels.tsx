@@ -323,13 +323,13 @@ function routeRemainingText(route: RouteOrder, progress: number) {
     const distance = Number.isFinite(totalKm)
         ? `${Math.max(0, totalKm * (1 - progress / 100)).toFixed(1)} km`
         : '-- km';
-    const totalDurationMs = Number(route.travelDurationMs ?? routeDisplayData(route).fallbackDuration);
+    const totalDurationMs = Number(route.travelDurationMs);
     if (!Number.isFinite(totalDurationMs) || totalDurationMs <= 0) return `剩余 ${distance}`;
-    const remainingMinutes = Math.max(0, Math.round(totalDurationMs * (1 - progress / 100) / 60_000));
-    const hours = Math.floor(remainingMinutes / 60);
-    const minutes = remainingMinutes % 60;
+    const navigationMinutes = Math.max(1, Math.round(totalDurationMs / 60_000));
+    const hours = Math.floor(navigationMinutes / 60);
+    const minutes = navigationMinutes % 60;
     const duration = hours > 0 ? `${hours}h${minutes}m` : `${minutes}m`;
-    return `剩余 ${distance} · 预计 ${duration}`;
+    return `剩余 ${distance} · 导航预计 ${duration}`;
 }
 
 function OverflowMarquee({
@@ -626,7 +626,7 @@ function VehicleTransportDetails({
                 </div>
 
                 <div className="no-scrollbar mt-3 flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto rounded border border-white/8 bg-slate-900/55 px-3 py-3">
-                    <div className="mb-3 grid min-w-0 grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] gap-2">
+                    <div className="mb-3 grid min-w-0 grid-cols-2 gap-2">
                         <div className="min-w-0 rounded border border-white/8 bg-white/[0.025] px-2.5 py-2">
                             <div className="text-[9px] text-slate-500">始发省市</div>
                             <OverflowMarquee value={fromAddress.region} className="mt-1 text-[11px] font-medium text-slate-300" />
@@ -639,20 +639,20 @@ function VehicleTransportDetails({
                             <OverflowMarquee value={toAddress.region} className="mt-1 text-xs font-semibold text-emerald-100" />
                         </div>
                     </div>
-                    <div className="grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] gap-x-3 overflow-hidden">
-                        <div className="flex min-h-[11.5rem] flex-col items-center py-2">
+                    <div className="grid min-w-0 shrink-0 grid-cols-[1rem_minmax(0,1fr)] gap-x-3 overflow-hidden">
+                        <div className="flex h-[12.5rem] flex-col items-center py-2">
                             <span className="h-2.5 w-2.5 rounded-full border-2 border-sky-200 bg-sky-500 shadow-[0_0_10px_rgba(56,189,248,0.7)]" />
                             <span className="my-1 min-h-5 w-px flex-1 bg-gradient-to-b from-sky-300/70 to-emerald-300/70" />
                             <span className="h-2.5 w-2.5 rounded-full border-2 border-emerald-200 bg-emerald-500 shadow-[0_0_10px_rgba(52,211,153,0.65)]" />
                         </div>
-                        <div className="grid min-h-[11.5rem] min-w-0 grid-rows-[4.75rem_5.75rem] gap-2 overflow-hidden">
+                        <div className="grid h-[12.5rem] min-w-0 grid-rows-2 gap-2 overflow-hidden">
                             <div className="min-w-0 overflow-hidden rounded border border-sky-300/10 bg-sky-300/[0.025] px-2.5 py-2 opacity-80">
                                 <div className="text-[10px] text-slate-500">起点</div>
-                                <OverflowMarquee value={fromAddress.detail} className="mt-1 h-6 text-xs font-medium leading-6 text-slate-300" />
+                                <OverflowMarquee value={fromAddress.detail} className="mt-2 h-7 text-xs font-medium leading-7 text-slate-300" />
                             </div>
                             <div className="min-w-0 overflow-hidden rounded border border-emerald-300/15 bg-emerald-300/[0.045] px-2.5 py-2">
                                 <div className="text-[10px] font-medium text-emerald-300/70">目的地</div>
-                                <OverflowMarquee value={toAddress.detail || toAddress.fullAddress} className="mt-1 h-7 text-[15px] font-semibold leading-7 text-emerald-50" />
+                                <OverflowMarquee value={toAddress.detail || toAddress.fullAddress} className="mt-2 h-7 text-sm font-semibold leading-7 text-emerald-50" />
                             </div>
                         </div>
                     </div>

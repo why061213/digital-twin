@@ -51,6 +51,7 @@ const TRUCK_MODEL_URL = '/models/rm2-truck.glb';
 const TRUCK_MODEL_SCALE = 1;
 const TRUCK_MODEL_Y_OFFSET = -0.31;
 const TRUCK_IDLE_VISUAL_SCALE = 0.14;
+const TRUCK_HIGH_CAMERA_SCALE = 1.55;
 const VEHICLE_UPGRADE_MS = 420;
 const NORTH_UP_MAX_FIT_DISTANCE = 320;
 const NORTH_UP_VIEW_DIRECTION = new THREE.Vector3(0, 0.82, -0.58).normalize();
@@ -246,6 +247,7 @@ export function useRoadControls(
     const nextOrderColorIndexRef = useRef(0);
     const highlightedLineIdRef = useRef<string | null>(null);
     const highlightGenerationRef = useRef(0);
+    const cameraTruckScaleRef = useRef(1);
 
     const colorForOrder = useCallback((orderId: string) => {
         const existing = orderColorByIdRef.current.get(orderId);
@@ -290,9 +292,21 @@ export function useRoadControls(
         material.opacity = vehicle.truckVisual ? 0 : baseOpacity * (1 - progress);
         material.needsUpdate = true;
         vehicle.truckVisual?.scale.setScalar(
-            THREE.MathUtils.lerp(TRUCK_IDLE_VISUAL_SCALE, 1, progress),
+            THREE.MathUtils.lerp(TRUCK_IDLE_VISUAL_SCALE, 1, progress) * cameraTruckScaleRef.current,
         );
     }, []);
+
+    const updateVehicleScaleForCamera = useCallback((cameraHeight: number) => {
+        const normalized = THREE.MathUtils.smoothstep(Math.abs(cameraHeight), 480, 2200);
+        const nextScale = THREE.MathUtils.lerp(1, TRUCK_HIGH_CAMERA_SCALE, normalized);
+        if (Math.abs(nextScale - cameraTruckScaleRef.current) < 0.002) return;
+        cameraTruckScaleRef.current = nextScale;
+        refs.roadsMapRef.current.forEach((road) => {
+            road.orders.forEach((lane) => {
+                lane.vehicles.forEach(applyUpgradeVisual);
+            });
+        });
+    }, [applyUpgradeVisual, refs.roadsMapRef]);
 
     const animateVehicleUpgrade = useCallback((vehicle: VehicleBarState, target: 0 | 1) => {
         if (vehicle.upgradeAnimationFrame !== undefined) {
@@ -913,5 +927,6 @@ export function useRoadControls(
         updateProgressFromTruck,
         focusAllRoads,
         setHighlightedVehicle,
+        updateVehicleScaleForCamera,
     };
 }
