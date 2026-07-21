@@ -57,6 +57,10 @@ function App() {
           }
           knownInstanceId = nextInstanceId;
           window.localStorage.setItem(BACKEND_INSTANCE_KEY, nextInstanceId);
+        } else if (!knownInstanceId) {
+          // Remember a pre-instance-ID backend so the first upgrade restart also reloads the page.
+          knownInstanceId = 'legacy-backend';
+          window.localStorage.setItem(BACKEND_INSTANCE_KEY, knownInstanceId);
         }
       } catch {
         // A temporary outage is not a restart. Compare instance IDs after recovery.
