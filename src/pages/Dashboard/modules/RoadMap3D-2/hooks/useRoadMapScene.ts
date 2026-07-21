@@ -9,6 +9,29 @@ import { useRoadMapRefs } from './useRoadMapRefs';
 import { useRoadControls } from './useRoadControls';
 import { useRoadSelection } from './useRoadSelection';
 
+/** 用 Canvas 渲染一个文字 Sprite，用作地图区域名称标签 */
+function makeTextSprite(text: string, color: number): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#' + color.toString(16).padStart(6, '0');
+    ctx.font = '22px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 128, 32);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    const material = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+    });
+    const sprite = new THREE.Sprite(material);
+    return sprite;
+}
+
 type MapLayer = {
     group: THREE.Group;
     boundaryMaterials: LineMaterial[];
@@ -73,7 +96,7 @@ function buildMapLayer(geoJson: any, container: HTMLDivElement): MapLayer {
             const boundaryStyle = boundaryLevel === 'province'
                 ? { color: 0xfbbf24, width: 1.8, opacity: 0.9, z: -0.18, order: 6 }
                 : boundaryLevel === 'city'
-                    ? { color: 0x38bdf8, width: 1.35, opacity: 0.40, z: -0.12, order: 5 }
+                    ? { color: 0x38bdf8, width: 1.35, opacity: 0.2, z: -0.12, order: 5 }
                     : { color: 0x94a3b8, width: 0.75, opacity: 0.42, z: -0.07, order: 4 };
 
             const positions: number[] = [];
@@ -139,6 +162,17 @@ function buildMapLayer(geoJson: any, container: HTMLDivElement): MapLayer {
             mesh.position.z = usesDistrictSurface ? -0.012 : 0;
             mesh.renderOrder = usesDistrictSurface ? 2 : 1;
             cityGroup.add(mesh);
+
+            // 区县名称标签
+            if (isDistrict && properties?.name) {
+                const cx = projectedRing.reduce((s, p) => s + p[0], 0) / projectedRing.length;
+                const cy = projectedRing.reduce((s, p) => s + p[1], 0) / projectedRing.length;
+                const label = makeTextSprite(properties.name, 0x6b7280);
+                label.position.set(-cx, -cy, 0.05);
+                label.scale.set(4, 2, 1);
+                label.renderOrder = 3;
+                cityGroup.add(label);
+            }
         });
         group.add(cityGroup);
     });
