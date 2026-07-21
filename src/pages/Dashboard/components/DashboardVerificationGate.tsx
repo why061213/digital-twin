@@ -20,6 +20,7 @@ const INITIAL_STATUS: BootstrapStatus = {
     dataInitialized: false,
     authorized: false,
     phase: 'connecting',
+    authorizationState: 'pending',
     message: '正在连接后端服务',
     rawCount: 0,
     routeCount: 0,
@@ -49,7 +50,7 @@ function deniedFeedback(status: BootstrapStatus) {
         default:
             return {
                 title: '当前设备被拒绝访问',
-                detail: status.message || '后端没有授权当前设备进入数字孪生大屏。',
+                detail: status.authorizationMessage || '后端没有授权当前设备进入数字孪生大屏。',
                 action: '请检查设备白名单、访问密钥和局域网连接后重试。',
             };
     }
@@ -128,6 +129,11 @@ export function DashboardVerificationGate({ onVerified, standalone = false }: Da
                 if (disposed || controller.signal.aborted) return;
                 setStatus((current) => ({
                     ...current,
+                    backendReady: false,
+                    authorized: false,
+                    authorizationState: 'pending',
+                    authorizationCode: undefined,
+                    authorizationMessage: undefined,
                     phase: 'connecting',
                     message: connectionFailureMessage(error),
                 }));
@@ -161,7 +167,10 @@ export function DashboardVerificationGate({ onVerified, standalone = false }: Da
         window.setTimeout(() => setCopyLabel('复制密钥'), 1200);
     };
 
-    const unauthorized = status.phase === 'unauthorized';
+    const unauthorized = status.authorizationState === 'denied'
+        || (!status.authorized && Boolean(status.authorizationCode?.startsWith('mac_')
+            || status.authorizationCode?.startsWith('device_')));
+    const verificationPending = status.authorizationState === 'pending';
     const rejection = unauthorized ? deniedFeedback(status) : null;
     return (
         <main className="relative flex h-screen w-screen items-center justify-center overflow-hidden bg-[#050914] text-slate-100">
@@ -177,13 +186,15 @@ export function DashboardVerificationGate({ onVerified, standalone = false }: Da
 
                 <div className="mb-5 border-y border-white/8">
                     <StatusRow label="后端服务" complete={status.backendReady} active={!status.backendReady} />
-                    <StatusRow label="局域网设备" complete={status.authorized} active={status.backendReady && !status.authorized} />
+                    <StatusRow label="设备验证" complete={status.authorized} active={status.backendReady && verificationPending} />
                     <StatusRow label="订单与路线数据" complete={status.dataInitialized} active={status.authorized && !status.dataInitialized} />
                 </div>
 
                 <div className="min-h-14">
                     <p className={`text-sm ${unauthorized ? 'font-semibold text-rose-200' : 'text-slate-300'}`}>
-                        {rejection?.title ?? status.message}
+                        {rejection?.title ?? (status.authorized && !status.dataInitialized
+                            ? status.message
+                            : status.authorizationMessage || status.message)}
                     </p>
                     {rejection && (
                         <div className="mt-3 border border-rose-300/20 bg-rose-400/[0.065] px-3 py-3">

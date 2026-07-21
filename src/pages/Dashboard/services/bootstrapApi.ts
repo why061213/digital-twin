@@ -6,7 +6,9 @@ export type BootstrapStatus = {
     backendReady: boolean;
     dataInitialized: boolean;
     authorized: boolean;
-    phase: 'connecting' | 'starting' | 'synchronizing' | 'retrying' | 'unauthorized' | 'ready';
+    phase: 'connecting' | 'starting' | 'synchronizing' | 'retrying' | 'ready';
+    authorizationState?: 'pending' | 'verified' | 'denied';
+    authorizationMessage?: string;
     message: string;
     lastError?: string | null;
     rawCount: number;
