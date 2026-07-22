@@ -229,16 +229,16 @@ export function positionAtDistance(coordinates: LonLat[], targetDistance: number
 export function projectDistanceOnPath(coordinates: LonLat[], point: LonLat, hintDistance = -1) {
     if (coordinates.length < 2) return 0;
 
-    const totalKm = pathLengthKm(coordinates);
-    if (totalKm <= 0) return 0;
+    const totalDistance = pathLength(coordinates);
+    if (totalDistance <= 0) return 0;
 
-    // 窗口约束：只搜索 hintDistance ±30% 范围内的线段，避免 U 形路线贴错边
+    // hintDistance、累计距离和返回值统一使用经纬度路径长度，避免与公里单位混算。
     let windowStart = 0;
-    let windowEnd = totalKm;
-    const useWindow = hintDistance >= 0 && hintDistance < totalKm;
+    let windowEnd = totalDistance;
+    const useWindow = hintDistance >= 0 && hintDistance < totalDistance;
     if (useWindow) {
-        windowStart = Math.max(0, hintDistance - totalKm * 0.3);
-        windowEnd = Math.min(totalKm, hintDistance + totalKm * 0.3);
+        windowStart = Math.max(0, hintDistance - totalDistance * 0.3);
+        windowEnd = Math.min(totalDistance, hintDistance + totalDistance * 0.3);
     }
 
     let walked = 0;
@@ -248,9 +248,9 @@ export function projectDistanceOnPath(coordinates: LonLat[], point: LonLat, hint
     for (let i = 1; i < coordinates.length; i++) {
         const start = coordinates[i - 1];
         const end = coordinates[i];
-        const segmentKm = distanceKm(start, end);
+        const segmentLength = distance(start, end);
         const segStart = walked;
-        const segEnd = walked + segmentKm;
+        const segEnd = walked + segmentLength;
 
         // 窗口约束
         if (useWindow && segEnd < windowStart) { walked = segEnd; continue; }
@@ -272,7 +272,7 @@ export function projectDistanceOnPath(coordinates: LonLat[], point: LonLat, hint
 
         if (currentDistanceSq < nearestDistanceSq) {
             nearestDistanceSq = currentDistanceSq;
-            nearestDistance = walked + segmentKm * segmentProgress;
+            nearestDistance = walked + segmentLength * segmentProgress;
         }
 
         walked = segEnd;
