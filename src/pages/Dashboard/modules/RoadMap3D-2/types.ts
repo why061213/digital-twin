@@ -41,6 +41,7 @@ export type RoadObjectInfo = {
     colorKey?: string;
     isRouteBranch?: boolean;
     isBaselineRoute?: boolean;
+    isVehicleRoute?: boolean;
     deviationCoordinates?: [number, number][];
 };
 

@@ -654,7 +654,7 @@ export function useRoadControls(
         progressTube.renderOrder = 9 + laneIndex;
         progressTube.userData = { roadId: road.pathKey, objectType: '订单进度' };
         progressTube.visible = false;
-        const endpointLayer = info.isRouteBranch
+        const endpointLayer = info.isRouteBranch || info.isVehicleRoute
             ? new THREE.Group()
             : createRouteEndpointLayer(road.samples, 'rm2', info, color, laneIndex);
         road.group.add(endpointLayer);
@@ -753,9 +753,9 @@ export function useRoadControls(
             const grayTube = new THREE.Mesh(
                 new THREE.TubeGeometry(displayCurve, tubularSegments, 0.18, radialSegments, false),
                 new THREE.MeshBasicMaterial({
-                    color: info.isRouteBranch || info.isBaselineRoute ? routeColor : 0x6b7280,
+                    color: info.isRouteBranch || info.isBaselineRoute || info.isVehicleRoute ? routeColor : 0x6b7280,
                     transparent: true,
-                    opacity: info.isRouteBranch ? 0.96 : info.isBaselineRoute ? 0.42 : 0.62,
+                    opacity: info.isRouteBranch ? 0.96 : info.isBaselineRoute || info.isVehicleRoute ? 0.42 : 0.62,
                     depthWrite: false,
                 })
             );
