@@ -243,6 +243,9 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             alarmStr?: string;
             alarmSeverity?: 'none' | 'warning' | 'critical';
             online?: boolean;
+            colorKey?: string;
+            isRouteBranch?: boolean;
+            deviationCoordinates?: [number, number][];
         }) => {
             roadMapRef.current?.updateTruckPosition(lineId, position, {
                 speedKmh: info.speedKmh,
@@ -266,6 +269,9 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
                 alarmStr?: string;
                 alarmSeverity?: 'none' | 'warning' | 'critical';
                 online?: boolean;
+                colorKey?: string;
+                isRouteBranch?: boolean;
+                deviationCoordinates?: [number, number][];
             },
         ) => {
             const roadMap = roadMapRef.current;
@@ -284,6 +290,9 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
                 alarmStr: info.alarmStr,
                 alarmSeverity: info.alarmSeverity,
                 online: info.online,
+                colorKey: info.colorKey ?? `branch:${lineId}`,
+                isRouteBranch: true,
+                deviationCoordinates: info.deviationCoordinates,
                 // 越界车辆从共享道路中独立出来，后续改路复用同一个稳定轨道键。
                 pathKey: `${route.pathKey}::adaptive::${lineId}`,
             };

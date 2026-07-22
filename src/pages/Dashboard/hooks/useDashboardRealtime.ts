@@ -76,6 +76,7 @@ export type TruckPositionMessage = {
     directionLabel?: string;
     routeRevision?: number;
     routeCoordinates?: [number, number][];
+    deviationCoordinates?: [number, number][];
     routeLengthKm?: number;
     travelDurationMs?: number;
     pathKey?: string;

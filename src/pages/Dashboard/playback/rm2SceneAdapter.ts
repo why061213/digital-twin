@@ -41,6 +41,7 @@ function routeInfo(route: RenderRouteDTO): RoadObjectInfo {
         routeLengthKm: route.routeLengthKm,
         orderId: route.orderId,
         pathKey: route.pathKey,
+        isBaselineRoute: true,
     };
 }
 

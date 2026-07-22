@@ -40,6 +40,8 @@ export type RoadObjectInfo = {
     manualMarker?: boolean;
     colorKey?: string;
     isRouteBranch?: boolean;
+    isBaselineRoute?: boolean;
+    deviationCoordinates?: [number, number][];
 };
 
 export type VehicleBarState = {
@@ -71,6 +73,7 @@ export interface RoadState {
     pathKey: string;
     group: THREE.Group;
     pathCurve: THREE.CurvePath<THREE.Vector3>;
+    displayCurve: THREE.CurvePath<THREE.Vector3>;
     grayTube: THREE.Mesh;
     selectionTube: THREE.Mesh;
     sharedProgressTube: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;

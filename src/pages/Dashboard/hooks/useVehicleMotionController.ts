@@ -31,6 +31,9 @@ type MotionRenderInfo = {
     alarmStr?: string;
     alarmSeverity?: 'none' | 'warning' | 'critical';
     online?: boolean;
+    colorKey?: string;
+    isRouteBranch?: boolean;
+    deviationCoordinates?: LonLat[];
 };
 
 type RouteSeed = {
@@ -131,6 +134,9 @@ export function useVehicleMotionController(options: Options) {
                 alarmStr: route.alarmStr,
                 alarmSeverity: route.alarmSeverity,
                 online: route.online,
+                colorKey: message.colorKey,
+                isRouteBranch: message.isRouteBranch,
+                deviationCoordinates: message.deviationCoordinates,
             });
         }
         const routeNodes = route.routeNodes ?? route.coordinates;
