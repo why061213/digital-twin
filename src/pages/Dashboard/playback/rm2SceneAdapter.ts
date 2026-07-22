@@ -154,7 +154,10 @@ export function createRm2SceneAdapter(
             };
         },
 
-        async replaceRenderedGroup(prepared: Rm2PreparedGroup) {
+        async replaceRenderedGroup(
+            prepared: Rm2PreparedGroup,
+            beforeReveal?: () => void | Promise<void>,
+        ) {
             const roadMap = roadMapRef.current;
             if (!roadMap) throw new Error('RM2 scene is not ready for replacement');
             const generation = ++transitionGeneration;
@@ -172,6 +175,10 @@ export function createRm2SceneAdapter(
 
             roadMap.setRoadsOpacity(0);
             currentOpacity = 0;
+            await beforeReveal?.();
+            if (generation !== transitionGeneration || !roadMapRef.current) return;
+            // beforeReveal 可能创建车辆专属路线，新对象也必须保持隐藏，统一淡入。
+            roadMap.setRoadsOpacity(0);
             if (!await fadeRoadsTo(1, generation) || generation !== transitionGeneration) return;
             console.info('[RM2 scene replace]', {
                 groupId: prepared.groupId,

@@ -14,6 +14,23 @@ import {
     type RouteSnapshotChangedMessage,
 } from '../services/renderRouteApi';
 import type { ViewMode } from '../types';
+import type { TruckPositionMessage } from './useDashboardRealtime';
+
+type MotionRouteSeed = {
+    lineId: string;
+    groupId: string;
+    coordinates: [number, number][];
+    routeLengthKm?: number;
+    speedKmh?: number | null;
+    travelDurationMs?: number;
+    status?: string;
+};
+
+type MotionLoadContext = {
+    groupId: string;
+    snapshotVersion: string | null;
+    initialPositions?: TruckPositionMessage[];
+};
 
 const FIXTURE_GROUPS: Rm2GroupDTO[] = [
     { groupId: 'rm2-fixture-fs-gz', groupName: '佛山 - 广州', index: 0, count: 1, orderLineIds: ['RM2-FS-GZ::line-0'], vehicleLineIds: ['rm2-fs-gz-01', 'rm2-fs-gz-02'], vehicleLineIdsByOrderLineId: { 'RM2-FS-GZ::line-0': ['rm2-fs-gz-01', 'rm2-fs-gz-02'] }, vehicleCount: 2, mapKey: '440000', fromProvinceKey: '440000', toProvinceKey: '440000', directionKey: '440000:440000', renderProvinceKeys: ['440000'], pageIndex: 1 },
@@ -66,9 +83,13 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
     const sourceRef = useRef<'backend' | 'fixture'>('backend');
     const snapshotVersionRef = useRef<string>('');
     const groupRoutesCacheRef = useRef<Map<string, RenderRouteDTO[]>>(new Map());
+    const groupPositionsCacheRef = useRef<Map<string, TruckPositionMessage[]>>(new Map());
     const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const sceneAdapterRef = useRef<ReturnType<typeof createRm2SceneAdapter> | null>(null);
-    const motionLoadRef = useRef<(routes: Array<{ lineId: string; groupId: string; coordinates: [number, number][]; routeLengthKm?: number; speedKmh?: number | null; travelDurationMs?: number; status?: string }>) => Promise<void>>(async () => {});
+    const motionLoadRef = useRef<(
+        routes: MotionRouteSeed[],
+        context: MotionLoadContext,
+    ) => Promise<void>>(async () => {});
     const completedLineIdsByGroupRef = useRef<Map<string, Set<string>>>(new Map());
     const playbackRef = useRef<{ activeGroupId: string | null; phase: string }>({ activeGroupId: null, phase: 'idle' });
 
@@ -112,6 +133,7 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             sourceRef.current = 'backend';
             if (response.snapshotVersion !== snapshotVersionRef.current) {
                 groupRoutesCacheRef.current.clear();
+                groupPositionsCacheRef.current.clear();
                 snapshotVersionRef.current = response.snapshotVersion;
             }
             const groups = filterCompletedGroups(response.groups);
@@ -137,8 +159,20 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
 
     const fetchGroupRoutes = useCallback(async (groupId: string, signal?: AbortSignal) => {
         const version = snapshotVersionRef.current;
-        const cached = groupRoutesCacheRef.current.get(cacheKey(version, groupId));
+        const currentCacheKey = cacheKey(version, groupId);
+        const cached = groupRoutesCacheRef.current.get(currentCacheKey);
         if (cached) {
+            // 路线快照可以缓存，但车辆专属修正路线可能在该组不可见期间更新。
+            // 重新进组时先读取一次后端位置缓存，并在场景淡入前应用，禁止先露出 AB 基准线。
+            try {
+                const currentPositions = await fetchVehiclePositions(cached.map((route) => route.lineId));
+                groupPositionsCacheRef.current.set(currentCacheKey, currentPositions);
+            } catch (error) {
+                console.warn('[RM2 group] failed to refresh positions before reveal; using cached positions', {
+                    groupId,
+                    error,
+                });
+            }
             rememberCompletedRoutes(groupId, cached);
             return filterCompletedRoutes(groupId, cached);
         }
@@ -153,11 +187,17 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             };
         if (response.mismatch) {
             groupRoutesCacheRef.current.clear();
+            groupPositionsCacheRef.current.clear();
             snapshotVersionRef.current = response.snapshotVersion;
             throw new Error(`RM2 snapshot mismatch while loading ${groupId}`);
         }
         if (response.snapshotVersion) {
-            groupRoutesCacheRef.current.set(cacheKey(response.snapshotVersion, groupId), response.routes);
+            const responseCacheKey = cacheKey(response.snapshotVersion, groupId);
+            groupRoutesCacheRef.current.set(responseCacheKey, response.routes);
+            groupPositionsCacheRef.current.set(
+                responseCacheKey,
+                'positions' in response ? response.positions : [],
+            );
         }
         rememberCompletedRoutes(groupId, response.routes);
         return filterCompletedRoutes(groupId, response.routes);
@@ -180,8 +220,7 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             renderedLineIds: prepared.routes.map((route) => route.lineId),
             rejectedLineIds: prepared.rejectedLineIds,
         });
-        await adapter.replaceRenderedGroup(prepared);
-        await motionLoadRef.current(routes.map((route) => ({
+        const routeSeeds = routes.map((route) => ({
             lineId: route.lineId,
             groupId: route.groupId,
             coordinates: route.coordinates,
@@ -189,7 +228,15 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             speedKmh: route.speedKmh,
             travelDurationMs: route.travelDurationMs,
             status: route.status,
-        })));
+        }));
+        const initialPositions = groupPositionsCacheRef.current.get(
+            cacheKey(snapshotVersionRef.current, group.groupId),
+        );
+        await adapter.replaceRenderedGroup(prepared, () => motionLoadRef.current(routeSeeds, {
+            groupId: group.groupId,
+            snapshotVersion: snapshotVersionRef.current || null,
+            initialPositions,
+        }));
     }, []);
 
     const clearRenderedGroup = useCallback(() => {
@@ -317,15 +364,16 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             completedLineIds.add(lineId);
             completedLineIdsByGroupRef.current.set(route.groupId, completedLineIds);
             groupRoutesCacheRef.current.delete(cacheKey(snapshotVersionRef.current, route.groupId));
+            groupPositionsCacheRef.current.delete(cacheKey(snapshotVersionRef.current, route.groupId));
             markRouteFinished(route);
         },
     });
     const loadMotionGroup = motion.loadGroup;
 
     useEffect(() => {
-        motionLoadRef.current = async (routes) => {
+        motionLoadRef.current = async (routes, context) => {
             activeRoutesRef.current = new Map(routes.map((route) => [route.lineId, route as RenderRouteDTO]));
-            await loadMotionGroup(routes);
+            await loadMotionGroup(routes, context);
         };
     }, [loadMotionGroup]);
 
