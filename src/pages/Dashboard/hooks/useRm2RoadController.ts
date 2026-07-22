@@ -24,6 +24,7 @@ type MotionRouteSeed = {
     speedKmh?: number | null;
     travelDurationMs?: number;
     status?: string;
+    routeRevision?: number;
 };
 
 type MotionLoadContext = {
@@ -228,6 +229,7 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             speedKmh: route.speedKmh,
             travelDurationMs: route.travelDurationMs,
             status: route.status,
+            routeRevision: route.routeRevision,
         }));
         const initialPositions = groupPositionsCacheRef.current.get(
             cacheKey(snapshotVersionRef.current, group.groupId),

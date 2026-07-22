@@ -44,6 +44,7 @@ type RouteSeed = {
     speedKmh?: number | null;
     travelDurationMs?: number;
     status?: string;
+    routeRevision?: number;
 };
 
 type GroupContext = {
@@ -257,6 +258,7 @@ export function useVehicleMotionController(options: Options) {
                 calibratedAt: now, calibratedDistance: 0, pathSpeed: length / (seed.travelDurationMs ?? 60_000),
                 pathLength: length, routeLengthKm: seed.routeLengthKm ?? pathLengthKm(seed.coordinates),
                 speedKmh: seed.speedKmh ?? null, nextCalibrationAt: now, arrivalCheckRequested: false,
+                routeRevision: seed.routeRevision,
             });
         });
         activeRoutesRef.current = next;

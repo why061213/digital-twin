@@ -13,6 +13,7 @@ export type RenderRouteDTO = {
     fromCoords: [number, number];
     toCoords: [number, number];
     coordinates: [number, number][];
+    baselineCoordinates?: [number, number][];
     routeLengthKm?: number;
     speedKmh?: number | null;
     status: string;
@@ -21,6 +22,11 @@ export type RenderRouteDTO = {
     cargoUnit?: string;
     travelDurationMs?: number;
     pathKey: string;
+    baselinePathKey?: string;
+    routeRevision?: number;
+    deviationCoordinates?: [number, number][];
+    colorKey?: string;
+    isRouteBranch?: boolean;
     scope: 'rm1' | 'rm2';
     groupId: string;
     role: 'primary' | 'along';

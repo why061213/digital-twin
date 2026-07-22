@@ -13,6 +13,8 @@ export type Rm2PreparedRoute = {
     lineId: string;
     pathKey: string;
     coordinates: [number, number][];
+    baselineCoordinates?: [number, number][];
+    baselinePathKey?: string;
     initialPosition: [number, number];
     info: RoadObjectInfo;
 };
@@ -31,6 +33,8 @@ function nextFrame() {
 }
 
 function routeInfo(route: RenderRouteDTO): RoadObjectInfo {
+    const hasVehicleRoute = typeof route.routeRevision === 'number'
+        && Number.isFinite(route.routeRevision);
     return {
         plate: route.plate,
         cargo: route.cargo,
@@ -41,7 +45,11 @@ function routeInfo(route: RenderRouteDTO): RoadObjectInfo {
         routeLengthKm: route.routeLengthKm,
         orderId: route.orderId,
         pathKey: route.pathKey,
-        isBaselineRoute: true,
+        colorKey: route.colorKey,
+        isRouteBranch: route.isRouteBranch,
+        isBaselineRoute: !hasVehicleRoute,
+        isVehicleRoute: hasVehicleRoute,
+        deviationCoordinates: route.deviationCoordinates,
     };
 }
 
@@ -139,6 +147,8 @@ export function createRm2SceneAdapter(
                     lineId: rawRoute.lineId,
                     pathKey: rawRoute.pathKey,
                     coordinates: rawRoute.coordinates,
+                    baselineCoordinates: rawRoute.baselineCoordinates,
+                    baselinePathKey: rawRoute.baselinePathKey,
                     initialPosition: rawRoute.coordinates[0],
                     info: routeInfo(rawRoute),
                 });
@@ -165,6 +175,27 @@ export function createRm2SceneAdapter(
             // 此处才移除旧组：请求、校验和新组描述都已完成，避免等待网络时出现黑屏。
             if (!await fadeRoadsTo(0, generation) || generation !== transitionGeneration || !roadMapRef.current) return;
             roadMap.clearRoads();
+
+            const renderedBaselineKeys = new Set<string>();
+            prepared.routes.forEach((route) => {
+                if (!route.info.isVehicleRoute
+                    || !route.baselinePathKey
+                    || !route.baselineCoordinates
+                    || renderedBaselineKeys.has(route.baselinePathKey)) return;
+                renderedBaselineKeys.add(route.baselinePathKey);
+                const referenceId = `baseline:${route.baselinePathKey}`;
+                roadMap.addRoadPath(referenceId, route.baselineCoordinates, {
+                    ...route.info,
+                    pathKey: route.baselinePathKey,
+                    colorKey: route.info.orderId,
+                    isBaselineRoute: true,
+                    isVehicleRoute: false,
+                    isRouteBranch: false,
+                    deviationCoordinates: undefined,
+                });
+                // 只保留基准线图层，不留下虚拟车辆。
+                roadMap.removeRoadPath(referenceId);
+            });
 
             prepared.routes.forEach((route) => {
                 if (generation !== transitionGeneration) return;
