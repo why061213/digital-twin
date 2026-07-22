@@ -43,6 +43,10 @@ export type RoadObjectInfo = {
     isBaselineRoute?: boolean;
     isVehicleRoute?: boolean;
     deviationCoordinates?: [number, number][];
+    routeDeviationState?: 'BASELINE' | 'SUSPECTED' | 'ALTERNATIVE' | 'EXPECTED' | 'ANOMALOUS' | 'UNKNOWN';
+    routeDeviationReasonCode?: string;
+    routeDeviationConfidence?: number;
+    routeAnomalyScore?: number;
 };
 
 export type VehicleBarState = {

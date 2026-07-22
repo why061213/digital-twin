@@ -82,6 +82,11 @@ export type TruckPositionMessage = {
     pathKey?: string;
     routeDeviationCount?: number;
     routeDeviationDistanceKm?: number;
+    routeDeviationState?: 'BASELINE' | 'SUSPECTED' | 'ALTERNATIVE' | 'EXPECTED' | 'ANOMALOUS' | 'UNKNOWN';
+    routeDeviationReasonCode?: string;
+    routeDeviationConfidence?: number;
+    routeAnomalyScore?: number;
+    routeDeviationSampleCount?: number;
     sequence?: number;
 };
 

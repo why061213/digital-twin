@@ -295,6 +295,10 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             colorKey?: string;
             isRouteBranch?: boolean;
             deviationCoordinates?: [number, number][];
+            routeDeviationState?: 'BASELINE' | 'SUSPECTED' | 'ALTERNATIVE' | 'EXPECTED' | 'ANOMALOUS' | 'UNKNOWN';
+            routeDeviationReasonCode?: string;
+            routeDeviationConfidence?: number;
+            routeAnomalyScore?: number;
         }) => {
             roadMapRef.current?.updateTruckPosition(lineId, position, {
                 speedKmh: info.speedKmh,
@@ -303,6 +307,10 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
                 alarmStr: info.alarmStr,
                 alarmSeverity: info.alarmSeverity,
                 online: info.online,
+                routeDeviationState: info.routeDeviationState,
+                routeDeviationReasonCode: info.routeDeviationReasonCode,
+                routeDeviationConfidence: info.routeDeviationConfidence,
+                routeAnomalyScore: info.routeAnomalyScore,
             });
         },
         removeVehicle: (lineId: string) => roadMapRef.current?.removeRoadPath(lineId),
@@ -321,6 +329,10 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
                 colorKey?: string;
                 isRouteBranch?: boolean;
                 deviationCoordinates?: [number, number][];
+                routeDeviationState?: 'BASELINE' | 'SUSPECTED' | 'ALTERNATIVE' | 'EXPECTED' | 'ANOMALOUS' | 'UNKNOWN';
+                routeDeviationReasonCode?: string;
+                routeDeviationConfidence?: number;
+                routeAnomalyScore?: number;
             },
         ) => {
             const roadMap = roadMapRef.current;
@@ -343,6 +355,10 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
                 isRouteBranch: info.isRouteBranch ?? false,
                 isVehicleRoute: true,
                 deviationCoordinates: info.deviationCoordinates,
+                routeDeviationState: info.routeDeviationState,
+                routeDeviationReasonCode: info.routeDeviationReasonCode,
+                routeDeviationConfidence: info.routeDeviationConfidence,
+                routeAnomalyScore: info.routeAnomalyScore,
                 // 越界车辆从共享道路中独立出来，后续改路复用同一个稳定轨道键。
                 pathKey: `${route.pathKey}::adaptive::${lineId}`,
             };

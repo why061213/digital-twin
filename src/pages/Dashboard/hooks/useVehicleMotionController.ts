@@ -34,6 +34,10 @@ type MotionRenderInfo = {
     colorKey?: string;
     isRouteBranch?: boolean;
     deviationCoordinates?: LonLat[];
+    routeDeviationState?: TruckPositionMessage['routeDeviationState'];
+    routeDeviationReasonCode?: string;
+    routeDeviationConfidence?: number;
+    routeAnomalyScore?: number;
 };
 
 type RouteSeed = {
@@ -109,6 +113,10 @@ export function useVehicleMotionController(options: Options) {
         route.stateStr = message.stateStr ?? route.stateStr;
         route.alarmStr = message.alarmStr ?? route.alarmStr;
         route.alarmSeverity = message.alarmSeverity ?? route.alarmSeverity;
+        route.routeDeviationState = message.routeDeviationState ?? route.routeDeviationState;
+        route.routeDeviationReasonCode = message.routeDeviationReasonCode ?? route.routeDeviationReasonCode;
+        route.routeDeviationConfidence = message.routeDeviationConfidence ?? route.routeDeviationConfidence;
+        route.routeAnomalyScore = message.routeAnomalyScore ?? route.routeAnomalyScore;
         route.online = message.online ?? route.online;
         const now = performance.now();
         if (message.routeCoordinates && message.routeCoordinates.length >= 2
@@ -138,6 +146,10 @@ export function useVehicleMotionController(options: Options) {
                 colorKey: message.colorKey,
                 isRouteBranch: message.isRouteBranch,
                 deviationCoordinates: message.deviationCoordinates,
+                routeDeviationState: route.routeDeviationState,
+                routeDeviationReasonCode: route.routeDeviationReasonCode,
+                routeDeviationConfidence: route.routeDeviationConfidence,
+                routeAnomalyScore: route.routeAnomalyScore,
             });
         }
         const routeNodes = route.routeNodes ?? route.coordinates;
@@ -306,6 +318,10 @@ export function useVehicleMotionController(options: Options) {
                     alarmStr: route.alarmStr,
                     alarmSeverity: route.alarmSeverity,
                     online: route.online,
+                    routeDeviationState: route.routeDeviationState,
+                    routeDeviationReasonCode: route.routeDeviationReasonCode,
+                    routeDeviationConfidence: route.routeDeviationConfidence,
+                    routeAnomalyScore: route.routeAnomalyScore,
                 });
                 const reachedPredictedEnd = route.pathLength > 0
                     && predictedDistance(route, now) >= route.pathLength - 0.0001;

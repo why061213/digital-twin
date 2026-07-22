@@ -32,6 +32,10 @@ export type ActiveRoute = RouteOrder & {
     online?: boolean;
     directionDeg?: number;
     directionLabel?: string;
+    routeDeviationState?: 'BASELINE' | 'SUSPECTED' | 'ALTERNATIVE' | 'EXPECTED' | 'ANOMALOUS' | 'UNKNOWN';
+    routeDeviationReasonCode?: string;
+    routeDeviationConfidence?: number;
+    routeAnomalyScore?: number;
     nextCalibrationAt: number;
     arrivalCheckRequested: boolean;
 };

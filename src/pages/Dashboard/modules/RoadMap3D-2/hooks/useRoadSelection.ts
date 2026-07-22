@@ -4,6 +4,18 @@ import type { HoverInfo, RoadObjectInfo } from '../types';
 import { formatNumber, screenPosition } from '../utils';
 import { useRoadMapRefs } from './useRoadMapRefs';
 
+function deviationStateLabel(state: RoadObjectInfo['routeDeviationState']) {
+    switch (state) {
+        case 'BASELINE': return '基准路线';
+        case 'SUSPECTED': return '待确认路线不一致';
+        case 'ALTERNATIVE': return '合理替代路线';
+        case 'EXPECTED': return '疑似货车限制绕行';
+        case 'ANOMALOUS': return '疑似异常偏航';
+        case 'UNKNOWN': return '定位证据不足';
+        default: return '--';
+    }
+}
+
 export function useRoadSelection(refs: ReturnType<typeof useRoadMapRefs>) {
     const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
 
@@ -57,6 +69,10 @@ export function useRoadSelection(refs: ReturnType<typeof useRoadMapRefs>) {
                 ['当前纬度', formatNumber(coords[1], 6)],
                 ['时速', `${formatNumber(info.speedKmh, 1)} km/h`],
                 ['路线长度', `${formatNumber(info.routeLengthKm, 1)} km`],
+                ['路线判断', deviationStateLabel(info.routeDeviationState)],
+                ['判断置信度', info.routeDeviationConfidence == null
+                    ? '--'
+                    : `${Math.round(info.routeDeviationConfidence * 100)}%`],
             ],
         };
     }, [findVehicleInfo]);

@@ -718,7 +718,13 @@ export function useRoadControls(
 
             const pathKey = trackKeyFor(id, coords, info);
             const orderId = orderKeyFor(id, info);
-            const routeColor = colorForOrder(orderId);
+            const routeColor = info.routeDeviationState === 'ALTERNATIVE'
+                ? 0xfacc15
+                : info.routeDeviationState === 'EXPECTED'
+                    ? 0xf59e0b
+                    : info.routeDeviationState === 'ANOMALOUS'
+                        ? (info.alarmSeverity === 'critical' ? 0xef4444 : 0xf97316)
+                        : colorForOrder(orderId);
             const existing = refs.roadsMapRef.current.get(pathKey);
             if (existing) {
                 const lane = ensureOrderLane(existing, orderId, info);
