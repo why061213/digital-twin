@@ -440,7 +440,11 @@ export function useRoadControls(
             road.selectionTube.geometry = new THREE.TubeGeometry(road.displayCurve, road.tubularSegments, baseRadius + 0.16, road.radialSegments, false);
             road.sharedProgressTube.geometry.dispose();
             road.sharedProgressTube.geometry = new THREE.TubeGeometry(
-                road.displayCurve, road.tubularSegments, Math.max(0.24, baseRadius * 0.72), road.radialSegments, false,
+                road.displayCurve,
+                road.tubularSegments,
+                Math.max(0.42, baseRadius * 1.35),
+                road.radialSegments,
+                false,
             );
             road.renderedOrderCount = orderCount;
         }
