@@ -57,10 +57,11 @@ const TRUCK_HIGH_CAMERA_SCALE = 1.55;
 const VEHICLE_UPGRADE_MS = 420;
 const NORTH_UP_MAX_FIT_DISTANCE = 320;
 const NORTH_UP_VIEW_DIRECTION = new THREE.Vector3(0, 0.82, -0.58).normalize();
-const SHARED_ROAD_MATCH_TOLERANCE = 0.72;
-const SHARED_ROAD_DIRECTION_DOT = 0.92;
+const SHARED_ROAD_MATCH_TOLERANCE = 0.42;
+const SHARED_ROAD_DIRECTION_DOT = 0.97;
 const SHARED_ROAD_SAMPLE_LIMIT = 96;
-const SHARED_ROAD_MIN_MATCHED_SAMPLES = 3;
+const SHARED_ROAD_MIN_MATCHED_SAMPLES = 4;
+const SHARED_ROAD_MAX_TARGET_PROGRESS_STEP = 0.08;
 
 let truckTemplatePromise: Promise<THREE.Object3D> | null = null;
 
@@ -134,31 +135,67 @@ function pathTangentAt(samples: THREE.Vector3[], index: number) {
     return tangent.normalize();
 }
 
-function sharedRangeOnRoad(source: RoadState, target: RoadState) {
+function sampledPath(samples: THREE.Vector3[]) {
+    const denominator = Math.max(1, samples.length - 1);
+    return sampledPathIndices(samples.length).flatMap((index) => {
+        const tangent = pathTangentAt(samples, index);
+        return tangent ? [{
+            index,
+            point: samples[index],
+            progress: index / denominator,
+            tangent,
+        }] : [];
+    });
+}
+
+function sharedRangeOnRoad(source: RoadState, target: RoadState, targetProgress: number) {
     if (source.samples.length < 2 || target.samples.length < 2) return null;
-    const sourceIndices = sampledPathIndices(source.samples.length);
-    const targetIndices = sampledPathIndices(target.samples.length);
+    const sourcePath = sampledPath(source.samples);
+    const targetPath = sampledPath(target.samples);
     const toleranceSq = SHARED_ROAD_MATCH_TOLERANCE * SHARED_ROAD_MATCH_TOLERANCE;
-    const matched = sourceIndices.map((sourceIndex) => {
-        const sourcePoint = source.samples[sourceIndex];
-        const sourceTangent = pathTangentAt(source.samples, sourceIndex);
-        if (!sourceTangent) return false;
-        return targetIndices.some((targetIndex) => {
-            const targetPoint = target.samples[targetIndex];
-            const dx = sourcePoint.x - targetPoint.x;
-            const dz = sourcePoint.z - targetPoint.z;
-            if (dx * dx + dz * dz > toleranceSq) return false;
-            const targetTangent = pathTangentAt(target.samples, targetIndex);
-            return targetTangent !== null
-                && Math.abs(sourceTangent.dot(targetTangent)) >= SHARED_ROAD_DIRECTION_DOT;
-        });
+    const targetLimit = THREE.MathUtils.clamp(targetProgress, 0, 1)
+        + 0.5 / Math.max(1, targetPath.length - 1);
+    const matched = sourcePath.map((sourceSample) => {
+        let nearest: { targetProgress: number; directionSign: number; distanceSq: number } | null = null;
+        for (const targetSample of targetPath) {
+            if (targetSample.progress > targetLimit) continue;
+            const dx = sourceSample.point.x - targetSample.point.x;
+            const dz = sourceSample.point.z - targetSample.point.z;
+            if (dx * dx + dz * dz > toleranceSq) continue;
+            const directionDot = sourceSample.tangent.dot(targetSample.tangent);
+            if (Math.abs(directionDot) < SHARED_ROAD_DIRECTION_DOT) continue;
+            const distanceSq = dx * dx + dz * dz;
+            if (!nearest || distanceSq < nearest.distanceSq) {
+                nearest = {
+                    targetProgress: targetSample.progress,
+                    directionSign: Math.sign(directionDot) || 1,
+                    distanceSq,
+                };
+            }
+        }
+        return nearest ? {
+            sourceProgress: sourceSample.progress,
+            ...nearest,
+        } : null;
     });
 
     let bestStart = -1;
     let bestEnd = -1;
     let runStart = -1;
     for (let index = 0; index <= matched.length; index += 1) {
-        if (matched[index]) {
+        const current = matched[index];
+        const previous = index > 0 ? matched[index - 1] : null;
+        const targetProgressStep = current !== null && previous !== null
+            ? current.targetProgress - previous.targetProgress
+            : 0;
+        const continuous = current !== null && (
+            runStart < 0
+            || (previous !== null
+                && current.directionSign === previous.directionSign
+                && Math.abs(targetProgressStep) <= SHARED_ROAD_MAX_TARGET_PROGRESS_STEP
+                && targetProgressStep * current.directionSign >= -0.002)
+        );
+        if (continuous) {
             if (runStart < 0) runStart = index;
             continue;
         }
@@ -167,15 +204,14 @@ function sharedRangeOnRoad(source: RoadState, target: RoadState) {
             bestStart = runStart;
             bestEnd = index - 1;
         }
-        runStart = -1;
+        runStart = current ? index : -1;
     }
     if (bestStart < 0 || bestEnd < bestStart) return null;
 
-    const denominator = Math.max(1, source.samples.length - 1);
-    const padding = 0.5 / Math.max(1, sourceIndices.length - 1);
+    const padding = 0.5 / Math.max(1, sourcePath.length - 1);
     return {
-        start: Math.max(0, sourceIndices[bestStart] / denominator - padding),
-        end: Math.min(1, sourceIndices[bestEnd] / denominator + padding),
+        start: Math.max(0, matched[bestStart]!.sourceProgress - padding),
+        end: Math.min(1, matched[bestEnd]!.sourceProgress + padding),
     };
 }
 
@@ -314,6 +350,7 @@ export function useRoadControls(
     const highlightedLineIdRef = useRef<string | null>(null);
     const highlightGenerationRef = useRef(0);
     const cameraTruckScaleRef = useRef(1);
+    const sharedRangeRefreshFrameRef = useRef<number | null>(null);
 
     const colorForOrder = useCallback((orderId: string) => {
         const existing = orderColorByIdRef.current.get(orderId);
@@ -593,10 +630,10 @@ export function useRoadControls(
             const candidates: Array<SharedRouteColorRange & { length: number }> = [];
             roads.forEach((target) => {
                 if (target === source || target.info.isBaselineRoute) return;
-                const range = sharedRangeOnRoad(source, target);
-                if (!range) return;
                 target.orders.forEach((lane) => {
                     if (sourceColors.has(lane.color)) return;
+                    const range = sharedRangeOnRoad(source, target, lane.maxProgress);
+                    if (!range) return;
                     if (candidates.some((candidate) => (
                         candidate.color === lane.color
                         && Math.abs(candidate.start - range.start) < 0.01
@@ -614,6 +651,14 @@ export function useRoadControls(
             updateSharedRouteColorRanges(material, candidates.slice(0, 2));
         });
     }, [refs.roadsMapRef]);
+
+    const scheduleSharedRoadColorRangesRefresh = useCallback(() => {
+        if (sharedRangeRefreshFrameRef.current !== null) return;
+        sharedRangeRefreshFrameRef.current = requestAnimationFrame(() => {
+            sharedRangeRefreshFrameRef.current = null;
+            refreshSharedRoadColorRanges();
+        });
+    }, [refreshSharedRoadColorRanges]);
 
     const updateProgressFromTruck = useCallback((roadId: string) => {
         const trackKey = refs.lineTrackMapRef.current.get(roadId) ?? roadId;
@@ -709,6 +754,10 @@ export function useRoadControls(
     }, [refs]);
 
     const clearRoads = useCallback(() => {
+        if (sharedRangeRefreshFrameRef.current !== null) {
+            cancelAnimationFrame(sharedRangeRefreshFrameRef.current);
+            sharedRangeRefreshFrameRef.current = null;
+        }
         highlightedLineIdRef.current = null;
         highlightGenerationRef.current += 1;
         Array.from(refs.roadsMapRef.current.keys()).forEach((id) => clearRoad(id));
@@ -836,7 +885,7 @@ export function useRoadControls(
                 ensureVehicleBar(existing, lane, id, info);
                 existing.info = { ...existing.info, ...info };
                 updateOrderVisuals(existing);
-                refreshSharedRoadColorRanges();
+                scheduleSharedRoadColorRangesRefresh();
                 focusAllRoads();
                 return;
             }
@@ -936,17 +985,17 @@ export function useRoadControls(
             const lane = ensureOrderLane(road, orderId, info);
             ensureVehicleBar(road, lane, id, info);
             updateOrderVisuals(road);
-            refreshSharedRoadColorRanges();
+            scheduleSharedRoadColorRangesRefresh();
             focusAllRoads();
         },
-        [colorForOrder, ensureOrderLane, ensureVehicleBar, focusAllRoads, refs, refreshSharedRoadColorRanges, updateOrderVisuals],
+        [colorForOrder, ensureOrderLane, ensureVehicleBar, focusAllRoads, refs, scheduleSharedRoadColorRangesRefresh, updateOrderVisuals],
     );
 
     const removeRoadPath = useCallback((id: string) => {
         const trackKey = refs.lineTrackMapRef.current.get(id);
         if (!trackKey) {
             clearRoad(id);
-            refreshSharedRoadColorRanges();
+            scheduleSharedRoadColorRangesRefresh();
             return;
         }
 
@@ -972,12 +1021,12 @@ export function useRoadControls(
         refs.lineTrackMapRef.current.delete(id);
         if (road.lineIds.size === 0 && !road.info.isBaselineRoute) {
             clearRoad(trackKey);
-            refreshSharedRoadColorRanges();
+            scheduleSharedRoadColorRangesRefresh();
             return;
         }
         updateOrderVisuals(road);
-        refreshSharedRoadColorRanges();
-    }, [clearRoad, refs, refreshSharedRoadColorRanges, updateOrderVisuals]);
+        scheduleSharedRoadColorRangesRefresh();
+    }, [clearRoad, refs, scheduleSharedRoadColorRangesRefresh, updateOrderVisuals]);
 
     const setRoadPath = useCallback(
         (coords: [number, number][]) => {
@@ -1034,7 +1083,8 @@ export function useRoadControls(
         road.currentCoords = position;
         road.info = { ...road.info, ...info };
         updateOrderVisuals(road);
-    }, [ensureOrderLane, ensureVehicleBar, focusPath, refs, updateOrderVisuals]);
+        scheduleSharedRoadColorRangesRefresh();
+    }, [ensureOrderLane, ensureVehicleBar, focusPath, refs, scheduleSharedRoadColorRangesRefresh, updateOrderVisuals]);
 
     const refreshAllPositions = useCallback(() => {
         const ids = Array.from(refs.lineTrackMapRef.current.keys());
