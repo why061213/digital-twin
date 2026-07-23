@@ -10,8 +10,10 @@ import {
     createRouteEndpointLayer,
     createRouteVisualLayers,
     createSharedProgressMaterial,
+    updateSharedRouteColorRanges,
     updateSharedProgressMaterial,
 } from '../../routeVisuals';
+import type { SharedRouteColorRange } from '../../routeVisuals';
 import { syncVehicleAlertRipple } from '../../vehicleAlertRipples';
 
 // const ORDER_COLORS = [
@@ -55,6 +57,10 @@ const TRUCK_HIGH_CAMERA_SCALE = 1.55;
 const VEHICLE_UPGRADE_MS = 420;
 const NORTH_UP_MAX_FIT_DISTANCE = 320;
 const NORTH_UP_VIEW_DIRECTION = new THREE.Vector3(0, 0.82, -0.58).normalize();
+const SHARED_ROAD_MATCH_TOLERANCE = 0.72;
+const SHARED_ROAD_DIRECTION_DOT = 0.92;
+const SHARED_ROAD_SAMPLE_LIMIT = 96;
+const SHARED_ROAD_MIN_MATCHED_SAMPLES = 3;
 
 let truckTemplatePromise: Promise<THREE.Object3D> | null = null;
 
@@ -111,6 +117,66 @@ function trackKeyFor(id: string, coords: [number, number][], info: RoadObjectInf
 
 function orderKeyFor(lineId: string, info: RoadObjectInfo) {
     return info.colorKey ?? info.orderFamilyId ?? info.orderId ?? `order-${lineId}`;
+}
+
+function sampledPathIndices(length: number) {
+    if (length <= SHARED_ROAD_SAMPLE_LIMIT) return Array.from({ length }, (_, index) => index);
+    return Array.from({ length: SHARED_ROAD_SAMPLE_LIMIT }, (_, index) => (
+        Math.round(index / (SHARED_ROAD_SAMPLE_LIMIT - 1) * (length - 1))
+    ));
+}
+
+function pathTangentAt(samples: THREE.Vector3[], index: number) {
+    const previous = samples[Math.max(0, index - 1)] ?? samples[index];
+    const next = samples[Math.min(samples.length - 1, index + 1)] ?? samples[index];
+    const tangent = next.clone().sub(previous).setY(0);
+    if (tangent.lengthSq() <= 0.000001) return null;
+    return tangent.normalize();
+}
+
+function sharedRangeOnRoad(source: RoadState, target: RoadState) {
+    if (source.samples.length < 2 || target.samples.length < 2) return null;
+    const sourceIndices = sampledPathIndices(source.samples.length);
+    const targetIndices = sampledPathIndices(target.samples.length);
+    const toleranceSq = SHARED_ROAD_MATCH_TOLERANCE * SHARED_ROAD_MATCH_TOLERANCE;
+    const matched = sourceIndices.map((sourceIndex) => {
+        const sourcePoint = source.samples[sourceIndex];
+        const sourceTangent = pathTangentAt(source.samples, sourceIndex);
+        if (!sourceTangent) return false;
+        return targetIndices.some((targetIndex) => {
+            const targetPoint = target.samples[targetIndex];
+            const dx = sourcePoint.x - targetPoint.x;
+            const dz = sourcePoint.z - targetPoint.z;
+            if (dx * dx + dz * dz > toleranceSq) return false;
+            const targetTangent = pathTangentAt(target.samples, targetIndex);
+            return targetTangent !== null
+                && Math.abs(sourceTangent.dot(targetTangent)) >= SHARED_ROAD_DIRECTION_DOT;
+        });
+    });
+
+    let bestStart = -1;
+    let bestEnd = -1;
+    let runStart = -1;
+    for (let index = 0; index <= matched.length; index += 1) {
+        if (matched[index]) {
+            if (runStart < 0) runStart = index;
+            continue;
+        }
+        if (runStart >= 0 && index - runStart >= SHARED_ROAD_MIN_MATCHED_SAMPLES
+            && index - 1 - runStart > bestEnd - bestStart) {
+            bestStart = runStart;
+            bestEnd = index - 1;
+        }
+        runStart = -1;
+    }
+    if (bestStart < 0 || bestEnd < bestStart) return null;
+
+    const denominator = Math.max(1, source.samples.length - 1);
+    const padding = 0.5 / Math.max(1, sourceIndices.length - 1);
+    return {
+        start: Math.max(0, sourceIndices[bestStart] / denominator - padding),
+        end: Math.min(1, sourceIndices[bestEnd] / denominator + padding),
+    };
 }
 
 function drawTubeProgress(tube: THREE.Mesh, progress: number, tubularSegments: number, radialSegments: number) {
@@ -514,6 +580,41 @@ export function useRoadControls(
         });
     }, []);
 
+    const refreshSharedRoadColorRanges = useCallback(() => {
+        const roads = Array.from(refs.roadsMapRef.current.values());
+        roads.forEach((source) => {
+            const material = source.sharedProgressTube.material as THREE.ShaderMaterial;
+            if (source.info.isBaselineRoute) {
+                updateSharedRouteColorRanges(material, []);
+                return;
+            }
+
+            const sourceColors = new Set(Array.from(source.orders.values(), (lane) => lane.color));
+            const candidates: Array<SharedRouteColorRange & { length: number }> = [];
+            roads.forEach((target) => {
+                if (target === source || target.info.isBaselineRoute) return;
+                const range = sharedRangeOnRoad(source, target);
+                if (!range) return;
+                target.orders.forEach((lane) => {
+                    if (sourceColors.has(lane.color)) return;
+                    if (candidates.some((candidate) => (
+                        candidate.color === lane.color
+                        && Math.abs(candidate.start - range.start) < 0.01
+                        && Math.abs(candidate.end - range.end) < 0.01
+                    ))) return;
+                    candidates.push({
+                        ...range,
+                        color: lane.color,
+                        length: range.end - range.start,
+                    });
+                });
+            });
+
+            candidates.sort((left, right) => right.length - left.length);
+            updateSharedRouteColorRanges(material, candidates.slice(0, 2));
+        });
+    }, [refs.roadsMapRef]);
+
     const updateProgressFromTruck = useCallback((roadId: string) => {
         const trackKey = refs.lineTrackMapRef.current.get(roadId) ?? roadId;
         const road = refs.roadsMapRef.current.get(trackKey);
@@ -735,6 +836,7 @@ export function useRoadControls(
                 ensureVehicleBar(existing, lane, id, info);
                 existing.info = { ...existing.info, ...info };
                 updateOrderVisuals(existing);
+                refreshSharedRoadColorRanges();
                 focusAllRoads();
                 return;
             }
@@ -834,15 +936,17 @@ export function useRoadControls(
             const lane = ensureOrderLane(road, orderId, info);
             ensureVehicleBar(road, lane, id, info);
             updateOrderVisuals(road);
+            refreshSharedRoadColorRanges();
             focusAllRoads();
         },
-        [colorForOrder, ensureOrderLane, ensureVehicleBar, focusAllRoads, refs, updateOrderVisuals],
+        [colorForOrder, ensureOrderLane, ensureVehicleBar, focusAllRoads, refs, refreshSharedRoadColorRanges, updateOrderVisuals],
     );
 
     const removeRoadPath = useCallback((id: string) => {
         const trackKey = refs.lineTrackMapRef.current.get(id);
         if (!trackKey) {
             clearRoad(id);
+            refreshSharedRoadColorRanges();
             return;
         }
 
@@ -868,10 +972,12 @@ export function useRoadControls(
         refs.lineTrackMapRef.current.delete(id);
         if (road.lineIds.size === 0 && !road.info.isBaselineRoute) {
             clearRoad(trackKey);
+            refreshSharedRoadColorRanges();
             return;
         }
         updateOrderVisuals(road);
-    }, [clearRoad, refs, updateOrderVisuals]);
+        refreshSharedRoadColorRanges();
+    }, [clearRoad, refs, refreshSharedRoadColorRanges, updateOrderVisuals]);
 
     const setRoadPath = useCallback(
         (coords: [number, number][]) => {
