@@ -442,7 +442,7 @@ export function useRoadControls(
             road.sharedProgressTube.geometry = new THREE.TubeGeometry(
                 road.displayCurve,
                 road.tubularSegments,
-                Math.max(0.42, baseRadius * 1.35),
+                Math.max(0.52, baseRadius * 1.45),
                 road.radialSegments,
                 false,
             );
@@ -789,7 +789,7 @@ export function useRoadControls(
             sharedProgressTube.position.y = 0.045;
             sharedProgressTube.renderOrder = 9;
             sharedProgressTube.userData = { roadId: pathKey, objectType: '共享订单进度' };
-            sharedProgressTube.visible = !info.isRouteBranch;
+            sharedProgressTube.visible = true;
             sharedProgressTube.onBeforeRender = () => {
                 sharedProgressMaterial.uniforms.uTime.value = performance.now() / 1_000;
             };

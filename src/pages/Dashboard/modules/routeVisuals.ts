@@ -24,7 +24,6 @@ type RouteEndpointInfo = {
     orderName?: string;
 };
 
-const MAX_SHARED_ROUTE_LANES = 12;
 const SHARED_ROUTE_SEGMENT_COUNT = 14;
 
 const PRESETS: Record<'rm1' | 'rm2', RouteVisualPreset> = {
@@ -309,14 +308,10 @@ export function createSharedProgressMaterial() {
     return new THREE.ShaderMaterial({
         uniforms: {
             uTime: { value: 0 },
-            uLaneCount: { value: 0 },
-            uProgress: { value: Array.from({ length: MAX_SHARED_ROUTE_LANES }, () => 0) },
-            uColors: {
-                value: Array.from(
-                    { length: MAX_SHARED_ROUTE_LANES },
-                    () => new THREE.Color(0x00ff88),
-                ),
-            },
+            uProgress: { value: new THREE.Vector3() },
+            uColor0: { value: new THREE.Color(0x00ff88) },
+            uColor1: { value: new THREE.Color(0x00ccff) },
+            uColor2: { value: new THREE.Color(0xffaa00) },
             uSegmentCount: { value: SHARED_ROUTE_SEGMENT_COUNT },
         },
         vertexShader: `
@@ -327,43 +322,42 @@ export function createSharedProgressMaterial() {
             }
         `,
         fragmentShader: `
-            #define MAX_SHARED_ROUTE_LANES ${MAX_SHARED_ROUTE_LANES}
-
             uniform float uTime;
-            uniform int uLaneCount;
-            uniform float uProgress[MAX_SHARED_ROUTE_LANES];
-            uniform vec3 uColors[MAX_SHARED_ROUTE_LANES];
+            uniform vec3 uProgress;
+            uniform vec3 uColor0;
+            uniform vec3 uColor1;
+            uniform vec3 uColor2;
             uniform float uSegmentCount;
             varying vec2 vUv;
 
             void main() {
-                int activeCount = 0;
-                for (int laneIndex = 0; laneIndex < MAX_SHARED_ROUTE_LANES; laneIndex++) {
-                    if (laneIndex < uLaneCount
-                        && uProgress[laneIndex] > 0.0001
-                        && vUv.x <= uProgress[laneIndex]) {
-                        activeCount += 1;
-                    }
-                }
-
-                if (activeCount == 0) discard;
+                bool active0 = uProgress.x > 0.0001 && vUv.x <= uProgress.x;
+                bool active1 = uProgress.y > 0.0001 && vUv.x <= uProgress.y;
+                bool active2 = uProgress.z > 0.0001 && vUv.x <= uProgress.z;
+                float activeCount = (active0 ? 1.0 : 0.0)
+                    + (active1 ? 1.0 : 0.0)
+                    + (active2 ? 1.0 : 0.0);
+                if (activeCount < 0.5) discard;
 
                 float movingSegment = floor(
                     vUv.x * max(1.0, uSegmentCount) - uTime * 1.15
                 );
-                int targetOrdinal = int(mod(
+                float targetOrdinal = mod(
                     movingSegment + 4096.0,
-                    float(activeCount)
-                ));
-                int activeOrdinal = 0;
-                vec3 color = vec3(1.0);
-                for (int laneIndex = 0; laneIndex < MAX_SHARED_ROUTE_LANES; laneIndex++) {
-                    bool active = laneIndex < uLaneCount
-                        && uProgress[laneIndex] > 0.0001
-                        && vUv.x <= uProgress[laneIndex];
-                    if (!active) continue;
-                    if (activeOrdinal == targetOrdinal) color = uColors[laneIndex];
-                    activeOrdinal += 1;
+                    activeCount
+                );
+
+                vec3 color;
+                if (activeCount < 1.5) {
+                    color = active0 ? uColor0 : (active1 ? uColor1 : uColor2);
+                } else if (activeCount < 2.5) {
+                    vec3 first = active0 ? uColor0 : uColor1;
+                    vec3 second = active2 ? uColor2 : uColor1;
+                    color = targetOrdinal < 1.0 ? first : second;
+                } else {
+                    color = targetOrdinal < 1.0
+                        ? uColor0
+                        : (targetOrdinal < 2.0 ? uColor1 : uColor2);
                 }
 
                 float crown = 0.72 + 0.28 * pow(abs(sin(vUv.y * 3.14159265)), 4.0);
@@ -380,16 +374,13 @@ export function updateSharedProgressMaterial(
     material: THREE.ShaderMaterial,
     lanes: Array<{ color: number; progress: number }>,
 ) {
-    const visible = lanes.slice(0, MAX_SHARED_ROUTE_LANES);
-    const progresses = material.uniforms.uProgress.value as number[];
-    const colors = material.uniforms.uColors.value as THREE.Color[];
-
-    material.uniforms.uLaneCount.value = visible.length;
-    for (let index = 0; index < MAX_SHARED_ROUTE_LANES; index += 1) {
-        const lane = visible[index];
-        progresses[index] = lane ? THREE.MathUtils.clamp(lane.progress, 0, 1) : 0;
-        if (lane) colors[index].setHex(lane.color);
-    }
+    const visible = lanes.slice(0, 3);
+    const progresses = [0, 0, 0];
+    visible.forEach((lane, index) => {
+        progresses[index] = THREE.MathUtils.clamp(lane.progress, 0, 1);
+        (material.uniforms[`uColor${index}`].value as THREE.Color).setHex(lane.color);
+    });
+    material.uniforms.uProgress.value.set(progresses[0], progresses[1], progresses[2]);
 }
 
 function createFlowMaterial(repeats: number) {
