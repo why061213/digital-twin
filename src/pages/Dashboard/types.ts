@@ -36,6 +36,7 @@ export type ActiveRoute = RouteOrder & {
     routeDeviationReasonCode?: string;
     routeDeviationConfidence?: number;
     routeAnomalyScore?: number;
+    hasRealPosition?: boolean;
     nextCalibrationAt: number;
     arrivalCheckRequested: boolean;
 };

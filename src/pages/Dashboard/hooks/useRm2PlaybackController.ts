@@ -98,22 +98,12 @@ function diffGroupIds(previous: readonly Rm2GroupDTO[], next: readonly Rm2GroupD
     };
 }
 
-function assignRouteBranchColors(routes: NonNullable<ReturnType<typeof adaptRenderRoute>>[]) {
-    const primaryPathByBusinessLine = new Map<string, string>();
-    return routes.map((route) => {
-        const businessLine = route.orderFamilyId ?? route.orderId ?? route.lineId;
-        const pathKey = route.pathKey ?? route.lineId;
-        const primaryPath = primaryPathByBusinessLine.get(businessLine);
-        if (!primaryPath) primaryPathByBusinessLine.set(businessLine, pathKey);
-        const isRouteBranch = Boolean(primaryPath && primaryPath !== pathKey);
-        return {
-            ...route,
-            isRouteBranch,
-            colorKey: isRouteBranch
-                ? `branch:${route.orderId ?? businessLine}:${businessLine}:${pathKey}`
-                : `main:${route.orderId ?? businessLine}`,
-        };
-    });
+function preserveBackendRouteIdentity(routes: NonNullable<ReturnType<typeof adaptRenderRoute>>[]) {
+    return routes.map((route) => ({
+        ...route,
+        colorKey: route.colorKey?.trim() || route.orderId || route.orderFamilyId || route.lineId,
+        isRouteBranch: route.isRouteBranch === true,
+    }));
 }
 
 export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Options) {
@@ -403,7 +393,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 return;
             }
 
-            const accepted = assignRouteBranchColors(
+            const accepted = preserveBackendRouteIdentity(
                 routes.map(adaptRenderRoute).filter((route): route is NonNullable<typeof route> => route !== null),
             );
             if (accepted.length === 0) {
@@ -438,7 +428,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 const now = performance.now();
                 activeRoutes.forEach((route) => {
                     if (!previousLineIds.has(route.lineId)) syncRoadRoute(route);
-                    renderTruckPosition(route, now);
+                    if (route.hasRealPosition) renderTruckPosition(route, now);
                 });
             }
 

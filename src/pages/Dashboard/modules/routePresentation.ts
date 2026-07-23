@@ -41,6 +41,26 @@ const ROUTE_TONES = [
         surface: 'rgba(68, 170, 255, 0.08)',
         glow: 'rgba(68, 170, 255, 0.18)',
     },
+    {
+        color: '#ff0000',
+        surface: 'rgba(255, 0, 0, 0.08)',
+        glow: 'rgba(255, 0, 0, 0.18)',
+    },
+    {
+        color: '#ffff00',
+        surface: 'rgba(255, 255, 0, 0.08)',
+        glow: 'rgba(255, 255, 0, 0.18)',
+    },
+    {
+        color: '#ff00ff',
+        surface: 'rgba(255, 0, 255, 0.08)',
+        glow: 'rgba(255, 0, 255, 0.18)',
+    },
+    {
+        color: '#00ff00',
+        surface: 'rgba(0, 255, 0, 0.08)',
+        glow: 'rgba(0, 255, 0, 0.18)',
+    },
 ] as const;
 
 export function routeColorKey(route?: RouteOrder) {

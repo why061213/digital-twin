@@ -18,6 +18,9 @@ export type RoadObjectInfo = {
     status?: string;
     speedKmh?: number | null;
     routeLengthKm?: number;
+    routeProgress?: number;
+    vehicleVisible?: boolean;
+    vehicleRole?: 'primary' | 'along';
     orderId?: string;
     orderFamilyId?: string;
     orderName?: string;
@@ -33,6 +36,12 @@ export type RoadObjectInfo = {
     manualMarker?: boolean;
     colorKey?: string;
     isRouteBranch?: boolean;
+    isBaselineRoute?: boolean;
+    isVehicleRoute?: boolean;
+    routeDeviationState?: 'BASELINE' | 'SUSPECTED' | 'ALTERNATIVE' | 'EXPECTED' | 'ANOMALOUS' | 'UNKNOWN';
+    routeDeviationReasonCode?: string;
+    routeDeviationConfidence?: number;
+    routeAnomalyScore?: number;
 };
 
 export type VehicleBarState = {

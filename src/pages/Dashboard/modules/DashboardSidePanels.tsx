@@ -544,7 +544,7 @@ function VehicleTransportDetails({
     onVehicleSelect: (lineId: string) => void;
     onActiveVehicleChange?: (lineId: string | null) => void;
 }) {
-    const { runningRoutes, finishedRoutes, detailRoutes } = useMemo(() => {
+    const { runningRoutes, detailRoutes } = useMemo(() => {
         const running = roadGroup.routes.filter((route) => (
             route.status !== '已完成' && route.status !== 'finished'
         ));
@@ -553,7 +553,6 @@ function VehicleTransportDetails({
         ));
         return {
             runningRoutes: running,
-            finishedRoutes: finished,
             detailRoutes: [...running, ...finished],
         };
     }, [roadGroup.routes]);

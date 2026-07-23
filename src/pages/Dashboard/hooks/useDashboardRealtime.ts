@@ -44,6 +44,8 @@ export type RoadPathMessage = {
     vehicleId?: string;
     colorKey?: string;
     isRouteBranch?: boolean;
+    routeRevision?: number;
+    vehicleRole?: 'primary' | 'along';
 };
 
 export type TruckPositionMessage = {
@@ -61,6 +63,7 @@ export type TruckPositionMessage = {
     vehicleId?: string;
     colorKey?: string;
     isRouteBranch?: boolean;
+    vehicleRole?: 'primary' | 'along';
     plate?: string;
     source?: string;
     stale?: boolean;
@@ -147,6 +150,7 @@ export type RouteOrder = {
     status: string;
     colorKey?: string;
     isRouteBranch?: boolean;
+    vehicleRole?: 'primary' | 'along';
     speedKmh?: number | null;
     driverName?: string;
     address?: string;

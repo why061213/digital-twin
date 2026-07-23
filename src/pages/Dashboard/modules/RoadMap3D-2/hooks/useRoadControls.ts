@@ -112,7 +112,13 @@ function vehicleLocatorColor(laneColor: number, lineId: string) {
 }
 
 function trackKeyFor(id: string, coords: [number, number][], info: RoadObjectInfo) {
-    if (info.pathKey) return info.pathKey;
+    if (info.pathKey) {
+        if (!info.isVehicleRoute) return info.pathKey;
+        const geometryKey = coords
+            .map(([lng, lat]) => `${lng.toFixed(4)},${lat.toFixed(4)}`)
+            .join('|');
+        return `${info.pathKey}::geometry::${geometryKey}`;
+    }
     return coords.map(([lng, lat]) => `${lng.toFixed(4)},${lat.toFixed(4)}`).join('|') || id;
 }
 
@@ -565,10 +571,10 @@ export function useRoadControls(
         lanes.forEach((lane, laneIndex) => {
             lane.laneIndex = laneIndex;
             const vehicles = Array.from(lane.vehicles.values());
-            const leadVehicle = vehicles.reduce<VehicleBarState | null>((lead, vehicle) => {
-                if (!lead || vehicle.progress > lead.progress) return vehicle;
-                return lead;
-            }, null);
+            // 后端 primary 身份优先；缺失时用稳定 lineId 兜底，不能随进度动态换车。
+            const leadVehicle = vehicles.find((vehicle) => vehicle.info.vehicleRole === 'primary')
+                ?? [...vehicles].sort((left, right) => left.lineId.localeCompare(right.lineId))[0]
+                ?? null;
             let followerIndex = 0;
             vehicles.forEach((vehicle, vehicleIndex) => {
                 const material = vehicle.bar.material as THREE.MeshBasicMaterial;
@@ -578,12 +584,8 @@ export function useRoadControls(
                 if (isLead) {
                     material.color.setHex(lane.color);
                 } else {
-                    // 跟随车辆：从统一颜色库中选一个与当前车道颜色不同的颜色
-                    let followerColorIndex = (laneIndex + vehicleIndex) % UNIFIED_COLORS.length;
-                    if (UNIFIED_COLORS[followerColorIndex] === lane.color) {
-                        followerColorIndex = (followerColorIndex + 1) % UNIFIED_COLORS.length;
-                    }
-                    material.color.setHex(UNIFIED_COLORS[followerColorIndex]);
+                    // 跟随车辆只在订单主色的明度/饱和度上做变化，保持同一色相。
+                    material.color.copy(vehicleLocatorColor(lane.color, vehicle.lineId));
                 }
 
                 // 2. 透明度
@@ -855,6 +857,7 @@ export function useRoadControls(
             info,
             upgradeProgress: 0,
         };
+        bar.visible = info.vehicleVisible !== false;
         lane.vehicles.set(lineId, vehicle);
         road.lineIds.add(lineId);
         refs.lineTrackMapRef.current.set(lineId, road.pathKey);
@@ -872,13 +875,8 @@ export function useRoadControls(
 
             const pathKey = trackKeyFor(id, coords, info);
             const orderId = orderKeyFor(id, info);
-            const routeColor = info.routeDeviationState === 'ALTERNATIVE'
-                ? 0xfacc15
-                : info.routeDeviationState === 'EXPECTED'
-                    ? 0xf59e0b
-                    : info.routeDeviationState === 'ANOMALOUS'
-                        ? (info.alarmSeverity === 'critical' ? 0xef4444 : 0xf97316)
-                        : colorForOrder(orderId);
+            // 路线、车辆和面板统一由后端 colorKey 决定颜色；报警级别仅控制警示光效。
+            const routeColor = colorForOrder(orderId);
             const existing = refs.roadsMapRef.current.get(pathKey);
             if (existing) {
                 const lane = ensureOrderLane(existing, orderId, info);
@@ -1080,6 +1078,7 @@ export function useRoadControls(
         const lane = existingLane ?? ensureOrderLane(road, orderKeyFor(lineId, info), info);
         const vehicle = existingLane?.vehicles.get(lineId)
             ?? ensureVehicleBar(road, lane, lineId, info);
+        vehicle.bar.visible = true;
         vehicle.currentCoords = position;
         vehicle.info = { ...vehicle.info, ...info };
         const authoritativeProgress = Number(info.routeProgress);

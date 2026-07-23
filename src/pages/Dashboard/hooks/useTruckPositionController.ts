@@ -73,6 +73,26 @@ function positionDetailsPatch(message: TruckPositionMessage) {
         ...(message.routeLengthKm !== undefined ? { routeLengthKm: message.routeLengthKm } : {}),
         ...(message.travelDurationMs !== undefined ? { fallbackDuration: message.travelDurationMs } : {}),
         ...(message.pathKey !== undefined ? { pathKey: message.pathKey } : {}),
+        ...(message.colorKey !== undefined ? { colorKey: message.colorKey } : {}),
+        ...(message.isRouteBranch !== undefined ? { isRouteBranch: message.isRouteBranch } : {}),
+        ...(message.routeDeviationState !== undefined ? { routeDeviationState: message.routeDeviationState } : {}),
+        ...(message.routeDeviationReasonCode !== undefined ? { routeDeviationReasonCode: message.routeDeviationReasonCode } : {}),
+        ...(message.routeDeviationConfidence !== undefined ? { routeDeviationConfidence: message.routeDeviationConfidence } : {}),
+        ...(message.routeAnomalyScore !== undefined ? { routeAnomalyScore: message.routeAnomalyScore } : {}),
+    };
+}
+
+type PositionStamp = {
+    sequence: number | null;
+    fetchedAt: number | null;
+};
+
+function positionStamp(message: TruckPositionMessage): PositionStamp {
+    const sequence = Number(message.sequence);
+    const fetchedAt = message.fetchedAt ? Date.parse(message.fetchedAt) : Number.NaN;
+    return {
+        sequence: Number.isFinite(sequence) ? sequence : null,
+        fetchedAt: Number.isFinite(fetchedAt) ? fetchedAt : null,
     };
 }
 
@@ -87,6 +107,26 @@ export function useTruckPositionController({
     const routeOrdersRef = useRef<RouteOrder[]>([]);
     const positionRequestsRef = useRef<Set<string>>(new Set());
     const completedRouteIdsRef = useRef<Set<string>>(new Set());
+    const lastPositionStampRef = useRef<Map<string, PositionStamp>>(new Map());
+
+    const acceptPositionSample = useCallback((message: TruckPositionMessage) => {
+        if (!message.position || message.stale === true) return false;
+        const incoming = positionStamp(message);
+        const previous = lastPositionStampRef.current.get(message.lineId);
+        if (previous) {
+            if (incoming.fetchedAt !== null && previous.fetchedAt !== null) {
+                if (incoming.fetchedAt < previous.fetchedAt) return false;
+                if (incoming.fetchedAt === previous.fetchedAt
+                    && incoming.sequence !== null && previous.sequence !== null
+                    && incoming.sequence <= previous.sequence) return false;
+            } else if (incoming.sequence !== null && previous.sequence !== null
+                && incoming.sequence <= previous.sequence) {
+                return false;
+            }
+        }
+        lastPositionStampRef.current.set(message.lineId, incoming);
+        return true;
+    }, []);
 
     useEffect(() => {
         routeOrdersRef.current = routeOrders;
@@ -112,6 +152,13 @@ export function useTruckPositionController({
             online: route.online,
             colorKey: route.colorKey,
             isRouteBranch: route.isRouteBranch,
+            isVehicleRoute: Number.isFinite(Number(route.routeRevision)),
+            vehicleRole: route.vehicleRole,
+            vehicleVisible: route.hasRealPosition === true,
+            routeDeviationState: route.routeDeviationState,
+            routeDeviationReasonCode: route.routeDeviationReasonCode,
+            routeDeviationConfidence: route.routeDeviationConfidence,
+            routeAnomalyScore: route.routeAnomalyScore,
         });
     }, [roadMapRef]);
 
@@ -135,6 +182,12 @@ export function useTruckPositionController({
             online: route.online,
             colorKey: route.colorKey,
             isRouteBranch: route.isRouteBranch,
+            routeProgress: route.pathLength > 0 ? predictedDistance(route, now) / route.pathLength : 0,
+            vehicleVisible: route.hasRealPosition === true,
+            routeDeviationState: route.routeDeviationState,
+            routeDeviationReasonCode: route.routeDeviationReasonCode,
+            routeDeviationConfidence: route.routeDeviationConfidence,
+            routeAnomalyScore: route.routeAnomalyScore,
         });
     }, [roadMapRef]);
 
@@ -168,6 +221,8 @@ export function useTruckPositionController({
                     pathKey: message.pathKey ?? existing.pathKey,
                     colorKey: message.colorKey ?? existing.colorKey,
                     isRouteBranch: message.isRouteBranch ?? existing.isRouteBranch,
+                    vehicleRole: message.vehicleRole ?? existing.vehicleRole,
+                    routeRevision: message.routeRevision ?? existing.routeRevision,
                     plate: message.plate ?? existing.plate,
                     cargo: message.cargo ?? existing.cargo,
                     cargoWeight: message.cargoWeight ?? existing.cargoWeight,
@@ -185,6 +240,7 @@ export function useTruckPositionController({
                     pathSpeed,
                     pathLength: totalPathLength,
                     speedKmh,
+                    hasRealPosition: existing.hasRealPosition,
                     arrivalCheckRequested: false,
                 };
                 activeRoutesRef.current.set(updated.lineId, updated);
@@ -208,6 +264,8 @@ export function useTruckPositionController({
                 pathKey: message.pathKey,
                 colorKey: message.colorKey,
                 isRouteBranch: message.isRouteBranch,
+                vehicleRole: message.vehicleRole,
+                routeRevision: message.routeRevision,
                 from: message.from ?? '起点',
                 to: message.to ?? '目的地',
                 fromCoords: message.coordinates[0],
@@ -226,6 +284,7 @@ export function useTruckPositionController({
                 pathSpeed,
                 pathLength: totalPathLength,
                 speedKmh: cachedPosition?.speedKmh ?? speedKmh,
+                hasRealPosition: Boolean(cachedPosition),
                 arrivalCheckRequested: false,
                 nextCalibrationAt: now,
             };
@@ -242,7 +301,7 @@ export function useTruckPositionController({
             const now = performance.now();
             routes.forEach((route) => {
                 syncRoadRoute(route);
-                renderTruckPosition(route, now);
+                if (route.hasRealPosition) renderTruckPosition(route, now);
             });
         },
         [renderTruckPosition, syncRoadRoute]
@@ -258,9 +317,10 @@ export function useTruckPositionController({
                     completedRouteIdsRef.current.add(route.lineId);
                     return;
                 }
-                if (!message.position) return;
+                if (!message.position || !acceptPositionSample(message)) return;
                 const now = performance.now();
                 applyTruckPositionToRoute(route, message, now);
+                route.hasRealPosition = true;
                 saveTruckPositionToCache({
                     lineId: message.lineId,
                     position: message.position,
@@ -276,7 +336,7 @@ export function useTruckPositionController({
             }
         }));
         return routes.filter((route) => !completedRouteIdsRef.current.has(route.lineId));
-    }, []);
+    }, [acceptPositionSample]);
 
     const hydrateRoutePositions = useCallback((routes: ActiveRoute[], positions: TruckPositionMessage[]) => {
         const routeByLineId = new Map(routes.map((route) => [route.lineId, route]));
@@ -284,13 +344,15 @@ export function useTruckPositionController({
         positions.forEach((message) => {
             const route = routeByLineId.get(message.lineId);
             if (!route) return;
-            Object.assign(route, positionDetailsPatch(message));
             if (message.status === 'finished') {
                 completedRouteIdsRef.current.add(message.lineId);
                 return;
             }
+            if (message.position && !acceptPositionSample(message)) return;
+            Object.assign(route, positionDetailsPatch(message));
             if (!message.position) return;
             applyTruckPositionToRoute(route, message, now);
+            route.hasRealPosition = true;
             saveTruckPositionToCache({
                 lineId: message.lineId,
                 position: message.position,
@@ -300,7 +362,7 @@ export function useTruckPositionController({
             });
         });
         return routes.filter((route) => !completedRouteIdsRef.current.has(route.lineId));
-    }, []);
+    }, [acceptPositionSample]);
 
     const finishRoute = useCallback((lineId: string) => {
         const alreadyFinished = completedRouteIdsRef.current.has(lineId);
@@ -315,15 +377,19 @@ export function useTruckPositionController({
 
     const handleTruckPosition = useCallback(
         (message: TruckPositionMessage, forceCalibration = false) => {
+            // 兼容旧调用签名；正式链对所有通过时序校验的位置包都立即校准。
+            void forceCalibration;
             const route = activeRoutesRef.current.get(message.lineId);
             if (!route) return;
-            const detailPatch = positionDetailsPatch(message);
-            Object.assign(route, detailPatch);
 
             if (message.status === 'finished') {
                 finishRoute(message.lineId);
                 return;
             }
+            if (message.position && !acceptPositionSample(message)) return;
+
+            const detailPatch = positionDetailsPatch(message);
+            Object.assign(route, detailPatch);
             if (!message.position) {
                 if (Object.keys(detailPatch).length > 0) {
                     setRouteOrders((prev) => {
@@ -338,49 +404,30 @@ export function useTruckPositionController({
             }
 
             const now = performance.now();
+            let routeReplaced = false;
             if (message.routeCoordinates && message.routeCoordinates.length >= 2
                 && Number(message.routeRevision) > Number(route.routeRevision ?? 0)) {
                 const correctedCoordinates = message.routeCoordinates;
-                const previousPathKey = route.pathKey;
                 route.routeRevision = message.routeRevision;
                 route.coordinates = correctedCoordinates;
+                route.routeNodes = correctedCoordinates.map((point) => [point[0], point[1]]);
                 route.fromCoords = correctedCoordinates[0];
                 route.toCoords = correctedCoordinates[correctedCoordinates.length - 1];
                 route.pathLength = pathLength(correctedCoordinates);
                 route.routeLengthKm = message.routeLengthKm ?? pathLengthKm(correctedCoordinates);
                 route.fallbackDuration = message.travelDurationMs ?? route.fallbackDuration;
                 route.pathKey = message.pathKey ?? route.pathKey;
-                if (message.pathKey && previousPathKey && message.pathKey !== previousPathKey) {
-                    const businessLine = route.orderFamilyId ?? route.orderId ?? route.lineId;
-                    route.isRouteBranch = true;
-                    route.colorKey = `branch:${route.orderId ?? businessLine}:${businessLine}:${message.pathKey}`;
-                }
-                route.calibratedDistance = message.position
-                    ? projectDistanceOnPath(correctedCoordinates, message.position)
-                    : 0;
-                route.calibratedAt = now;
-                route.pathSpeed = pathSpeedFromKmh(
-                    route.pathLength,
-                    route.routeLengthKm,
-                    route.speedKmh ?? FALLBACK_TRUCK_SPEED_KMH,
-                );
-                roadMapRef.current?.removeRoadPath(route.lineId);
-                syncRoadRoute(route);
-            }
-            if (!forceCalibration && now < route.nextCalibrationAt) {
-                if (Object.keys(detailPatch).length > 0) {
-                    setRouteOrders((prev) => {
-                        const next = prev.map((item) => (
-                            item.lineId === route.lineId ? { ...item, ...detailPatch } : item
-                        ));
-                        routeOrdersRef.current = next;
-                        return next;
-                    });
-                }
-                return;
+                routeReplaced = true;
             }
 
             applyTruckPositionToRoute(route, message, now);
+            route.hasRealPosition = true;
+
+            if (routeReplaced) {
+                // 校准完成后再换线，并在同一调用内恢复权威进度，禁止出现 0% 中间帧。
+                roadMapRef.current?.removeRoadPath(route.lineId);
+                syncRoadRoute(route);
+            }
 
             saveTruckPositionToCache({
                 lineId: message.lineId,
@@ -403,7 +450,7 @@ export function useTruckPositionController({
                 return next;
             });
         },
-        [finishRoute, renderTruckPosition, roadMapRef, syncRoadRoute]
+        [acceptPositionSample, finishRoute, renderTruckPosition, roadMapRef, syncRoadRoute]
     );
 
     const requestTruckPosition = useCallback(
@@ -433,7 +480,7 @@ export function useTruckPositionController({
             roadMapRef.current?.clearRoads();
             activeRoutesRef.current.forEach((route) => {
                 syncRoadRoute(route);
-                renderTruckPosition(route, now);
+                if (route.hasRealPosition) renderTruckPosition(route, now);
             });
         }, 0);
 
@@ -449,8 +496,10 @@ export function useTruckPositionController({
             const now = performance.now();
             const progressUpdates = new Map<string, ReturnType<typeof routeProgressPatch>>();
             activeRoutesRef.current.forEach((route) => {
-                renderTruckPosition(route, now);
-                progressUpdates.set(route.lineId, routeProgressPatch(route, now));
+                if (route.hasRealPosition) {
+                    renderTruckPosition(route, now);
+                    progressUpdates.set(route.lineId, routeProgressPatch(route, now));
+                }
                 const reachedPredictedEnd = route.pathLength > 0 && predictedDistance(route, now) >= route.pathLength - 0.0001;
                 if (reachedPredictedEnd && !route.arrivalCheckRequested) {
                     route.arrivalCheckRequested = true;
