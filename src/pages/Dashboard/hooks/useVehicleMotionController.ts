@@ -27,6 +27,9 @@ type MotionRenderInfo = {
     speedKmh: number | null;
     status: string;
     routeLengthKm?: number;
+    routeProgress?: number;
+    orderId?: string;
+    orderFamilyId?: string;
     stateStr?: string;
     alarmStr?: string;
     alarmSeverity?: 'none' | 'warning' | 'critical';
@@ -44,6 +47,9 @@ type RouteSeed = {
     lineId: string;
     groupId: string;
     coordinates: LonLat[];
+    orderId?: string;
+    orderFamilyId?: string;
+    colorKey?: string;
     routeLengthKm?: number;
     speedKmh?: number | null;
     travelDurationMs?: number;
@@ -118,6 +124,7 @@ export function useVehicleMotionController(options: Options) {
         route.routeDeviationConfidence = message.routeDeviationConfidence ?? route.routeDeviationConfidence;
         route.routeAnomalyScore = message.routeAnomalyScore ?? route.routeAnomalyScore;
         route.online = message.online ?? route.online;
+        route.colorKey = message.colorKey ?? route.colorKey;
         const now = performance.now();
         if (message.routeCoordinates && message.routeCoordinates.length >= 2
             && Number(message.routeRevision) > Number(route.routeRevision ?? 0)) {
@@ -128,9 +135,10 @@ export function useVehicleMotionController(options: Options) {
             route.pathLength = pathLength(corrected);
             route.routeLengthKm = message.routeLengthKm ?? pathLengthKm(corrected);
             route.fallbackDuration = message.travelDurationMs ?? route.fallbackDuration;
-            route.calibratedDistance = message.position
-                ? projectDistanceOnPath(corrected, message.position)
-                : 0;
+            const reportedProgress = Number(message.progress);
+            route.calibratedDistance = Number.isFinite(reportedProgress)
+                ? Math.max(0, Math.min(1, reportedProgress)) * route.pathLength
+                : projectDistanceOnPath(corrected, message.position);
             route.calibratedAt = now;
             route.pathSpeed = route.speedKmh !== null && route.routeLengthKm > 0
                 ? route.speedKmh / 3_600_000 * route.pathLength / route.routeLengthKm
@@ -139,6 +147,9 @@ export function useVehicleMotionController(options: Options) {
                 speedKmh: route.speedKmh,
                 status: route.status,
                 routeLengthKm: route.routeLengthKm,
+                routeProgress: route.pathLength > 0 ? route.calibratedDistance / route.pathLength : 0,
+                orderId: route.orderId,
+                orderFamilyId: route.orderFamilyId,
                 stateStr: route.stateStr,
                 alarmStr: route.alarmStr,
                 alarmSeverity: route.alarmSeverity,
@@ -168,6 +179,25 @@ export function useVehicleMotionController(options: Options) {
             return false;
         }
         applyTruckPositionToRoute(route, message, now);
+        options.mapAdapter.updateVehicle(route.lineId, message.position, {
+            speedKmh: route.speedKmh,
+            status: route.status,
+            routeLengthKm: route.routeLengthKm,
+            routeProgress: route.pathLength > 0 ? route.calibratedDistance / route.pathLength : 0,
+            orderId: route.orderId,
+            orderFamilyId: route.orderFamilyId,
+            stateStr: route.stateStr,
+            alarmStr: route.alarmStr,
+            alarmSeverity: route.alarmSeverity,
+            online: route.online,
+            colorKey: route.colorKey,
+            isRouteBranch: message.isRouteBranch ?? route.isRouteBranch,
+            deviationCoordinates: message.deviationCoordinates,
+            routeDeviationState: route.routeDeviationState,
+            routeDeviationReasonCode: route.routeDeviationReasonCode,
+            routeDeviationConfidence: route.routeDeviationConfidence,
+            routeAnomalyScore: route.routeAnomalyScore,
+        });
         return true;
     }, [options]);
 
@@ -264,6 +294,7 @@ export function useVehicleMotionController(options: Options) {
             const length = pathLength(seed.coordinates);
             next.set(seed.lineId, {
                 lineId: seed.lineId, from: '', to: '', fromCoords: seed.coordinates[0], toCoords: seed.coordinates[seed.coordinates.length - 1],
+                orderId: seed.orderId, orderFamilyId: seed.orderFamilyId, colorKey: seed.colorKey,
                 plate: '', cargo: '', status: seed.status ?? '运输中', startedAt: now,
                 fallbackDuration: seed.travelDurationMs ?? 60_000, coordinates: seed.coordinates,
                 routeNodes: seed.coordinates.map((point) => [point[0], point[1]]),
@@ -314,6 +345,11 @@ export function useVehicleMotionController(options: Options) {
                 options.mapAdapter.updateVehicle(route.lineId, predictedPosition(route, now), {
                     speedKmh: route.speedKmh,
                     status: route.status,
+                    routeLengthKm: route.routeLengthKm,
+                    routeProgress: route.pathLength > 0 ? predictedDistance(route, now) / route.pathLength : 0,
+                    orderId: route.orderId,
+                    orderFamilyId: route.orderFamilyId,
+                    colorKey: route.colorKey,
                     stateStr: route.stateStr,
                     alarmStr: route.alarmStr,
                     alarmSeverity: route.alarmSeverity,

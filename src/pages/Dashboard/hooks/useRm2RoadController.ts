@@ -20,6 +20,9 @@ type MotionRouteSeed = {
     lineId: string;
     groupId: string;
     coordinates: [number, number][];
+    orderId?: string;
+    orderFamilyId?: string;
+    colorKey?: string;
     routeLengthKm?: number;
     speedKmh?: number | null;
     travelDurationMs?: number;
@@ -225,6 +228,9 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             lineId: route.lineId,
             groupId: route.groupId,
             coordinates: route.coordinates,
+            orderId: route.orderId,
+            orderFamilyId: route.businessLineId,
+            colorKey: route.colorKey,
             routeLengthKm: route.routeLengthKm,
             speedKmh: route.speedKmh,
             travelDurationMs: route.travelDurationMs,
@@ -288,6 +294,9 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             speedKmh: number | null;
             status: string;
             routeLengthKm?: number;
+            routeProgress?: number;
+            orderId?: string;
+            orderFamilyId?: string;
             stateStr?: string;
             alarmStr?: string;
             alarmSeverity?: 'none' | 'warning' | 'critical';
@@ -300,9 +309,14 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
             routeDeviationConfidence?: number;
             routeAnomalyScore?: number;
         }) => {
+            const route = activeRoutesRef.current.get(lineId);
             roadMapRef.current?.updateTruckPosition(lineId, position, {
                 speedKmh: info.speedKmh,
                 status: info.status,
+                routeProgress: info.routeProgress,
+                orderId: info.orderId ?? route?.orderId,
+                orderFamilyId: info.orderFamilyId ?? route?.businessLineId,
+                colorKey: info.colorKey ?? route?.colorKey,
                 stateStr: info.stateStr,
                 alarmStr: info.alarmStr,
                 alarmSeverity: info.alarmSeverity,
@@ -322,6 +336,9 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
                 speedKmh: number | null;
                 status: string;
                 routeLengthKm?: number;
+                routeProgress?: number;
+                orderId?: string;
+                orderFamilyId?: string;
                 stateStr?: string;
                 alarmStr?: string;
                 alarmSeverity?: 'none' | 'warning' | 'critical';
@@ -346,12 +363,14 @@ export function useRm2RoadController({ roadMapRef, view, sceneReady }: Options) 
                 status: info.status,
                 speedKmh: info.speedKmh,
                 routeLengthKm: info.routeLengthKm ?? route.routeLengthKm,
+                routeProgress: info.routeProgress,
                 orderId: route.orderId,
+                orderFamilyId: info.orderFamilyId ?? route.businessLineId,
                 stateStr: info.stateStr,
                 alarmStr: info.alarmStr,
                 alarmSeverity: info.alarmSeverity,
                 online: info.online,
-                colorKey: info.colorKey ?? `branch:${lineId}`,
+                colorKey: info.colorKey ?? route.colorKey ?? route.orderId ?? route.businessLineId,
                 isRouteBranch: info.isRouteBranch ?? false,
                 isVehicleRoute: true,
                 deviationCoordinates: info.deviationCoordinates,

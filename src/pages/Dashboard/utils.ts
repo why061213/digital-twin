@@ -322,7 +322,10 @@ export function routeProgressPatch(route: ActiveRoute, now: number) {
 export function applyTruckPositionToRoute(route: ActiveRoute, message: TruckPositionMessage, now: number) {
     if (!message.position) return;
     const elapsedSinceLastCalibration = now - route.calibratedAt;
-    const nextDistance = projectDistanceOnPath(route.coordinates, message.position, route.calibratedDistance);
+    const reportedProgress = Number(message.progress);
+    const nextDistance = Number.isFinite(reportedProgress)
+        ? clamp01(reportedProgress) * route.pathLength
+        : projectDistanceOnPath(route.coordinates, message.position, route.calibratedDistance);
     const measuredPathSpeed = elapsedSinceLastCalibration >= MIN_MEASURED_SPEED_INTERVAL_MS
         ? Math.max(0, (nextDistance - route.calibratedDistance) / elapsedSinceLastCalibration)
         : null;

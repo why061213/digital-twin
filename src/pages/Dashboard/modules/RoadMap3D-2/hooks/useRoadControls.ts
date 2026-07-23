@@ -1075,11 +1075,17 @@ export function useRoadControls(
 
         const road = refs.roadsMapRef.current.get(trackKey);
         if (!road) return;
-        const lane = ensureOrderLane(road, orderKeyFor(lineId, info), info);
-        const vehicle = ensureVehicleBar(road, lane, lineId, info);
+        const existingLane = Array.from(road.orders.values())
+            .find((candidate) => candidate.vehicles.has(lineId));
+        const lane = existingLane ?? ensureOrderLane(road, orderKeyFor(lineId, info), info);
+        const vehicle = existingLane?.vehicles.get(lineId)
+            ?? ensureVehicleBar(road, lane, lineId, info);
         vehicle.currentCoords = position;
         vehicle.info = { ...vehicle.info, ...info };
-        vehicle.progress = progressOnRoad(road, worldPos);
+        const authoritativeProgress = Number(info.routeProgress);
+        vehicle.progress = Number.isFinite(authoritativeProgress)
+            ? clamp01(authoritativeProgress)
+            : progressOnRoad(road, worldPos);
         road.currentCoords = position;
         road.info = { ...road.info, ...info };
         updateOrderVisuals(road);
