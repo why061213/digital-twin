@@ -37,8 +37,8 @@ import { syncVehicleAlertRipple } from '../../vehicleAlertRipples';
 // ];
 const ROUTE_COLORS = [0x3b82f6, 0xf59e0b, 0x22c55e, 0xa78bfa, 0xfb7185, 0x2dd4bf]; // 蓝/黄/绿/紫/粉/青
 const VEHICLE_COLOR = 0xf8fafc;
-// 试验模式：精确共线时蛇必然与自己的路线占用同一批像素，关闭蛇层避免形成斑马纹。
-const SHOW_ROUTE_SNAKES = false;
+// 恢复 64ab698 的顶层蛇效果；蛇的实际沿线速度在 routeVisuals 中统一。
+const SHOW_ROUTE_SNAKES = true;
 
 const TRUCK_MODEL_URL = '/models/rm2-truck.glb';
 const TRUCK_MODEL_SCALE = 1;

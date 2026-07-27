@@ -35,6 +35,8 @@ export type RouteStopVisualInfo = {
 };
 
 const MAX_SHARED_ROUTE_RANGES = 24;
+// Shader 相位为 x * frequency - time * speed，因此真实沿线速度是 speed / frequency。
+const SHARED_SNAKE_ROUTE_SPEED = 0.014;
 
 export type SharedRouteColorRange = {
     start: number;
@@ -464,7 +466,6 @@ export function configureSharedProgressMaterial(
     }
     const positiveHash = hash >>> 0;
     const frequency = primes[positiveHash % primes.length];
-    const speedPrime = primes[Math.floor(positiveHash / primes.length) % primes.length];
     const lengthPrime = primes[Math.floor(positiveHash / (primes.length * primes.length)) % primes.length];
     const base = new THREE.Color(baseColor);
     const snake = base.clone();
@@ -474,7 +475,8 @@ export function configureSharedProgressMaterial(
     (material.uniforms.uColor0.value as THREE.Color).copy(base);
     (material.uniforms.uSnakeColor.value as THREE.Color).copy(snake);
     material.uniforms.uSnakeFrequency.value = frequency;
-    material.uniforms.uSnakeSpeed.value = speedPrime / 83;
+    // 不同质数频率仍保持差异，但所有蛇沿路线前进的速度完全一致，避免共线时相互追赶。
+    material.uniforms.uSnakeSpeed.value = frequency * SHARED_SNAKE_ROUTE_SPEED;
     material.uniforms.uSnakeLength.value = THREE.MathUtils.clamp(lengthPrime / 67, 0.18, 0.46);
 }
 

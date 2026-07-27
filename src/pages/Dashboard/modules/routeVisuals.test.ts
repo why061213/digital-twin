@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createSharedProgressMaterial } from './routeVisuals';
+import { configureSharedProgressMaterial, createSharedProgressMaterial } from './routeVisuals';
 
 describe('route snake overlay material', () => {
     it('uses a dedicated top overlay mode without depth occlusion', () => {
@@ -19,5 +19,20 @@ describe('route snake overlay material', () => {
         expect(material.depthTest).toBe(true);
 
         material.dispose();
+    });
+
+    it('keeps actual route speed identical across different prime frequencies', () => {
+        const first = createSharedProgressMaterial('snake');
+        const second = createSharedProgressMaterial('snake');
+        configureSharedProgressMaterial(first, 0x3b82f6, 'route-blue-a');
+        configureSharedProgressMaterial(second, 0xf59e0b, 'route-orange-b');
+
+        expect(first.uniforms.uSnakeFrequency.value).not.toBe(second.uniforms.uSnakeFrequency.value);
+        const firstRouteSpeed = first.uniforms.uSnakeSpeed.value / first.uniforms.uSnakeFrequency.value;
+        const secondRouteSpeed = second.uniforms.uSnakeSpeed.value / second.uniforms.uSnakeFrequency.value;
+        expect(firstRouteSpeed).toBeCloseTo(secondRouteSpeed, 10);
+
+        first.dispose();
+        second.dispose();
     });
 });
