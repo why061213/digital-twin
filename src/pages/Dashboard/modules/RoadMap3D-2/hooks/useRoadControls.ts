@@ -33,20 +33,11 @@ import { syncVehicleAlertRipple } from '../../vehicleAlertRipples';
 //     0xa7f3d0,
 //     0xfed7aa,
 // ];
-const UNIFIED_COLORS = [
-    0x00ff88,   // 亮绿色
-    0x00ccff,   // 亮青色
-    0xffaa00,   // 亮橙色
-    0xff44aa,   // 亮粉红
-    0xaaff00,   // 亮黄绿
-    0x00ffff,   // 纯青色
-    0xff8800,   // 深橙色
-    0x44aaff,   // 亮蓝色
-    0xff0000,   // 纯红色
-    0xffff00,   // 纯黄色
-    0xff00ff,   // 品红色
-    0x00ff00,   // 纯绿色
-];
+const ROUTE_NORMAL_COLOR = 0x38bdf8;
+const ROUTE_DEVIATION_COLOR = 0xf59e0b;
+const ROUTE_SHARED_COLOR = 0xa855f7;
+const ROUTE_DEVIATION_SHARED_COLOR = 0xf43f5e;
+const VEHICLE_COLOR = 0xf8fafc;
 
 const TRUCK_MODEL_URL = '/models/rm2-truck.glb';
 const TRUCK_MODEL_SCALE = 1;
@@ -91,30 +82,9 @@ function cloneTruckTemplate(template: THREE.Object3D) {
     return clone;
 }
 
-function vehicleLocatorColor(laneColor: number, lineId: string) {
-    const color = new THREE.Color(laneColor);
-    const hsl = { h: 0, s: 0, l: 0 };
-    color.getHSL(hsl);
-    const variant = Array.from(lineId).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 5;
-    const lightnessOffset = [-0.08, -0.04, 0, 0.05, 0.1][variant];
-    color.setHSL(
-        hsl.h,
-        THREE.MathUtils.clamp(hsl.s * 0.92 + 0.08, 0.58, 1),
-        THREE.MathUtils.clamp(hsl.l + lightnessOffset, 0.42, 0.72),
-    );
-    return color;
-}
-
 function trackKeyFor(id: string, coords: [number, number][], info: RoadObjectInfo) {
-    if (info.visualKey) return `visual:${info.visualKey}`;
-    if (info.pathKey) {
-        if (!info.isVehicleRoute) return info.pathKey;
-        const geometryKey = coords
-            .map(([lng, lat]) => `${lng.toFixed(4)},${lat.toFixed(4)}`)
-            .join('|');
-        return `${info.pathKey}::geometry::${geometryKey}`;
-    }
-    return coords.map(([lng, lat]) => `${lng.toFixed(4)},${lat.toFixed(4)}`).join('|') || id;
+    if (info.isBaselineRoute) return `baseline:${info.pathKey ?? geometryKeyFor(coords)}`;
+    return `route:${id}`;
 }
 
 function geometryKeyFor(coords: [number, number][]) {
@@ -255,25 +225,10 @@ function setVehicleBarTransform(
 export function useRoadControls(
     refs: ReturnType<typeof useRoadMapRefs>,
 ) {
-    const orderColorByIdRef = useRef<Map<string, number>>(new Map());
-    const nextOrderColorIndexRef = useRef(0);
     const highlightedLineIdRef = useRef<string | null>(null);
     const highlightGenerationRef = useRef(0);
     const cameraTruckScaleRef = useRef(1);
     const sharedRangeRefreshFrameRef = useRef<number | null>(null);
-
-    const colorForOrder = useCallback((orderId: string) => {
-        const existing = orderColorByIdRef.current.get(orderId);
-        if (existing !== undefined) return existing;
-
-        const branch = orderId.startsWith('branch:');
-        const color = branch
-            ? UNIFIED_COLORS[3 + (Array.from(orderId).reduce((sum, char) => sum + char.charCodeAt(0), 0) % (UNIFIED_COLORS.length - 3))]
-            : UNIFIED_COLORS[nextOrderColorIndexRef.current % 3];
-        if (!branch) nextOrderColorIndexRef.current += 1;
-        orderColorByIdRef.current.set(orderId, color);
-        return color;
-    }, []);
 
     const easeInOutCubic = useCallback((value: number) => (
         value < 0.5
@@ -350,8 +305,7 @@ export function useRoadControls(
         const model = cloneTruckTemplate(template);
         model.scale.setScalar(TRUCK_MODEL_SCALE);
         model.position.y = TRUCK_MODEL_Y_OFFSET;
-        const laneColor = colorForOrder(vehicle.orderId);
-        const locatorColor = vehicleLocatorColor(laneColor, vehicle.lineId);
+        const locatorColor = new THREE.Color(VEHICLE_COLOR);
 
         const locator = new THREE.Mesh(
             new THREE.RingGeometry(4.2, 4.8, 64),
@@ -373,7 +327,7 @@ export function useRoadControls(
         vehicle.bar.add(visual);
         vehicle.truckVisual = visual;
         return visual;
-    }, [colorForOrder]);
+    }, []);
 
     const ensureVehicleTruck = useCallback(async (vehicle: VehicleBarState) => {
         try {
@@ -486,10 +440,10 @@ export function useRoadControls(
 
                 // 1. 选择颜色
                 if (isLead) {
-                    material.color.setHex(lane.color);
+                    material.color.setHex(VEHICLE_COLOR);
                 } else {
                     // 跟随车辆只在订单主色的明度/饱和度上做变化，保持同一色相。
-                    material.color.copy(vehicleLocatorColor(lane.color, vehicle.lineId));
+                    material.color.setHex(VEHICLE_COLOR);
                 }
 
                 // 2. 透明度
@@ -525,8 +479,6 @@ export function useRoadControls(
 
     const refreshSharedRoadColorRanges = useCallback(() => {
         const roads = Array.from(refs.roadsMapRef.current.values());
-        const roadByLineId = new Map<string, RoadState>();
-        roads.forEach((road) => road.lineIds.forEach((lineId) => roadByLineId.set(lineId, road)));
         roads.forEach((source) => {
             const material = source.sharedProgressTube.material as THREE.ShaderMaterial;
             const analysis = source.info.routeAnalysis;
@@ -534,19 +486,18 @@ export function useRoadControls(
                 updateSharedRouteColorRanges(material, []);
                 return;
             }
-            const ranges = analysis.parts.flatMap((part) => part.sharedWith.flatMap((participant) => {
-                const target = roadByLineId.get(participant.lineId);
-                if (!target || target === source) return [];
-                const lane = Array.from(target.orders.values()).find((candidate) => (
-                    candidate.vehicles.has(participant.lineId)
-                )) ?? target.orders.values().next().value;
-                if (!lane) return [];
+            const ranges = analysis.parts.flatMap((part) => {
+                const isShared = part.sharedWith.length > 0;
+                const isDeviation = part.routeRole === 'DEVIATION';
+                if (!isShared && !isDeviation) return [];
                 return [{
                     start: part.fromMeasureM / analysis.totalLengthM,
                     end: part.toMeasureM / analysis.totalLengthM,
-                    color: lane.color,
+                    color: isShared
+                        ? isDeviation ? ROUTE_DEVIATION_SHARED_COLOR : ROUTE_SHARED_COLOR
+                        : ROUTE_DEVIATION_COLOR,
                 }];
-            }));
+            });
             updateSharedRouteColorRanges(material, ranges);
         });
     }, [refs.roadsMapRef]);
@@ -663,8 +614,6 @@ export function useRoadControls(
         refs.roadsMapRef.current.clear();
         refs.lineTrackMapRef.current.clear();
         refs.selectedRoadIdRef.current = null;
-        orderColorByIdRef.current.clear();
-        nextOrderColorIndexRef.current = 0;
     }, [clearRoad, refs]);
 
     const setRoadsOpacity = useCallback((opacity: number) => {
@@ -692,7 +641,7 @@ export function useRoadControls(
         if (lane) return lane;
 
         const laneIndex = road.orders.size;
-        const color = colorForOrder(orderId);
+        const color = ROUTE_NORMAL_COLOR;
         const progressGeo = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, 0.17, road.radialSegments, false);
         progressGeo.setDrawRange(0, 0);
         const progressTube = new THREE.Mesh(progressGeo, new THREE.MeshBasicMaterial({
@@ -707,9 +656,9 @@ export function useRoadControls(
         progressTube.renderOrder = 9 + laneIndex;
         progressTube.userData = { roadId: road.pathKey, objectType: '订单进度' };
         progressTube.visible = false;
-        const endpointLayer = info.isRouteBranch
+        const endpointLayer = info.showRouteEndpoints === false
             ? new THREE.Group()
-            : createRouteEndpointLayer(road.samples, 'rm2', info, color, laneIndex);
+            : createRouteEndpointLayer(road.samples, 'rm2', info, color, info.routeIndex ?? laneIndex);
         road.group.add(endpointLayer);
 
         lane = {
@@ -723,7 +672,7 @@ export function useRoadControls(
         };
         road.orders.set(orderId, lane);
         return lane;
-    }, [colorForOrder]);
+    }, []);
 
     const ensureVehicleBar = useCallback((road: RoadState, lane: OrderLaneState, lineId: string, info: RoadObjectInfo) => {
         let vehicle = lane.vehicles.get(lineId);
@@ -772,8 +721,6 @@ export function useRoadControls(
 
             const pathKey = trackKeyFor(id, coords, info);
             const orderId = orderKeyFor(id, info);
-            // 路线、车辆和面板统一由后端 colorKey 决定颜色；报警级别仅控制警示光效。
-            const routeColor = colorForOrder(orderId);
             const existing = refs.roadsMapRef.current.get(pathKey);
             if (existing) {
                 const nextGeometryKey = geometryKeyFor(coords);
@@ -785,9 +732,7 @@ export function useRoadControls(
                         const pathCurve = makePathCurve(points);
                         const tubularSegments = Math.max(PATH_SAMPLE_COUNT, points.length * 32);
                         const samples = pathCurve.getSpacedPoints(tubularSegments);
-                        const displayPoints = (info.isRouteBranch && (info.deviationCoordinates?.length ?? 0) >= 2
-                            ? info.deviationCoordinates!
-                            : coords)
+                        const displayPoints = coords
                             .map((coord) => mapPosition(coord, ROAD_LIFT))
                             .filter((point): point is THREE.Vector3 => Boolean(point));
                         const displayCurve = makePathCurve(displayPoints.length >= 2 ? displayPoints : points);
@@ -816,9 +761,9 @@ export function useRoadControls(
                             );
                             existing.group.remove(lane.endpointLayer);
                             disposeObject3D(lane.endpointLayer);
-                            lane.endpointLayer = info.isRouteBranch
+                            lane.endpointLayer = info.showRouteEndpoints === false
                                 ? new THREE.Group()
-                                : createRouteEndpointLayer(samples, 'rm2', info, lane.color, lane.laneIndex);
+                                : createRouteEndpointLayer(samples, 'rm2', info, ROUTE_NORMAL_COLOR, info.routeIndex ?? lane.laneIndex);
                             existing.group.add(lane.endpointLayer);
                         });
                         const oldVisualLayers = existing.group.children.find(
@@ -832,6 +777,7 @@ export function useRoadControls(
                             displayCurve, tubularSegments, existing.radialSegments, displaySamples, 'rm2', info,
                         );
                         visualLayers.userData.routeVisualLayers = true;
+                        visualLayers.visible = !info.isBaselineRoute;
                         existing.group.add(visualLayers);
                         existing.pathCurve = pathCurve;
                         existing.displayCurve = displayCurve;
@@ -861,9 +807,7 @@ export function useRoadControls(
             const tubularSegments = Math.max(PATH_SAMPLE_COUNT, points.length * 32);
             const radialSegments = 6;
             const samples = pathCurve.getSpacedPoints(tubularSegments);
-            const displayPoints = (info.isRouteBranch && (info.deviationCoordinates?.length ?? 0) >= 2
-                ? info.deviationCoordinates!
-                : coords)
+            const displayPoints = coords
                 .map((coord) => mapPosition(coord, ROAD_LIFT))
                 .filter((point): point is THREE.Vector3 => Boolean(point));
             const displayCurve = makePathCurve(displayPoints.length >= 2 ? displayPoints : points);
@@ -876,14 +820,14 @@ export function useRoadControls(
             const grayTube = new THREE.Mesh(
                 new THREE.TubeGeometry(displayCurve, tubularSegments, 0.18, radialSegments, false),
                 new THREE.MeshBasicMaterial({
-                    color: info.isRouteBranch || info.isBaselineRoute || info.isVehicleRoute ? routeColor : 0x6b7280,
+                    color: info.isBaselineRoute ? 0x64748b : 0x0f172a,
                     transparent: true,
                     opacity: info.isRouteBranch ? 0.96 : info.isBaselineRoute || info.isVehicleRoute ? 0.42 : 0.62,
                     depthWrite: false,
                 })
             );
             grayTube.renderOrder = 2;
-            grayTube.userData = { roadId: pathKey, objectType: '共享路线' };
+            grayTube.userData = { roadId: pathKey, objectType: info.isBaselineRoute ? '计划基线' : '路线结构' };
 
             const selectionTube = new THREE.Mesh(new THREE.TubeGeometry(displayCurve, tubularSegments, 0.38, radialSegments, false), new THREE.MeshBasicMaterial({
                 color: 0x38bdf8,
@@ -892,7 +836,7 @@ export function useRoadControls(
                 depthWrite: false,
             }));
             selectionTube.renderOrder = 12;
-            selectionTube.userData = { roadId: pathKey, objectType: '共享路线' };
+            selectionTube.userData = { roadId: pathKey, objectType: info.isBaselineRoute ? '计划基线' : '路线结构' };
 
             const sharedProgressMaterial = createSharedProgressMaterial();
             const sharedProgressTube = new THREE.Mesh(
@@ -901,12 +845,8 @@ export function useRoadControls(
             );
             sharedProgressTube.position.y = 0.045;
             sharedProgressTube.renderOrder = 9;
-            sharedProgressTube.userData = { roadId: pathKey, objectType: '共享订单进度' };
-            sharedProgressTube.visible = true;
-            sharedProgressTube.onBeforeRender = () => {
-                sharedProgressMaterial.uniforms.uTime.value = performance.now() / 1_000;
-            };
-
+            sharedProgressTube.userData = { roadId: pathKey, objectType: '路线语义' };
+            sharedProgressTube.visible = !info.isBaselineRoute;
             const labelAnchor = samples[Math.floor(samples.length * 0.58)]?.clone() ?? samples[0].clone();
             labelAnchor.x += 1.25;
             labelAnchor.y = TRUCK_LIFT + 3.25;
@@ -916,6 +856,7 @@ export function useRoadControls(
                 displayCurve, tubularSegments, radialSegments, displaySamples, 'rm2', info,
             );
             visualLayers.userData.routeVisualLayers = true;
+            visualLayers.visible = !info.isBaselineRoute;
             const group = new THREE.Group();
             group.add(
                 visualLayers,
@@ -955,7 +896,7 @@ export function useRoadControls(
             scheduleSharedRoadColorRangesRefresh();
             focusAllRoads();
         },
-        [colorForOrder, ensureOrderLane, ensureVehicleBar, focusAllRoads, refs, scheduleSharedRoadColorRangesRefresh, updateOrderVisuals],
+        [ensureOrderLane, ensureVehicleBar, focusAllRoads, refs, scheduleSharedRoadColorRangesRefresh, updateOrderVisuals],
     );
 
     const removeRoadPath = useCallback((id: string) => {

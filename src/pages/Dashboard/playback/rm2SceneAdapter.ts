@@ -33,7 +33,7 @@ function nextFrame() {
     return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
-function routeInfo(route: RenderRouteDTO): RoadObjectInfo {
+function routeInfo(route: RenderRouteDTO, routeIndex: number): RoadObjectInfo {
     const hasVehicleRoute = typeof route.routeRevision === 'number'
         && Number.isFinite(route.routeRevision);
     return {
@@ -52,6 +52,8 @@ function routeInfo(route: RenderRouteDTO): RoadObjectInfo {
         isVehicleRoute: hasVehicleRoute,
         deviationCoordinates: route.deviationCoordinates,
         routeAnalysis: route.analysis,
+        routeIndex,
+        showRouteEndpoints: true,
         tripId: route.meta?.tripId,
         visualKey: route.meta?.visualKey,
         currentLegId: route.meta?.currentLegId,
@@ -86,7 +88,7 @@ export function createRm2SceneAdapter(
     let transitionGeneration = 0;
     let currentOpacity = 1;
     let renderedGroupId: string | null = null;
-    let renderedByVisualKey = new Map<string, Rm2PreparedRoute>();
+    let renderedByLineId = new Map<string, Rm2PreparedRoute>();
 
     const stopFade = () => {
         if (fadeFrame) window.cancelAnimationFrame(fadeFrame);
@@ -142,7 +144,7 @@ export function createRm2SceneAdapter(
             const preparedRoutes: Rm2PreparedRoute[] = [];
             const seenLineIds = new Set<string>();
 
-            routes.forEach((rawRoute) => {
+            routes.forEach((rawRoute, routeIndex) => {
                 if (!adaptRenderRoute(rawRoute)
                     || rawRoute.groupId !== group.groupId
                     || seenLineIds.has(rawRoute.lineId)) {
@@ -161,7 +163,7 @@ export function createRm2SceneAdapter(
                     baselineCoordinates: rawRoute.baselineCoordinates,
                     baselinePathKey: rawRoute.baselinePathKey,
                     initialPosition: rawRoute.coordinates[0],
-                    info: routeInfo(rawRoute),
+                    info: routeInfo(rawRoute, routeIndex),
                     visualKey: rawRoute.meta?.visualKey ?? rawRoute.lineId,
                 });
             });
@@ -185,19 +187,15 @@ export function createRm2SceneAdapter(
             const generation = ++transitionGeneration;
 
             if (renderedGroupId === prepared.groupId) {
-                const nextByVisualKey = new Map(prepared.routes.map((route) => [route.visualKey, route]));
-                renderedByVisualKey.forEach((oldRoute, visualKey) => {
-                    if (!nextByVisualKey.has(visualKey)) roadMap.removeRoadPath(oldRoute.lineId);
+                const nextByLineId = new Map(prepared.routes.map((route) => [route.lineId, route]));
+                renderedByLineId.forEach((oldRoute, lineId) => {
+                    if (!nextByLineId.has(lineId)) roadMap.removeRoadPath(oldRoute.lineId);
                 });
                 prepared.routes.forEach((route) => {
-                    const oldRoute = renderedByVisualKey.get(route.visualKey);
-                    if (oldRoute && oldRoute.lineId !== route.lineId) {
-                        roadMap.removeRoadPath(oldRoute.lineId);
-                    }
                     roadMap.addRoadPath(route.lineId, route.coordinates, route.info);
                     roadMap.updateTruckPosition(route.lineId, route.initialPosition, route.info);
                 });
-                renderedByVisualKey = nextByVisualKey;
+                renderedByLineId = nextByLineId;
                 await beforeReveal?.();
                 return;
             }
@@ -221,13 +219,14 @@ export function createRm2SceneAdapter(
                     isBaselineRoute: true,
                     isVehicleRoute: false,
                     isRouteBranch: false,
+                    showRouteEndpoints: false,
                     deviationCoordinates: undefined,
                 });
                 // 只保留基准线图层，不留下虚拟车辆。
                 roadMap.removeRoadPath(referenceId);
             });
             renderedGroupId = prepared.groupId;
-            renderedByVisualKey = new Map(prepared.routes.map((route) => [route.visualKey, route]));
+            renderedByLineId = new Map(prepared.routes.map((route) => [route.lineId, route]));
 
             prepared.routes.forEach((route) => {
                 if (generation !== transitionGeneration) return;
@@ -258,7 +257,7 @@ export function createRm2SceneAdapter(
             stopFade();
             currentOpacity = 1;
             renderedGroupId = null;
-            renderedByVisualKey.clear();
+            renderedByLineId.clear();
             roadMapRef.current?.clearRoads();
         },
     };

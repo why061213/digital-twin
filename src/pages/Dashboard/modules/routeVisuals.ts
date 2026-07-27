@@ -22,10 +22,10 @@ type RouteEndpointInfo = {
     plate?: string;
     orderId?: string;
     orderName?: string;
+    routeIndex?: number;
 };
 
-const SHARED_ROUTE_SEGMENT_COUNT = 14;
-const MAX_SHARED_ROUTE_RANGES = 8;
+const MAX_SHARED_ROUTE_RANGES = 24;
 
 export type SharedRouteColorRange = {
     start: number;
@@ -226,9 +226,10 @@ function createEndpointLabel(
     color: string,
     mode: 'rm1' | 'rm2',
     laneIndex: number,
+    routeName?: string,
 ) {
     const canvas = document.createElement('canvas');
-    const label = `${prefix} · ${fullEndpoint(value)}`;
+    const label = `${routeName ? `${routeName} · ` : ''}${prefix} · ${fullEndpoint(value)}`;
     const fontWeight = prefix === '终点' ? 600 : 500;
     const font = `${fontWeight} 22px "Microsoft YaHei", sans-serif`;
     const measuringContext = canvas.getContext('2d');
@@ -296,16 +297,18 @@ export function createRouteEndpointLayer(
 ) {
     const preset = PRESETS[mode];
     const layer = new THREE.Group();
-    const markerScale = preset.markerScale * (1 + laneIndex * 0.18);
-    const startPoint = endpointMarkerPoint(samples, true, laneIndex, markerScale);
-    const endPoint = endpointMarkerPoint(samples, false, laneIndex, markerScale);
-    const start = createEndpointMarker(startPoint, markerScale, color, 10 + laneIndex, mode);
-    const end = createEndpointMarker(endPoint, markerScale, 0xef4444, 10 + laneIndex, mode);
+    const routeIndex = info.routeIndex ?? laneIndex;
+    const markerScale = preset.markerScale * (1 + Math.min(routeIndex, 4) * 0.1);
+    const startPoint = endpointMarkerPoint(samples, true, routeIndex, markerScale);
+    const endPoint = endpointMarkerPoint(samples, false, routeIndex, markerScale);
+    const start = createEndpointMarker(startPoint, markerScale, color, 10 + routeIndex, mode);
+    const end = createEndpointMarker(endPoint, markerScale, 0xef4444, 10 + routeIndex, mode);
+    const routeName = `路线${routeIndex + 1}${info.plate ? ` · ${info.plate}` : ''}`;
     const startLabel = createEndpointLabel(
-        samples[0], '起点', info.from, colorText(color), mode, laneIndex,
+        samples[0], '起点', info.from, colorText(color), mode, routeIndex, routeName,
     );
     const endLabel = createEndpointLabel(
-        samples[samples.length - 1], '终点', info.to, colorText(color), mode, laneIndex,
+        samples[samples.length - 1], '终点', info.to, colorText(color), mode, routeIndex, routeName,
     );
     layer.add(start, end, startLabel, endLabel);
     return layer;
@@ -314,15 +317,10 @@ export function createRouteEndpointLayer(
 export function createSharedProgressMaterial() {
     return new THREE.ShaderMaterial({
         uniforms: {
-            uTime: { value: 0 },
-            uProgress: { value: new THREE.Vector3() },
-            uColor0: { value: new THREE.Color(0x00ff88) },
-            uColor1: { value: new THREE.Color(0x00ccff) },
-            uColor2: { value: new THREE.Color(0xffaa00) },
+            uColor0: { value: new THREE.Color(0x38bdf8) },
             uSharedRanges: { value: Array.from({ length: MAX_SHARED_ROUTE_RANGES }, () => new THREE.Vector2(-1, -1)) },
             uSharedColors: { value: Array.from({ length: MAX_SHARED_ROUTE_RANGES }, () => new THREE.Color(0xffffff)) },
             uSharedRangeCount: { value: 0 },
-            uSegmentCount: { value: SHARED_ROUTE_SEGMENT_COUNT },
         },
         vertexShader: `
             varying vec2 vUv;
@@ -332,67 +330,23 @@ export function createSharedProgressMaterial() {
             }
         `,
         fragmentShader: `
-            uniform float uTime;
-            uniform vec3 uProgress;
             uniform vec3 uColor0;
-            uniform vec3 uColor1;
-            uniform vec3 uColor2;
             uniform vec2 uSharedRanges[${MAX_SHARED_ROUTE_RANGES}];
             uniform vec3 uSharedColors[${MAX_SHARED_ROUTE_RANGES}];
             uniform int uSharedRangeCount;
-            uniform float uSegmentCount;
             varying vec2 vUv;
 
             void main() {
-                bool active0 = uProgress.x > 0.0001 && vUv.x <= uProgress.x;
-                bool active1 = uProgress.y > 0.0001 && vUv.x <= uProgress.y;
-                bool active2 = uProgress.z > 0.0001 && vUv.x <= uProgress.z;
-                bool ownRouteActive = active0 || active1 || active2;
-                float activeCount = (active0 ? 1.0 : 0.0)
-                    + (active1 ? 1.0 : 0.0)
-                    + (active2 ? 1.0 : 0.0);
+                vec3 color = uColor0;
                 for (int i = 0; i < ${MAX_SHARED_ROUTE_RANGES}; i++) {
                     if (i >= uSharedRangeCount) break;
-                    bool shared = ownRouteActive
-                        && vUv.x >= uSharedRanges[i].x && vUv.x <= uSharedRanges[i].y;
-                    if (shared) activeCount += 1.0;
-                }
-                if (activeCount < 0.5) discard;
-
-                float movingSegment = floor(
-                    vUv.x * max(1.0, uSegmentCount) - uTime * 1.15
-                );
-                float targetOrdinal = mod(
-                    movingSegment + 4096.0,
-                    activeCount
-                );
-
-                float ordinal = 0.0;
-                vec3 color = vec3(1.0);
-                if (active0) {
-                    if (abs(targetOrdinal - ordinal) < 0.5) color = uColor0;
-                    ordinal += 1.0;
-                }
-                if (active1) {
-                    if (abs(targetOrdinal - ordinal) < 0.5) color = uColor1;
-                    ordinal += 1.0;
-                }
-                if (active2) {
-                    if (abs(targetOrdinal - ordinal) < 0.5) color = uColor2;
-                    ordinal += 1.0;
-                }
-                for (int i = 0; i < ${MAX_SHARED_ROUTE_RANGES}; i++) {
-                    if (i >= uSharedRangeCount) break;
-                    bool shared = ownRouteActive
-                        && vUv.x >= uSharedRanges[i].x && vUv.x <= uSharedRanges[i].y;
-                    if (shared) {
-                        if (abs(targetOrdinal - ordinal) < 0.5) color = uSharedColors[i];
-                        ordinal += 1.0;
+                    if (vUv.x >= uSharedRanges[i].x && vUv.x <= uSharedRanges[i].y) {
+                        color = uSharedColors[i];
                     }
                 }
 
                 float crown = 0.72 + 0.28 * pow(abs(sin(vUv.y * 3.14159265)), 4.0);
-                gl_FragColor = vec4(color, 0.94 + crown * 0.06);
+                gl_FragColor = vec4(color, 0.88 + crown * 0.12);
             }
         `,
         transparent: true,
@@ -403,15 +357,9 @@ export function createSharedProgressMaterial() {
 
 export function updateSharedProgressMaterial(
     material: THREE.ShaderMaterial,
-    lanes: Array<{ color: number; progress: number }>,
+    _lanes: Array<{ color: number; progress: number }>,
 ) {
-    const visible = lanes.slice(0, 3);
-    const progresses = [0, 0, 0];
-    visible.forEach((lane, index) => {
-        progresses[index] = THREE.MathUtils.clamp(lane.progress, 0, 1);
-        (material.uniforms[`uColor${index}`].value as THREE.Color).setHex(lane.color);
-    });
-    material.uniforms.uProgress.value.set(progresses[0], progresses[1], progresses[2]);
+    (material.uniforms.uColor0.value as THREE.Color).setHex(0x38bdf8);
 }
 
 export function updateSharedRouteColorRanges(

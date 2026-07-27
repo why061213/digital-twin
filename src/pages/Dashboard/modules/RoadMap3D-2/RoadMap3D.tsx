@@ -63,6 +63,13 @@ const RoadMap3D = forwardRef<RoadMap3DHandle, RoadMap3DProps>(({ onVisualReady }
 
     return (
         <div ref={refs.containerRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
+            <div className="pointer-events-none absolute left-3 top-3 z-40 flex flex-wrap gap-2 rounded-md border border-white/10 bg-slate-950/85 px-3 py-2 text-[11px] text-slate-200 backdrop-blur-md">
+                <span><i className="mr-1.5 inline-block h-2 w-5 rounded bg-cyan-400" />普通路线</span>
+                <span><i className="mr-1.5 inline-block h-2 w-5 rounded bg-amber-500" />分支路线</span>
+                <span><i className="mr-1.5 inline-block h-2 w-5 rounded bg-purple-500" />重叠路线</span>
+                <span><i className="mr-1.5 inline-block h-2 w-5 rounded bg-rose-500" />分支且重叠</span>
+                <span><i className="mr-1.5 inline-block h-2 w-5 rounded bg-slate-500" />计划基线</span>
+            </div>
             {selection.hoverInfo && (
                 <div
                     className="pointer-events-none absolute z-50 w-64 -translate-x-1/2 -translate-y-full rounded-md border border-cyan-300/35 bg-slate-950/92 px-3 py-2.5 text-xs text-slate-100 shadow-2xl shadow-cyan-950/40 backdrop-blur-md"

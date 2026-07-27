@@ -42,6 +42,8 @@ export type RoadObjectInfo = {
     directionLabel?: string;
     manualMarker?: boolean;
     colorKey?: string;
+    routeIndex?: number;
+    showRouteEndpoints?: boolean;
     isRouteBranch?: boolean;
     isBaselineRoute?: boolean;
     isVehicleRoute?: boolean;
@@ -55,6 +57,7 @@ export type RoadObjectInfo = {
             toMeasureM: number;
             routeRole: 'NORMAL' | 'DEVIATION';
             sharedGroupId?: string | null;
+            coordinates?: [number, number][];
             sharedWith: Array<{ lineId: string }>;
         }>;
     };
