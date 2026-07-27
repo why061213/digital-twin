@@ -91,7 +91,7 @@ function geometryKeyFor(coords: [number, number][]) {
 }
 
 function orderKeyFor(lineId: string, info: RoadObjectInfo) {
-    return info.orderFamilyId ?? info.orderId ?? info.colorKey ?? `order-${lineId}`;
+    return info.colorKey ?? info.orderId ?? info.orderFamilyId ?? `order-${lineId}`;
 }
 
 function stableHash(value: string) {
