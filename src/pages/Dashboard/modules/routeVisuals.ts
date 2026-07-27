@@ -25,6 +25,15 @@ type RouteEndpointInfo = {
     routeIndex?: number;
 };
 
+export type RouteStopVisualInfo = {
+    point: THREE.Vector3;
+    action: 'PICKUP' | 'DELIVERY';
+    sequence: number;
+    locationName?: string | null;
+    currentTarget?: boolean;
+    markerColor?: string;
+};
+
 const MAX_SHARED_ROUTE_RANGES = 24;
 
 export type SharedRouteColorRange = {
@@ -312,6 +321,34 @@ export function createRouteEndpointLayer(
         samples[samples.length - 1], '终点', info.to, colorText(color), mode, routeIndex, routeName,
     );
     layer.add(start, end, startLabel, endLabel);
+    return layer;
+}
+
+export function createRouteStopLayer(
+    stops: RouteStopVisualInfo[],
+    mode: 'rm1' | 'rm2',
+) {
+    const preset = PRESETS[mode];
+    const layer = new THREE.Group();
+    stops.forEach((stop, index) => {
+        const delivery = stop.action === 'DELIVERY';
+        const color = delivery
+            ? 0xef4444
+            : new THREE.Color(stop.markerColor || '#38bdf8').getHex();
+        const point = stop.point.clone();
+        const markerScale = preset.markerScale * (stop.currentTarget ? 1.24 : 1);
+        const marker = createEndpointMarker(point, markerScale, color, 30 + index, mode);
+        const label = createEndpointLabel(
+            point,
+            delivery ? '终点' : '起点',
+            stop.locationName ?? undefined,
+            colorText(color),
+            mode,
+            index,
+            `${delivery ? '目的地' : '装载点'}${stop.sequence}`,
+        );
+        layer.add(marker, label);
+    });
     return layer;
 }
 

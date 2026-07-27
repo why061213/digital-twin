@@ -8,6 +8,7 @@ import type { RoadState, RoadObjectInfo, OrderLaneState, VehicleBarState } from 
 import type { useRoadMapRefs } from './useRoadMapRefs';
 import {
     createRouteEndpointLayer,
+    createRouteStopLayer,
     createRouteVisualLayers,
     createSharedProgressMaterial,
     configureSharedProgressMaterial,
@@ -127,6 +128,30 @@ function branchColors(baseColor: number, branchGroupId: string) {
         Math.max(0.12, snakeHsl.l * 0.8),
     );
     return { branch: branch.getHex(), snake: snake.getHex() };
+}
+
+function createEndpointLayer(
+    samples: THREE.Vector3[],
+    info: RoadObjectInfo,
+    color: number,
+    laneIndex: number,
+) {
+    const stops = (info.tripStops ?? []).flatMap((stop) => {
+        if (!stop.coordinates) return [];
+        const point = mapPosition(stop.coordinates, ROAD_LIFT);
+        if (!point) return [];
+        return [{
+            point,
+            action: stop.action,
+            sequence: stop.sequence,
+            locationName: stop.locationName,
+            currentTarget: stop.currentTarget,
+            markerColor: stop.markerColor,
+        }];
+    });
+    return stops.length > 0
+        ? createRouteStopLayer(stops, 'rm2')
+        : createRouteEndpointLayer(samples, 'rm2', info, color, laneIndex);
 }
 
 function drawTubeProgress(tube: THREE.Mesh, progress: number, tubularSegments: number, radialSegments: number) {
@@ -613,6 +638,11 @@ export function useRoadControls(
             refs.roadsMapRef.current.forEach((road) => {
                 if (road.samples.length === 0) return;
                 points.push(...road.samples);
+                (road.info.tripStops ?? []).forEach((stop) => {
+                    if (!stop.coordinates) return;
+                    const point = mapPosition(stop.coordinates, ROAD_LIFT);
+                    if (point) points.push(point);
+                });
                 road.orders.forEach((lane) => {
                     lane.vehicles.forEach((vehicle) => points.push(vehicle.bar.position));
                 });
@@ -677,7 +707,11 @@ export function useRoadControls(
         if (lane) return lane;
 
         const laneIndex = road.orders.size;
-        const color = routeColorFor(orderId);
+        // 第一车道用主路线色（蓝/黄/绿），分支车道从第一车道派生
+        const firstLane = [...road.orders.values()][0];
+        const color = laneIndex === 0 || !firstLane
+            ? routeColorFor(orderId)
+            : branchColors(firstLane.color, orderId).branch;
         const progressGeo = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, 0.17, road.radialSegments, false);
         progressGeo.setDrawRange(0, 0);
         const progressTube = new THREE.Mesh(progressGeo, new THREE.MeshBasicMaterial({
@@ -694,7 +728,7 @@ export function useRoadControls(
         progressTube.visible = false;
         const endpointLayer = info.showRouteEndpoints === false
             ? new THREE.Group()
-            : createRouteEndpointLayer(road.samples, 'rm2', info, color, info.routeIndex ?? laneIndex);
+            : createEndpointLayer(road.samples, info, color, info.routeIndex ?? laneIndex);
         road.group.add(endpointLayer);
 
         lane = {
@@ -799,7 +833,7 @@ export function useRoadControls(
                             disposeObject3D(lane.endpointLayer);
                             lane.endpointLayer = info.showRouteEndpoints === false
                                 ? new THREE.Group()
-                                : createRouteEndpointLayer(samples, 'rm2', info, routeColorFor(orderKeyFor(existing.pathKey, info)), info.routeIndex ?? lane.laneIndex);
+                                : createEndpointLayer(samples, info, routeColorFor(orderKeyFor(existing.pathKey, info)), info.routeIndex ?? lane.laneIndex);
                             existing.group.add(lane.endpointLayer);
                         });
                         const oldVisualLayers = existing.group.children.find(
@@ -858,7 +892,7 @@ export function useRoadControls(
                 new THREE.MeshBasicMaterial({
                     color: info.isBaselineRoute ? 0x64748b : 0x0f172a,
                     transparent: true,
-                    opacity: info.isRouteBranch ? 0.96 : info.isBaselineRoute || info.isVehicleRoute ? 0.42 : 0.62,
+                    opacity: 0.10, // 未走过路线虚化
                     depthWrite: false,
                 })
             );

@@ -41,7 +41,7 @@ function routeInfo(route: RenderRouteDTO, routeIndex: number): RoadObjectInfo {
         cargo: route.cargo,
         from: route.from,
         to: route.to,
-        status: route.status,
+        status: route.meta?.tripStatusText ?? route.status,
         speedKmh: route.speedKmh,
         routeLengthKm: route.routeLengthKm,
         orderId: route.orderId,
@@ -61,6 +61,8 @@ function routeInfo(route: RenderRouteDTO, routeIndex: number): RoadObjectInfo {
         targetStopId: route.meta?.targetStopId,
         targetOrderInstanceId: route.meta?.targetOrderInstanceId,
         targetAction: route.meta?.targetAction,
+        tripStatusText: route.meta?.tripStatusText,
+        tripStops: route.meta?.tripStops,
     };
 }
 
