@@ -128,6 +128,7 @@ export interface RoadState {
     selectionTube: THREE.Mesh;
     sharedProgressTube: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
     travelledProgressTube: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
+    snakeProgressTube: THREE.Mesh<THREE.BufferGeometry, THREE.ShaderMaterial>;
     samples: THREE.Vector3[];
     cumulativeLengths: number[];
     totalLength: number;

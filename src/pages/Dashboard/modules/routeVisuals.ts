@@ -353,7 +353,7 @@ export function createRouteStopLayer(
 }
 
 export function createSharedProgressMaterial(
-    layerMode: 'combined' | 'untravelled' | 'travelled' = 'combined',
+    layerMode: 'combined' | 'untravelled' | 'travelled' | 'snake' = 'combined',
 ) {
     return new THREE.ShaderMaterial({
         uniforms: {
@@ -364,7 +364,9 @@ export function createSharedProgressMaterial(
             uSnakeFrequency: { value: 17 },
             uSnakeSpeed: { value: 0.23 },
             uSnakeLength: { value: 0.29 },
-            uLayerMode: { value: layerMode === 'untravelled' ? 1 : layerMode === 'travelled' ? 2 : 0 },
+            uLayerMode: {
+                value: layerMode === 'untravelled' ? 1 : layerMode === 'travelled' ? 2 : layerMode === 'snake' ? 3 : 0,
+            },
             uSharedRanges: { value: Array.from({ length: MAX_SHARED_ROUTE_RANGES }, () => new THREE.Vector2(-1, -1)) },
             uSharedColors: { value: Array.from({ length: MAX_SHARED_ROUTE_RANGES }, () => new THREE.Color(0xffffff)) },
             uSharedSnakeColors: { value: Array.from({ length: MAX_SHARED_ROUTE_RANGES }, () => new THREE.Color(0xffffff)) },
@@ -405,6 +407,12 @@ export function createSharedProgressMaterial(
 
                 float travelled = 1.0 - step(uProgress, vUv.x);
                 float crown = 0.72 + 0.28 * pow(abs(sin(vUv.y * 3.14159265)), 4.0);
+                float phase = fract(vUv.x * uSnakeFrequency - uTime * uSnakeSpeed);
+                float tail = smoothstep(0.0, 0.055, phase);
+                float head = 1.0 - smoothstep(uSnakeLength - 0.07, uSnakeLength, phase);
+                float movingSnake = travelled * tail * head;
+                float currentHead = travelled * (1.0 - smoothstep(0.0, 0.018, abs(vUv.x - uProgress)));
+                float snakeMask = max(movingSnake, currentHead);
                 if (uLayerMode == 1) {
                     if (travelled > 0.5) discard;
                     // 未走路线统一使用导航灰，不再混入订单主色；中间略亮，保留管线体积感。
@@ -412,14 +420,17 @@ export function createSharedProgressMaterial(
                     gl_FragColor = vec4(ghostColor, 0.48 + crown * 0.16);
                     return;
                 }
-                if (uLayerMode == 2 && travelled < 0.5) discard;
+                if (uLayerMode == 2) {
+                    if (travelled < 0.5) discard;
+                    gl_FragColor = vec4(color, 0.88 + crown * 0.12);
+                    return;
+                }
+                if (uLayerMode == 3) {
+                    if (snakeMask < 0.02) discard;
+                    gl_FragColor = vec4(snakeColor, smoothstep(0.02, 0.18, snakeMask));
+                    return;
+                }
 
-                float phase = fract(vUv.x * uSnakeFrequency - uTime * uSnakeSpeed);
-                float tail = smoothstep(0.0, 0.055, phase);
-                float head = 1.0 - smoothstep(uSnakeLength - 0.07, uSnakeLength, phase);
-                float movingSnake = travelled * tail * head;
-                float currentHead = travelled * (1.0 - smoothstep(0.0, 0.018, abs(vUv.x - uProgress)));
-                float snakeMask = max(movingSnake, currentHead);
                 color = mix(color, snakeColor, snakeMask * 0.96);
                 float travelledAlpha = 0.88 + crown * 0.12;
                 float routeAlpha = mix(0.10, travelledAlpha, travelled);
@@ -427,6 +438,7 @@ export function createSharedProgressMaterial(
             }
         `,
         transparent: true,
+        depthTest: layerMode !== 'snake',
         depthWrite: false,
         blending: THREE.NormalBlending,
     });
