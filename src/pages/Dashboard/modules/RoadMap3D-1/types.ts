@@ -42,6 +42,13 @@ export type RoadObjectInfo = {
     routeDeviationReasonCode?: string;
     routeDeviationConfidence?: number;
     routeAnomalyScore?: number;
+    tripId?: string;
+    visualKey?: string;
+    currentLegId?: string;
+    planVersion?: number;
+    targetStopId?: string;
+    targetOrderInstanceId?: string;
+    targetAction?: 'PICKUP' | 'DELIVERY';
 };
 
 export type VehicleBarState = {

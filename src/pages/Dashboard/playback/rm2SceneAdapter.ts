@@ -17,6 +17,7 @@ export type Rm2PreparedRoute = {
     baselinePathKey?: string;
     initialPosition: [number, number];
     info: RoadObjectInfo;
+    visualKey: string;
 };
 
 export type Rm2PreparedGroup = {
@@ -50,6 +51,13 @@ function routeInfo(route: RenderRouteDTO): RoadObjectInfo {
         isBaselineRoute: !hasVehicleRoute,
         isVehicleRoute: hasVehicleRoute,
         deviationCoordinates: route.deviationCoordinates,
+        tripId: route.meta?.tripId,
+        visualKey: route.meta?.visualKey,
+        currentLegId: route.meta?.currentLegId,
+        planVersion: route.meta?.planVersion,
+        targetStopId: route.meta?.targetStopId,
+        targetOrderInstanceId: route.meta?.targetOrderInstanceId,
+        targetAction: route.meta?.targetAction,
     };
 }
 
@@ -76,6 +84,8 @@ export function createRm2SceneAdapter(
     let fadeResolve: ((completed: boolean) => void) | null = null;
     let transitionGeneration = 0;
     let currentOpacity = 1;
+    let renderedGroupId: string | null = null;
+    let renderedByVisualKey = new Map<string, Rm2PreparedRoute>();
 
     const stopFade = () => {
         if (fadeFrame) window.cancelAnimationFrame(fadeFrame);
@@ -151,6 +161,7 @@ export function createRm2SceneAdapter(
                     baselinePathKey: rawRoute.baselinePathKey,
                     initialPosition: rawRoute.coordinates[0],
                     info: routeInfo(rawRoute),
+                    visualKey: rawRoute.meta?.visualKey ?? rawRoute.lineId,
                 });
             });
 
@@ -171,6 +182,24 @@ export function createRm2SceneAdapter(
             const roadMap = roadMapRef.current;
             if (!roadMap) throw new Error('RM2 scene is not ready for replacement');
             const generation = ++transitionGeneration;
+
+            if (renderedGroupId === prepared.groupId) {
+                const nextByVisualKey = new Map(prepared.routes.map((route) => [route.visualKey, route]));
+                renderedByVisualKey.forEach((oldRoute, visualKey) => {
+                    if (!nextByVisualKey.has(visualKey)) roadMap.removeRoadPath(oldRoute.lineId);
+                });
+                prepared.routes.forEach((route) => {
+                    const oldRoute = renderedByVisualKey.get(route.visualKey);
+                    if (oldRoute && oldRoute.lineId !== route.lineId) {
+                        roadMap.removeRoadPath(oldRoute.lineId);
+                    }
+                    roadMap.addRoadPath(route.lineId, route.coordinates, route.info);
+                    roadMap.updateTruckPosition(route.lineId, route.initialPosition, route.info);
+                });
+                renderedByVisualKey = nextByVisualKey;
+                await beforeReveal?.();
+                return;
+            }
 
             // 此处才移除旧组：请求、校验和新组描述都已完成，避免等待网络时出现黑屏。
             if (!await fadeRoadsTo(0, generation) || generation !== transitionGeneration || !roadMapRef.current) return;
@@ -196,6 +225,8 @@ export function createRm2SceneAdapter(
                 // 只保留基准线图层，不留下虚拟车辆。
                 roadMap.removeRoadPath(referenceId);
             });
+            renderedGroupId = prepared.groupId;
+            renderedByVisualKey = new Map(prepared.routes.map((route) => [route.visualKey, route]));
 
             prepared.routes.forEach((route) => {
                 if (generation !== transitionGeneration) return;
@@ -225,6 +256,8 @@ export function createRm2SceneAdapter(
             transitionGeneration += 1;
             stopFade();
             currentOpacity = 1;
+            renderedGroupId = null;
+            renderedByVisualKey.clear();
             roadMapRef.current?.clearRoads();
         },
     };

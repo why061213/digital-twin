@@ -50,6 +50,13 @@ export type RoadObjectInfo = {
     routeDeviationReasonCode?: string;
     routeDeviationConfidence?: number;
     routeAnomalyScore?: number;
+    tripId?: string;
+    visualKey?: string;
+    currentLegId?: string;
+    planVersion?: number;
+    targetStopId?: string;
+    targetOrderInstanceId?: string;
+    targetAction?: 'PICKUP' | 'DELIVERY';
 };
 
 export type VehicleBarState = {
@@ -97,6 +104,7 @@ export interface RoadState {
     lineIds: Set<string>;
     renderedOrderCount: number;
     isSelected: boolean;
+    geometryKey?: string;
 }
 
 export type HoverInfo = {

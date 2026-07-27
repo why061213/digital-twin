@@ -112,6 +112,7 @@ function vehicleLocatorColor(laneColor: number, lineId: string) {
 }
 
 function trackKeyFor(id: string, coords: [number, number][], info: RoadObjectInfo) {
+    if (info.visualKey) return `visual:${info.visualKey}`;
     if (info.pathKey) {
         if (!info.isVehicleRoute) return info.pathKey;
         const geometryKey = coords
@@ -120,6 +121,10 @@ function trackKeyFor(id: string, coords: [number, number][], info: RoadObjectInf
         return `${info.pathKey}::geometry::${geometryKey}`;
     }
     return coords.map(([lng, lat]) => `${lng.toFixed(4)},${lat.toFixed(4)}`).join('|') || id;
+}
+
+function geometryKeyFor(coords: [number, number][]) {
+    return coords.map(([lng, lat]) => `${lng.toFixed(5)},${lat.toFixed(5)}`).join('|');
 }
 
 function orderKeyFor(lineId: string, info: RoadObjectInfo) {
@@ -879,6 +884,73 @@ export function useRoadControls(
             const routeColor = colorForOrder(orderId);
             const existing = refs.roadsMapRef.current.get(pathKey);
             if (existing) {
+                const nextGeometryKey = geometryKeyFor(coords);
+                if (existing.geometryKey !== nextGeometryKey) {
+                    const points = coords
+                        .map((coord) => mapPosition(coord, ROAD_LIFT))
+                        .filter((point): point is THREE.Vector3 => Boolean(point));
+                    if (points.length >= 2) {
+                        const pathCurve = makePathCurve(points);
+                        const tubularSegments = Math.max(PATH_SAMPLE_COUNT, points.length * 32);
+                        const samples = pathCurve.getSpacedPoints(tubularSegments);
+                        const displayPoints = (info.isRouteBranch && (info.deviationCoordinates?.length ?? 0) >= 2
+                            ? info.deviationCoordinates!
+                            : coords)
+                            .map((coord) => mapPosition(coord, ROAD_LIFT))
+                            .filter((point): point is THREE.Vector3 => Boolean(point));
+                        const displayCurve = makePathCurve(displayPoints.length >= 2 ? displayPoints : points);
+                        const displaySamples = displayCurve.getSpacedPoints(tubularSegments);
+                        const cumulativeLengths: number[] = [0];
+                        for (let index = 1; index < samples.length; index++) {
+                            cumulativeLengths[index] = cumulativeLengths[index - 1]
+                                + samples[index - 1].distanceTo(samples[index]);
+                        }
+                        existing.grayTube.geometry.dispose();
+                        existing.grayTube.geometry = new THREE.TubeGeometry(
+                            displayCurve, tubularSegments, 0.18, existing.radialSegments, false,
+                        );
+                        existing.selectionTube.geometry.dispose();
+                        existing.selectionTube.geometry = new THREE.TubeGeometry(
+                            displayCurve, tubularSegments, 0.38, existing.radialSegments, false,
+                        );
+                        existing.sharedProgressTube.geometry.dispose();
+                        existing.sharedProgressTube.geometry = new THREE.TubeGeometry(
+                            displayCurve, tubularSegments, 0.28, existing.radialSegments, false,
+                        );
+                        existing.orders.forEach((lane) => {
+                            lane.progressTube.geometry.dispose();
+                            lane.progressTube.geometry = new THREE.TubeGeometry(
+                                pathCurve, tubularSegments, 0.17, existing.radialSegments, false,
+                            );
+                            existing.group.remove(lane.endpointLayer);
+                            disposeObject3D(lane.endpointLayer);
+                            lane.endpointLayer = info.isRouteBranch || info.isVehicleRoute
+                                ? new THREE.Group()
+                                : createRouteEndpointLayer(samples, 'rm2', info, lane.color, lane.laneIndex);
+                            existing.group.add(lane.endpointLayer);
+                        });
+                        const oldVisualLayers = existing.group.children.find(
+                            (child) => child.userData.routeVisualLayers === true,
+                        );
+                        if (oldVisualLayers) {
+                            existing.group.remove(oldVisualLayers);
+                            disposeObject3D(oldVisualLayers);
+                        }
+                        const visualLayers = createRouteVisualLayers(
+                            displayCurve, tubularSegments, existing.radialSegments, displaySamples, 'rm2', info,
+                        );
+                        visualLayers.userData.routeVisualLayers = true;
+                        existing.group.add(visualLayers);
+                        existing.pathCurve = pathCurve;
+                        existing.displayCurve = displayCurve;
+                        existing.samples = samples;
+                        existing.cumulativeLengths = cumulativeLengths;
+                        existing.totalLength = cumulativeLengths[cumulativeLengths.length - 1] ?? 0;
+                        existing.tubularSegments = tubularSegments;
+                        existing.currentCoords = coords[0];
+                        existing.geometryKey = nextGeometryKey;
+                    }
+                }
                 const lane = ensureOrderLane(existing, orderId, info);
                 ensureVehicleBar(existing, lane, id, info);
                 existing.info = { ...existing.info, ...info };
@@ -948,9 +1020,13 @@ export function useRoadControls(
             labelAnchor.y = TRUCK_LIFT + 3.25;
             labelAnchor.z += 0.95;
 
+            const visualLayers = createRouteVisualLayers(
+                displayCurve, tubularSegments, radialSegments, displaySamples, 'rm2', info,
+            );
+            visualLayers.userData.routeVisualLayers = true;
             const group = new THREE.Group();
             group.add(
-                createRouteVisualLayers(displayCurve, tubularSegments, radialSegments, displaySamples, 'rm2', info),
+                visualLayers,
                 grayTube,
                 sharedProgressTube,
                 selectionTube,
@@ -977,6 +1053,7 @@ export function useRoadControls(
                 lineIds: new Set(),
                 renderedOrderCount: 0,
                 isSelected: false,
+                geometryKey: geometryKeyFor(coords),
             };
 
             refs.roadsMapRef.current.set(pathKey, road);

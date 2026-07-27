@@ -33,6 +33,16 @@ export type RenderRouteDTO = {
     coordinateSystem: string;
     updatedAt?: string;
     routeSignature: string;
+    meta?: {
+        tripId?: string;
+        visualKey?: string;
+        runtimeLineId?: string;
+        currentLegId?: string;
+        planVersion?: number;
+        targetStopId?: string;
+        targetOrderInstanceId?: string;
+        targetAction?: 'PICKUP' | 'DELIVERY';
+    };
 };
 
 export type Rm2GroupDTO = {
@@ -330,6 +340,13 @@ export function adaptRenderRoute(route: RenderRouteDTO): RoadPathMessage | null 
         colorKey: route.colorKey,
         isRouteBranch: route.isRouteBranch,
         vehicleRole: route.role,
+        tripId: route.meta?.tripId,
+        visualKey: route.meta?.visualKey,
+        currentLegId: route.meta?.currentLegId,
+        planVersion: route.meta?.planVersion,
+        targetStopId: route.meta?.targetStopId,
+        targetOrderInstanceId: route.meta?.targetOrderInstanceId,
+        targetAction: route.meta?.targetAction,
         plate: route.plate,
         vehicleId: route.vehicleId,
         cargo: route.cargo,
