@@ -415,8 +415,7 @@ export function createSharedProgressMaterial(
                 float tail = smoothstep(0.0, 0.055, phase);
                 float head = 1.0 - smoothstep(uSnakeLength - 0.07, uSnakeLength, phase);
                 float movingSnake = travelled * tail * head;
-                float currentHead = travelled * (1.0 - smoothstep(0.0, 0.018, abs(vUv.x - uProgress)));
-                float snakeMask = max(movingSnake, currentHead);
+                float snakeMask = movingSnake;
                 if (uLayerMode == 1) {
                     if (travelled > 0.5) discard;
                     // 未走路线统一使用导航灰，不再混入订单主色；中间略亮，保留管线体积感。
@@ -442,7 +441,8 @@ export function createSharedProgressMaterial(
             }
         `,
         transparent: true,
-        depthTest: layerMode !== 'snake',
+        // 蛇仍在路线透明层之后绘制，但必须接受车辆写入的深度，不能穿透车辆模型。
+        depthTest: true,
         depthWrite: false,
         blending: THREE.NormalBlending,
     });

@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { configureSharedProgressMaterial, createSharedProgressMaterial } from './routeVisuals';
 
 describe('route snake overlay material', () => {
-    it('uses a dedicated top overlay mode without depth occlusion', () => {
+    it('uses a dedicated overlay mode that remains occluded by vehicles', () => {
         const material = createSharedProgressMaterial('snake');
 
         expect(material.uniforms.uLayerMode.value).toBe(3);
-        expect(material.depthTest).toBe(false);
+        expect(material.depthTest).toBe(true);
         expect(material.depthWrite).toBe(false);
+        expect(material.fragmentShader).not.toContain('currentHead');
 
         material.dispose();
     });
