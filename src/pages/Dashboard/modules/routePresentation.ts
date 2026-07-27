@@ -39,15 +39,20 @@ export function routeColorKey(route?: RouteOrder) {
     return route?.colorKey?.trim() || route?.orderId?.trim() || route?.lineId || 'default-route';
 }
 
-export function routeTone(route?: RouteOrder, groupRoutes: RouteOrder[] = []) {
-    const colorKey = routeColorKey(route);
-    const orderKeys = Array.from(new Set(groupRoutes.map(routeColorKey)));
-    const orderIndex = orderKeys.indexOf(colorKey);
-    const isBranch = route?.isRouteBranch || colorKey.startsWith('branch:');
-    const toneIndex = isBranch
-        ? 3 + (Array.from(colorKey).reduce((sum, char) => sum + char.charCodeAt(0), 0) % Math.max(1, ROUTE_TONES.length - 3))
-        : orderIndex >= 0
-        ? orderIndex % Math.min(3, ROUTE_TONES.length)
-        : Array.from(colorKey).reduce((sum, char) => sum + char.charCodeAt(0), 0) % ROUTE_TONES.length;
+function stableHash(value: string) {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+}
+
+export function routeTone(route?: RouteOrder, _groupRoutes: RouteOrder[] = []) {
+    const key = routeColorKey(route);
+    const isBranch = route?.isRouteBranch || key.startsWith('branch:');
+    // 主路线和分支统一用 hash 取色，与 3D 路线一致
+    const baseIndex = stableHash(key) % (isBranch ? ROUTE_TONES.length - 3 : ROUTE_TONES.length);
+    const toneIndex = isBranch ? 3 + baseIndex : baseIndex;
     return ROUTE_TONES[toneIndex];
 }

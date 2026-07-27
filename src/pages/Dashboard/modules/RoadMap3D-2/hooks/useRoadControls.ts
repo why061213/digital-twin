@@ -35,7 +35,7 @@ import { syncVehicleAlertRipple } from '../../vehicleAlertRipples';
 //     0xa7f3d0,
 //     0xfed7aa,
 // ];
-const ROUTE_COLORS = [0x3b82f6, 0xf59e0b, 0x22c55e]; // 蓝、黄、绿
+const ROUTE_COLORS = [0x3b82f6, 0xf59e0b, 0x22c55e, 0xa78bfa, 0xfb7185, 0x2dd4bf]; // 蓝/黄/绿/紫/粉/青
 const VEHICLE_COLOR = 0xf8fafc;
 
 const TRUCK_MODEL_URL = '/models/rm2-truck.glb';
