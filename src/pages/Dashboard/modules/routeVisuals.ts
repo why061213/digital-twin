@@ -352,7 +352,9 @@ export function createRouteStopLayer(
     return layer;
 }
 
-export function createSharedProgressMaterial() {
+export function createSharedProgressMaterial(
+    layerMode: 'combined' | 'untravelled' | 'travelled' = 'combined',
+) {
     return new THREE.ShaderMaterial({
         uniforms: {
             uColor0: { value: new THREE.Color(0x38bdf8) },
@@ -362,6 +364,7 @@ export function createSharedProgressMaterial() {
             uSnakeFrequency: { value: 17 },
             uSnakeSpeed: { value: 0.23 },
             uSnakeLength: { value: 0.29 },
+            uLayerMode: { value: layerMode === 'untravelled' ? 1 : layerMode === 'travelled' ? 2 : 0 },
             uSharedRanges: { value: Array.from({ length: MAX_SHARED_ROUTE_RANGES }, () => new THREE.Vector2(-1, -1)) },
             uSharedColors: { value: Array.from({ length: MAX_SHARED_ROUTE_RANGES }, () => new THREE.Color(0xffffff)) },
             uSharedSnakeColors: { value: Array.from({ length: MAX_SHARED_ROUTE_RANGES }, () => new THREE.Color(0xffffff)) },
@@ -382,6 +385,7 @@ export function createSharedProgressMaterial() {
             uniform float uSnakeFrequency;
             uniform float uSnakeSpeed;
             uniform float uSnakeLength;
+            uniform int uLayerMode;
             uniform vec2 uSharedRanges[${MAX_SHARED_ROUTE_RANGES}];
             uniform vec3 uSharedColors[${MAX_SHARED_ROUTE_RANGES}];
             uniform vec3 uSharedSnakeColors[${MAX_SHARED_ROUTE_RANGES}];
@@ -400,6 +404,15 @@ export function createSharedProgressMaterial() {
                 }
 
                 float travelled = 1.0 - step(uProgress, vUv.x);
+                float crown = 0.72 + 0.28 * pow(abs(sin(vUv.y * 3.14159265)), 4.0);
+                if (uLayerMode == 1) {
+                    if (travelled > 0.5) discard;
+                    vec3 ghostColor = mix(color, vec3(0.58, 0.65, 0.72), 0.22);
+                    gl_FragColor = vec4(ghostColor, 0.20 + crown * 0.08);
+                    return;
+                }
+                if (uLayerMode == 2 && travelled < 0.5) discard;
+
                 float phase = fract(vUv.x * uSnakeFrequency - uTime * uSnakeSpeed);
                 float tail = smoothstep(0.0, 0.055, phase);
                 float head = 1.0 - smoothstep(uSnakeLength - 0.07, uSnakeLength, phase);
@@ -407,7 +420,6 @@ export function createSharedProgressMaterial() {
                 float currentHead = travelled * (1.0 - smoothstep(0.0, 0.018, abs(vUv.x - uProgress)));
                 float snakeMask = max(movingSnake, currentHead);
                 color = mix(color, snakeColor, snakeMask * 0.96);
-                float crown = 0.72 + 0.28 * pow(abs(sin(vUv.y * 3.14159265)), 4.0);
                 float travelledAlpha = 0.88 + crown * 0.12;
                 float routeAlpha = mix(0.10, travelledAlpha, travelled);
                 gl_FragColor = vec4(color, routeAlpha);
