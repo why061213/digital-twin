@@ -407,8 +407,9 @@ export function createSharedProgressMaterial(
                 float crown = 0.72 + 0.28 * pow(abs(sin(vUv.y * 3.14159265)), 4.0);
                 if (uLayerMode == 1) {
                     if (travelled > 0.5) discard;
-                    vec3 ghostColor = mix(color, vec3(0.58, 0.65, 0.72), 0.22);
-                    gl_FragColor = vec4(ghostColor, 0.20 + crown * 0.08);
+                    // 未走路线统一使用导航灰，不再混入订单主色；中间略亮，保留管线体积感。
+                    vec3 ghostColor = mix(vec3(0.36, 0.40, 0.45), vec3(0.52, 0.56, 0.61), crown);
+                    gl_FragColor = vec4(ghostColor, 0.48 + crown * 0.16);
                     return;
                 }
                 if (uLayerMode == 2 && travelled < 0.5) discard;
