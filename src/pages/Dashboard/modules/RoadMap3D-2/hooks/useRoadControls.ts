@@ -37,6 +37,8 @@ import { syncVehicleAlertRipple } from '../../vehicleAlertRipples';
 // ];
 const ROUTE_COLORS = [0x3b82f6, 0xf59e0b, 0x22c55e, 0xa78bfa, 0xfb7185, 0x2dd4bf]; // 蓝/黄/绿/紫/粉/青
 const VEHICLE_COLOR = 0xf8fafc;
+// 试验模式：精确共线时蛇必然与自己的路线占用同一批像素，关闭蛇层避免形成斑马纹。
+const SHOW_ROUTE_SNAKES = false;
 
 const TRUCK_MODEL_URL = '/models/rm2-truck.glb';
 const TRUCK_MODEL_SCALE = 1;
@@ -905,6 +907,7 @@ export function useRoadControls(
                 const lane = ensureOrderLane(existing, orderId, info);
                 ensureVehicleBar(existing, lane, id, info);
                 existing.info = { ...existing.info, ...info };
+                existing.snakeProgressTube.visible = SHOW_ROUTE_SNAKES && !existing.info.isBaselineRoute;
                 updateOrderVisuals(existing);
                 scheduleSharedRoadColorRangesRefresh();
                 focusAllRoads();
@@ -983,7 +986,7 @@ export function useRoadControls(
             snakeProgressTube.onBeforeRender = () => {
                 snakeProgressMaterial.uniforms.uTime.value = performance.now() / 1_000;
             };
-            snakeProgressTube.visible = !info.isBaselineRoute;
+            snakeProgressTube.visible = SHOW_ROUTE_SNAKES && !info.isBaselineRoute;
             const labelAnchor = samples[Math.floor(samples.length * 0.58)]?.clone() ?? samples[0].clone();
             labelAnchor.x += 1.25;
             labelAnchor.y = TRUCK_LIFT + 3.25;
