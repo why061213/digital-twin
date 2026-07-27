@@ -105,11 +105,11 @@ function createEndpointMarker(
     marker.position.y += radius * 0.08;
 
     const halo = new THREE.Mesh(
-        new THREE.RingGeometry(radius * 0.72, radius * 1.08, 32),
+        new THREE.RingGeometry(radius * 0.85, radius * 1.25, 32),
         new THREE.MeshBasicMaterial({
             color,
             transparent: true,
-            opacity: 0.3,
+            opacity: 0.45,
             side: THREE.DoubleSide,
             depthWrite: false,
             blending: THREE.AdditiveBlending,
@@ -120,11 +120,11 @@ function createEndpointMarker(
 
     const stemHeight = radius * 2.15;
     const stem = new THREE.Mesh(
-        new THREE.CylinderGeometry(radius * 0.085, radius * 0.12, stemHeight, 12),
+        new THREE.CylinderGeometry(radius * 0.1, radius * 0.14, stemHeight, 12),
         new THREE.MeshBasicMaterial({
             color,
             transparent: true,
-            opacity: 0.92,
+            opacity: 0.95,
             depthWrite: false,
         }),
     );
@@ -159,7 +159,7 @@ function createEndpointMarker(
         new THREE.MeshBasicMaterial({
             color,
             transparent: true,
-            opacity: 0.98,
+            opacity: 1.0,
             side: THREE.DoubleSide,
             depthTest: false,
             depthWrite: false,
@@ -169,11 +169,11 @@ function createEndpointMarker(
     pin.renderOrder = renderOrder + 3;
 
     const pinCore = new THREE.Mesh(
-        new THREE.CircleGeometry(radius * 0.23, 20),
+        new THREE.CircleGeometry(radius * 0.28, 20),
         new THREE.MeshBasicMaterial({
             color: 0xf8fafc,
             transparent: true,
-            opacity: 0.96,
+            opacity: 1.0,
             side: THREE.DoubleSide,
             depthTest: false,
             depthWrite: false,
@@ -188,7 +188,7 @@ function createEndpointMarker(
         pin.quaternion.copy(camera.quaternion);
         pinCore.quaternion.copy(camera.quaternion);
         const distance = camera.position.distanceTo(marker.getWorldPosition(worldPosition));
-        marker.scale.setScalar(THREE.MathUtils.clamp(distance / referenceDistance, 0.92, 1.75));
+        marker.scale.setScalar(THREE.MathUtils.clamp(distance / referenceDistance, 1.05, 2.2));
     };
 
     marker.add(halo, stem, pin, pinCore);

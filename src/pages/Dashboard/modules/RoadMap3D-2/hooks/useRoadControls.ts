@@ -707,7 +707,7 @@ export function useRoadControls(
         progressTube.renderOrder = 9 + laneIndex;
         progressTube.userData = { roadId: road.pathKey, objectType: '订单进度' };
         progressTube.visible = false;
-        const endpointLayer = info.isRouteBranch || info.isVehicleRoute
+        const endpointLayer = info.isRouteBranch
             ? new THREE.Group()
             : createRouteEndpointLayer(road.samples, 'rm2', info, color, laneIndex);
         road.group.add(endpointLayer);
@@ -816,7 +816,7 @@ export function useRoadControls(
                             );
                             existing.group.remove(lane.endpointLayer);
                             disposeObject3D(lane.endpointLayer);
-                            lane.endpointLayer = info.isRouteBranch || info.isVehicleRoute
+                            lane.endpointLayer = info.isRouteBranch
                                 ? new THREE.Group()
                                 : createRouteEndpointLayer(samples, 'rm2', info, lane.color, lane.laneIndex);
                             existing.group.add(lane.endpointLayer);
