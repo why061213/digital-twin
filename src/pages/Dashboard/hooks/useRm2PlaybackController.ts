@@ -103,13 +103,35 @@ function diffGroupIds(previous: readonly Rm2GroupDTO[], next: readonly Rm2GroupD
     };
 }
 
-function preserveBackendRouteIdentity(routes: NonNullable<ReturnType<typeof adaptRenderRoute>>[]) {
+export function assignRm2RouteColorSlots(
+    routes: NonNullable<ReturnType<typeof adaptRenderRoute>>[],
+    group?: Pick<Rm2GroupDTO, 'orderLineIds' | 'vehicleLineIdsByOrderLineId'>,
+) {
+    const slotByBusinessLineId = new Map(
+        (group?.orderLineIds ?? []).map((businessLineId, slot) => [businessLineId, slot]),
+    );
+    const slotByVehicleLineId = new Map<string, number>();
+    group?.orderLineIds.forEach((businessLineId, slot) => {
+        (group.vehicleLineIdsByOrderLineId[businessLineId] ?? []).forEach((lineId) => {
+            slotByVehicleLineId.set(lineId, slot);
+        });
+    });
+    const fallbackSlots = new Map<string, number>();
+
     return routes.map((route) => ({
         ...route,
-        // 在 colorKey 后追加 lineId 确保每辆车独立取色，同一起终点的订单不再撞色
-        colorKey: route.colorKey?.trim()
-            ? `${route.colorKey.trim()}:${route.lineId}`
-            : (route.orderId ?? route.orderFamilyId ?? route.lineId),
+        // 使用后端分组中的业务订单顺序分配色槽，不能再用 hash % 调色板碰运气。
+        routeColorIndex: slotByBusinessLineId.get(route.orderFamilyId ?? '')
+            ?? slotByVehicleLineId.get(route.lineId)
+            ?? (() => {
+                const identity = route.orderFamilyId ?? route.orderId ?? route.lineId;
+                const existing = fallbackSlots.get(identity);
+                if (existing !== undefined) return existing;
+                const slot = slotByBusinessLineId.size + fallbackSlots.size;
+                fallbackSlots.set(identity, slot);
+                return slot;
+            })(),
+        colorKey: route.colorKey?.trim() || route.orderFamilyId || route.orderId || route.lineId,
         isRouteBranch: route.isRouteBranch === true,
     }));
 }
@@ -406,8 +428,9 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 return;
             }
 
-            const accepted = preserveBackendRouteIdentity(
+            const accepted = assignRm2RouteColorSlots(
                 routes.map(adaptRenderRoute).filter((route): route is NonNullable<typeof route> => route !== null),
+                backendGroupsRef.current.find((group) => group.groupId === node.id),
             );
             if (accepted.length === 0) {
                 const next = node.playbackNext;

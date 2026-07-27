@@ -48,11 +48,14 @@ function stableHash(value: string) {
     return hash >>> 0;
 }
 
-export function routeTone(route?: RouteOrder, _groupRoutes: RouteOrder[] = []) {
+export function routeTone(route?: RouteOrder, groupRoutes: RouteOrder[] = []) {
     const key = routeColorKey(route);
-    const isBranch = route?.isRouteBranch || key.startsWith('branch:');
-    // 主路线和分支统一用 hash 取色，与 3D 路线一致
-    const baseIndex = stableHash(key) % (isBranch ? ROUTE_TONES.length - 3 : ROUTE_TONES.length);
-    const toneIndex = isBranch ? 3 + baseIndex : baseIndex;
+    const groupIndex = Array.from(new Set(groupRoutes.map(routeColorKey))).indexOf(key);
+    const assignedIndex = typeof route?.routeColorIndex === 'number' && Number.isFinite(route.routeColorIndex)
+        ? Math.abs(Math.trunc(route.routeColorIndex))
+        : groupIndex >= 0
+            ? groupIndex
+            : stableHash(key);
+    const toneIndex = assignedIndex % ROUTE_TONES.length;
     return ROUTE_TONES[toneIndex];
 }

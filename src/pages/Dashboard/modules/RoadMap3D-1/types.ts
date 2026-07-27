@@ -35,6 +35,7 @@ export type RoadObjectInfo = {
     directionLabel?: string;
     manualMarker?: boolean;
     colorKey?: string;
+    routeColorIndex?: number;
     isRouteBranch?: boolean;
     isBaselineRoute?: boolean;
     isVehicleRoute?: boolean;

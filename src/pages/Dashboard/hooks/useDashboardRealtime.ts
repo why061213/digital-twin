@@ -43,6 +43,7 @@ export type RoadPathMessage = {
     status?: string;
     vehicleId?: string;
     colorKey?: string;
+    routeColorIndex?: number;
     isRouteBranch?: boolean;
     routeRevision?: number;
     vehicleRole?: 'primary' | 'along';
@@ -76,6 +77,7 @@ export type TruckPositionMessage = {
     snapshotVersion?: string;
     vehicleId?: string;
     colorKey?: string;
+    routeColorIndex?: number;
     isRouteBranch?: boolean;
     vehicleRole?: 'primary' | 'along';
     plate?: string;
@@ -174,6 +176,7 @@ export type RouteOrder = {
     cargoUnit?: string;
     status: string;
     colorKey?: string;
+    routeColorIndex?: number;
     isRouteBranch?: boolean;
     vehicleRole?: 'primary' | 'along';
     tripId?: string;
