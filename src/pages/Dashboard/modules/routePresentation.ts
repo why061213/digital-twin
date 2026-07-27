@@ -1,65 +1,37 @@
 import type { RouteOrder } from '../hooks/useDashboardRealtime';
 
 const ROUTE_TONES = [
+    // 主路线：蓝、黄、绿
     {
-        color: '#00ff88',
-        surface: 'rgba(0, 255, 136, 0.08)',
-        glow: 'rgba(0, 255, 136, 0.18)',
+        color: '#3b82f6',
+        surface: 'rgba(59, 130, 246, 0.08)',
+        glow: 'rgba(59, 130, 246, 0.18)',
     },
     {
-        color: '#00ccff',
-        surface: 'rgba(0, 204, 255, 0.08)',
-        glow: 'rgba(0, 204, 255, 0.18)',
+        color: '#f59e0b',
+        surface: 'rgba(245, 158, 11, 0.08)',
+        glow: 'rgba(245, 158, 11, 0.18)',
     },
     {
-        color: '#ffaa00',
-        surface: 'rgba(255, 170, 0, 0.08)',
-        glow: 'rgba(255, 170, 0, 0.18)',
+        color: '#22c55e',
+        surface: 'rgba(34, 197, 94, 0.08)',
+        glow: 'rgba(34, 197, 94, 0.18)',
+    },
+    // 分支路线备用色
+    {
+        color: '#a78bfa',
+        surface: 'rgba(167, 139, 250, 0.08)',
+        glow: 'rgba(167, 139, 250, 0.18)',
     },
     {
-        color: '#ff44aa',
-        surface: 'rgba(255, 68, 170, 0.08)',
-        glow: 'rgba(255, 68, 170, 0.18)',
+        color: '#fb7185',
+        surface: 'rgba(251, 113, 133, 0.08)',
+        glow: 'rgba(251, 113, 133, 0.18)',
     },
     {
-        color: '#aaff00',
-        surface: 'rgba(170, 255, 0, 0.08)',
-        glow: 'rgba(170, 255, 0, 0.18)',
-    },
-    {
-        color: '#00ffff',
-        surface: 'rgba(0, 255, 255, 0.08)',
-        glow: 'rgba(0, 255, 255, 0.18)',
-    },
-    {
-        color: '#ff8800',
-        surface: 'rgba(255, 136, 0, 0.08)',
-        glow: 'rgba(255, 136, 0, 0.18)',
-    },
-    {
-        color: '#44aaff',
-        surface: 'rgba(68, 170, 255, 0.08)',
-        glow: 'rgba(68, 170, 255, 0.18)',
-    },
-    {
-        color: '#ff0000',
-        surface: 'rgba(255, 0, 0, 0.08)',
-        glow: 'rgba(255, 0, 0, 0.18)',
-    },
-    {
-        color: '#ffff00',
-        surface: 'rgba(255, 255, 0, 0.08)',
-        glow: 'rgba(255, 255, 0, 0.18)',
-    },
-    {
-        color: '#ff00ff',
-        surface: 'rgba(255, 0, 255, 0.08)',
-        glow: 'rgba(255, 0, 255, 0.18)',
-    },
-    {
-        color: '#00ff00',
-        surface: 'rgba(0, 255, 0, 0.08)',
-        glow: 'rgba(0, 255, 0, 0.18)',
+        color: '#2dd4bf',
+        surface: 'rgba(45, 212, 191, 0.08)',
+        glow: 'rgba(45, 212, 191, 0.18)',
     },
 ] as const;
 
