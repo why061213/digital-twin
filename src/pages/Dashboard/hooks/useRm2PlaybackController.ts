@@ -106,7 +106,10 @@ function diffGroupIds(previous: readonly Rm2GroupDTO[], next: readonly Rm2GroupD
 function preserveBackendRouteIdentity(routes: NonNullable<ReturnType<typeof adaptRenderRoute>>[]) {
     return routes.map((route) => ({
         ...route,
-        colorKey: route.colorKey?.trim() || route.orderId || route.orderFamilyId || route.lineId,
+        // 在 colorKey 后追加 lineId 确保每辆车独立取色，同一起终点的订单不再撞色
+        colorKey: route.colorKey?.trim()
+            ? `${route.colorKey.trim()}:${route.lineId}`
+            : (route.orderId ?? route.orderFamilyId ?? route.lineId),
         isRouteBranch: route.isRouteBranch === true,
     }));
 }
