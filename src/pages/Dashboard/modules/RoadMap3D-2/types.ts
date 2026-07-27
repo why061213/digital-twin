@@ -57,6 +57,7 @@ export type RoadObjectInfo = {
             toMeasureM: number;
             routeRole: 'NORMAL' | 'DEVIATION';
             sharedGroupId?: string | null;
+            branchGroupId?: string | null;
             coordinates?: [number, number][];
             sharedWith: Array<{ lineId: string }>;
         }>;

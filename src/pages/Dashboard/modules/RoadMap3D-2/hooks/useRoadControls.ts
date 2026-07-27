@@ -10,6 +10,7 @@ import {
     createRouteEndpointLayer,
     createRouteVisualLayers,
     createSharedProgressMaterial,
+    configureSharedProgressMaterial,
     updateSharedRouteColorRanges,
     updateSharedProgressMaterial,
 } from '../../routeVisuals';
@@ -33,10 +34,7 @@ import { syncVehicleAlertRipple } from '../../vehicleAlertRipples';
 //     0xa7f3d0,
 //     0xfed7aa,
 // ];
-const ROUTE_NORMAL_COLOR = 0x38bdf8;
-const ROUTE_DEVIATION_COLOR = 0xf59e0b;
-const ROUTE_SHARED_COLOR = 0xa855f7;
-const ROUTE_DEVIATION_SHARED_COLOR = 0xf43f5e;
+const ROUTE_COLORS = [0x38bdf8, 0x22c55e, 0xf59e0b, 0xa78bfa, 0xfb7185, 0x2dd4bf, 0xfacc15, 0x60a5fa];
 const VEHICLE_COLOR = 0xf8fafc;
 
 const TRUCK_MODEL_URL = '/models/rm2-truck.glb';
@@ -92,7 +90,43 @@ function geometryKeyFor(coords: [number, number][]) {
 }
 
 function orderKeyFor(lineId: string, info: RoadObjectInfo) {
-    return info.colorKey ?? info.orderFamilyId ?? info.orderId ?? `order-${lineId}`;
+    return info.orderFamilyId ?? info.orderId ?? info.colorKey ?? `order-${lineId}`;
+}
+
+function stableHash(value: string) {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+}
+
+function routeColorFor(orderKey: string) {
+    return ROUTE_COLORS[stableHash(orderKey) % ROUTE_COLORS.length];
+}
+
+function branchColors(baseColor: number, branchGroupId: string) {
+    const hash = stableHash(branchGroupId);
+    const base = new THREE.Color(baseColor);
+    const hsl = { h: 0, s: 0, l: 0 };
+    base.getHSL(hsl);
+    const hueShift = ((hash % 2001) / 1000 - 1) * 0.1;
+    const saturationShift = (((hash >>> 7) % 17) - 8) / 100;
+    const lightnessShift = (((hash >>> 13) % 21) - 10) / 100;
+    const branch = new THREE.Color().setHSL(
+        (hsl.h + hueShift + 1) % 1,
+        THREE.MathUtils.clamp(hsl.s + saturationShift, 0.42, 0.96),
+        THREE.MathUtils.clamp(hsl.l + lightnessShift, 0.34, 0.72),
+    );
+    const snakeHsl = { h: 0, s: 0, l: 0 };
+    branch.getHSL(snakeHsl);
+    const snake = new THREE.Color().setHSL(
+        snakeHsl.h,
+        snakeHsl.s,
+        Math.max(0.12, snakeHsl.l * 0.8),
+    );
+    return { branch: branch.getHex(), snake: snake.getHex() };
 }
 
 function drawTubeProgress(tube: THREE.Mesh, progress: number, tubularSegments: number, radialSegments: number) {
@@ -482,20 +516,22 @@ export function useRoadControls(
         roads.forEach((source) => {
             const material = source.sharedProgressTube.material as THREE.ShaderMaterial;
             const analysis = source.info.routeAnalysis;
+            const orderKey = orderKeyFor(source.pathKey, source.info);
+            const baseColor = routeColorFor(orderKey);
+            configureSharedProgressMaterial(material, baseColor, source.pathKey);
             if (source.info.isBaselineRoute || !analysis || analysis.totalLengthM <= 0) {
                 updateSharedRouteColorRanges(material, []);
                 return;
             }
             const ranges = analysis.parts.flatMap((part) => {
-                const isShared = part.sharedWith.length > 0;
-                const isDeviation = part.routeRole === 'DEVIATION';
-                if (!isShared && !isDeviation) return [];
+                if (part.routeRole !== 'DEVIATION') return [];
+                const groupId = part.branchGroupId ?? part.partId;
+                const colors = branchColors(baseColor, groupId);
                 return [{
                     start: part.fromMeasureM / analysis.totalLengthM,
                     end: part.toMeasureM / analysis.totalLengthM,
-                    color: isShared
-                        ? isDeviation ? ROUTE_DEVIATION_SHARED_COLOR : ROUTE_SHARED_COLOR
-                        : ROUTE_DEVIATION_COLOR,
+                    color: colors.branch,
+                    snakeColor: colors.snake,
                 }];
             });
             updateSharedRouteColorRanges(material, ranges);
@@ -641,7 +677,7 @@ export function useRoadControls(
         if (lane) return lane;
 
         const laneIndex = road.orders.size;
-        const color = ROUTE_NORMAL_COLOR;
+        const color = routeColorFor(orderId);
         const progressGeo = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, 0.17, road.radialSegments, false);
         progressGeo.setDrawRange(0, 0);
         const progressTube = new THREE.Mesh(progressGeo, new THREE.MeshBasicMaterial({
@@ -763,7 +799,7 @@ export function useRoadControls(
                             disposeObject3D(lane.endpointLayer);
                             lane.endpointLayer = info.showRouteEndpoints === false
                                 ? new THREE.Group()
-                                : createRouteEndpointLayer(samples, 'rm2', info, ROUTE_NORMAL_COLOR, info.routeIndex ?? lane.laneIndex);
+                                : createRouteEndpointLayer(samples, 'rm2', info, routeColorFor(orderKeyFor(existing.pathKey, info)), info.routeIndex ?? lane.laneIndex);
                             existing.group.add(lane.endpointLayer);
                         });
                         const oldVisualLayers = existing.group.children.find(
@@ -839,6 +875,7 @@ export function useRoadControls(
             selectionTube.userData = { roadId: pathKey, objectType: info.isBaselineRoute ? '计划基线' : '路线结构' };
 
             const sharedProgressMaterial = createSharedProgressMaterial();
+            configureSharedProgressMaterial(sharedProgressMaterial, routeColorFor(orderId), pathKey);
             const sharedProgressTube = new THREE.Mesh(
                 new THREE.TubeGeometry(displayCurve, tubularSegments, 0.28, radialSegments, false),
                 sharedProgressMaterial,
@@ -846,6 +883,9 @@ export function useRoadControls(
             sharedProgressTube.position.y = 0.045;
             sharedProgressTube.renderOrder = 9;
             sharedProgressTube.userData = { roadId: pathKey, objectType: '路线语义' };
+            sharedProgressTube.onBeforeRender = () => {
+                sharedProgressMaterial.uniforms.uTime.value = performance.now() / 1_000;
+            };
             sharedProgressTube.visible = !info.isBaselineRoute;
             const labelAnchor = samples[Math.floor(samples.length * 0.58)]?.clone() ?? samples[0].clone();
             labelAnchor.x += 1.25;

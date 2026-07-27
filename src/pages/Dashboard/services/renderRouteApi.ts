@@ -12,6 +12,7 @@ export type RouteAnalysisDTO = {
         routeRole: 'NORMAL' | 'DEVIATION';
         coordinates: [number, number][];
         sharedGroupId?: string | null;
+        branchGroupId?: string | null;
         sharedWith: Array<{
             lineId: string;
             visualKey?: string | null;

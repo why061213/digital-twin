@@ -31,6 +31,7 @@ export type SharedRouteColorRange = {
     start: number;
     end: number;
     color: number;
+    snakeColor?: number;
 };
 
 const PRESETS: Record<'rm1' | 'rm2', RouteVisualPreset> = {
@@ -318,8 +319,15 @@ export function createSharedProgressMaterial() {
     return new THREE.ShaderMaterial({
         uniforms: {
             uColor0: { value: new THREE.Color(0x38bdf8) },
+            uSnakeColor: { value: new THREE.Color(0x0ea5e9) },
+            uProgress: { value: 0 },
+            uTime: { value: 0 },
+            uSnakeFrequency: { value: 17 },
+            uSnakeSpeed: { value: 0.23 },
+            uSnakeLength: { value: 0.29 },
             uSharedRanges: { value: Array.from({ length: MAX_SHARED_ROUTE_RANGES }, () => new THREE.Vector2(-1, -1)) },
             uSharedColors: { value: Array.from({ length: MAX_SHARED_ROUTE_RANGES }, () => new THREE.Color(0xffffff)) },
+            uSharedSnakeColors: { value: Array.from({ length: MAX_SHARED_ROUTE_RANGES }, () => new THREE.Color(0xffffff)) },
             uSharedRangeCount: { value: 0 },
         },
         vertexShader: `
@@ -331,20 +339,37 @@ export function createSharedProgressMaterial() {
         `,
         fragmentShader: `
             uniform vec3 uColor0;
+            uniform vec3 uSnakeColor;
+            uniform float uProgress;
+            uniform float uTime;
+            uniform float uSnakeFrequency;
+            uniform float uSnakeSpeed;
+            uniform float uSnakeLength;
             uniform vec2 uSharedRanges[${MAX_SHARED_ROUTE_RANGES}];
             uniform vec3 uSharedColors[${MAX_SHARED_ROUTE_RANGES}];
+            uniform vec3 uSharedSnakeColors[${MAX_SHARED_ROUTE_RANGES}];
             uniform int uSharedRangeCount;
             varying vec2 vUv;
 
             void main() {
                 vec3 color = uColor0;
+                vec3 snakeColor = uSnakeColor;
                 for (int i = 0; i < ${MAX_SHARED_ROUTE_RANGES}; i++) {
                     if (i >= uSharedRangeCount) break;
                     if (vUv.x >= uSharedRanges[i].x && vUv.x <= uSharedRanges[i].y) {
                         color = uSharedColors[i];
+                        snakeColor = uSharedSnakeColors[i];
                     }
                 }
 
+                float travelled = 1.0 - step(uProgress, vUv.x);
+                float phase = fract(vUv.x * uSnakeFrequency - uTime * uSnakeSpeed);
+                float tail = smoothstep(0.0, 0.055, phase);
+                float head = 1.0 - smoothstep(uSnakeLength - 0.07, uSnakeLength, phase);
+                float movingSnake = travelled * tail * head;
+                float currentHead = travelled * (1.0 - smoothstep(0.0, 0.018, abs(vUv.x - uProgress)));
+                float snakeMask = max(movingSnake, currentHead);
+                color = mix(color, snakeColor, snakeMask * 0.96);
                 float crown = 0.72 + 0.28 * pow(abs(sin(vUv.y * 3.14159265)), 4.0);
                 gl_FragColor = vec4(color, 0.88 + crown * 0.12);
             }
@@ -357,9 +382,36 @@ export function createSharedProgressMaterial() {
 
 export function updateSharedProgressMaterial(
     material: THREE.ShaderMaterial,
-    _lanes: Array<{ color: number; progress: number }>,
+    lanes: Array<{ color: number; progress: number }>,
 ) {
-    (material.uniforms.uColor0.value as THREE.Color).setHex(0x38bdf8);
+    material.uniforms.uProgress.value = Math.max(0, ...lanes.map((lane) => THREE.MathUtils.clamp(lane.progress, 0, 1)));
+}
+
+export function configureSharedProgressMaterial(
+    material: THREE.ShaderMaterial,
+    baseColor: number,
+    routeKey: string,
+) {
+    const primes = [11, 13, 17, 19, 23, 29, 31];
+    let hash = 2166136261;
+    for (let index = 0; index < routeKey.length; index += 1) {
+        hash ^= routeKey.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    const positiveHash = hash >>> 0;
+    const frequency = primes[positiveHash % primes.length];
+    const speedPrime = primes[Math.floor(positiveHash / primes.length) % primes.length];
+    const lengthPrime = primes[Math.floor(positiveHash / (primes.length * primes.length)) % primes.length];
+    const base = new THREE.Color(baseColor);
+    const snake = base.clone();
+    const hsl = { h: 0, s: 0, l: 0 };
+    snake.getHSL(hsl);
+    snake.setHSL(hsl.h, hsl.s, Math.max(0.12, hsl.l * 0.8));
+    (material.uniforms.uColor0.value as THREE.Color).copy(base);
+    (material.uniforms.uSnakeColor.value as THREE.Color).copy(snake);
+    material.uniforms.uSnakeFrequency.value = frequency;
+    material.uniforms.uSnakeSpeed.value = speedPrime / 83;
+    material.uniforms.uSnakeLength.value = THREE.MathUtils.clamp(lengthPrime / 67, 0.18, 0.46);
 }
 
 export function updateSharedRouteColorRanges(
@@ -369,6 +421,7 @@ export function updateSharedRouteColorRanges(
     const visible = ranges.slice(0, MAX_SHARED_ROUTE_RANGES);
     const rangeUniforms = material.uniforms.uSharedRanges.value as THREE.Vector2[];
     const colorUniforms = material.uniforms.uSharedColors.value as THREE.Color[];
+    const snakeColorUniforms = material.uniforms.uSharedSnakeColors.value as THREE.Color[];
     material.uniforms.uSharedRangeCount.value = visible.length;
     for (let index = 0; index < MAX_SHARED_ROUTE_RANGES; index += 1) {
         const range = visible[index];
@@ -383,6 +436,7 @@ export function updateSharedRouteColorRanges(
             THREE.MathUtils.clamp(Math.max(range.start, range.end), 0, 1),
         );
         colorUniform.setHex(range.color);
+        snakeColorUniforms[index].setHex(range.snakeColor ?? range.color);
     }
 }
 
@@ -433,7 +487,7 @@ export function createRouteVisualLayers(
     const layers = new THREE.Group();
     layers.name = `route-visual-layers-${mode}`;
 
-    const screenGlow = createScreenSpaceLine(samples, 0x38bdf8, preset.screenGlowWidth, 0.12);
+    const screenGlow = createScreenSpaceLine(samples, 0x94a3b8, preset.screenGlowWidth, 0.08);
     screenGlow.renderOrder = 0;
     const screenCore = createScreenSpaceLine(samples, 0x07111d, preset.screenCoreWidth, 0.88);
     screenCore.renderOrder = 1;
@@ -465,9 +519,9 @@ export function createRouteVisualLayers(
             false,
         ),
         new THREE.MeshBasicMaterial({
-            color: 0x7dd3fc,
+            color: 0x64748b,
             transparent: true,
-            opacity: 0.42,
+            opacity: 0.22,
             depthWrite: false,
         }),
     );
@@ -495,6 +549,7 @@ export function createRouteVisualLayers(
         flowMaterial,
     );
     flow.renderOrder = 8;
+    flow.visible = false;
     flow.onBeforeRender = () => {
         flowMaterial.uniforms.uTime.value = performance.now() / 1_000;
     };
