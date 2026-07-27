@@ -45,6 +45,7 @@ function routeInfo(route: RenderRouteDTO, routeIndex: number, routeColorIndex: n
         speedKmh: route.speedKmh,
         routeLengthKm: route.routeLengthKm,
         orderId: route.orderId,
+        orderFamilyId: route.businessLineId,
         pathKey: route.pathKey,
         colorKey: route.colorKey,
         isRouteBranch: route.isRouteBranch,
@@ -81,6 +82,19 @@ function calculateBounds(routes: readonly Rm2PreparedRoute[]) {
         maxLat = Math.max(maxLat, lat);
     }));
     return { minLng, maxLng, minLat, maxLat };
+}
+
+export function buildRm2RouteColorIndexes(group: Rm2GroupDTO) {
+    const byBusinessLineId = new Map(
+        group.orderLineIds.map((businessLineId, colorIndex) => [businessLineId, colorIndex]),
+    );
+    const byVehicleLineId = new Map<string, number>();
+    group.orderLineIds.forEach((businessLineId, colorIndex) => {
+        (group.vehicleLineIdsByOrderLineId[businessLineId] ?? []).forEach((lineId) => {
+            byVehicleLineId.set(lineId, colorIndex);
+        });
+    });
+    return { byBusinessLineId, byVehicleLineId };
 }
 
 export function createRm2SceneAdapter(
@@ -146,7 +160,12 @@ export function createRm2SceneAdapter(
             const rejectedLineIds: string[] = [];
             const preparedRoutes: Rm2PreparedRoute[] = [];
             const seenLineIds = new Set<string>();
-            const orderColorIndexes = new Map<string, number>();
+            // 颜色槽必须以后端分组使用的业务路线 ID 为准。复合行程中的多张订单
+            // 可能共享同一个 orderId；用 orderId 分色会把它们错误地压进同一颜色。
+            const {
+                byBusinessLineId: colorIndexByBusinessLineId,
+                byVehicleLineId: colorIndexByVehicleLineId,
+            } = buildRm2RouteColorIndexes(group);
 
             routes.forEach((rawRoute, routeIndex) => {
                 if (!adaptRenderRoute(rawRoute)
@@ -157,12 +176,9 @@ export function createRm2SceneAdapter(
                 }
 
                 seenLineIds.add(rawRoute.lineId);
-                const orderColorKey = rawRoute.orderId?.trim()
-                    || rawRoute.businessLineId?.trim()
-                    || rawRoute.lineId;
-                if (!orderColorIndexes.has(orderColorKey)) {
-                    orderColorIndexes.set(orderColorKey, orderColorIndexes.size);
-                }
+                const routeColorIndex = colorIndexByBusinessLineId.get(rawRoute.businessLineId)
+                    ?? colorIndexByVehicleLineId.get(rawRoute.lineId)
+                    ?? routeIndex;
                 const lineIds = pathLineIds.get(rawRoute.pathKey) ?? [];
                 lineIds.push(rawRoute.lineId);
                 pathLineIds.set(rawRoute.pathKey, lineIds);
@@ -173,7 +189,7 @@ export function createRm2SceneAdapter(
                     baselineCoordinates: rawRoute.baselineCoordinates,
                     baselinePathKey: rawRoute.baselinePathKey,
                     initialPosition: rawRoute.coordinates[0],
-                    info: routeInfo(rawRoute, routeIndex, orderColorIndexes.get(orderColorKey) ?? 0),
+                    info: routeInfo(rawRoute, routeIndex, routeColorIndex),
                     visualKey: rawRoute.meta?.visualKey ?? rawRoute.lineId,
                 });
             });
