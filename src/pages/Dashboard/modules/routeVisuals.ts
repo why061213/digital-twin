@@ -37,6 +37,8 @@ export type RouteStopVisualInfo = {
 const MAX_SHARED_ROUTE_RANGES = 24;
 // Shader 相位为 x * frequency - time * speed，因此真实沿线速度是 speed / frequency。
 const SHARED_SNAKE_ROUTE_SPEED = 0.014;
+const RM2_SNAKE_FREQUENCY = 5;
+const RM2_SNAKE_LENGTH = 0.24;
 
 export type SharedRouteColorRange = {
     start: number;
@@ -457,6 +459,7 @@ export function configureSharedProgressMaterial(
     material: THREE.ShaderMaterial,
     baseColor: number,
     routeKey: string,
+    motionProfile: 'varied' | 'rm2-synchronized' = 'varied',
 ) {
     const primes = [11, 13, 17, 19, 23, 29, 31];
     let hash = 2166136261;
@@ -465,7 +468,9 @@ export function configureSharedProgressMaterial(
         hash = Math.imul(hash, 16777619);
     }
     const positiveHash = hash >>> 0;
-    const frequency = primes[positiveHash % primes.length];
+    const frequency = motionProfile === 'rm2-synchronized'
+        ? RM2_SNAKE_FREQUENCY
+        : primes[positiveHash % primes.length];
     const lengthPrime = primes[Math.floor(positiveHash / (primes.length * primes.length)) % primes.length];
     const base = new THREE.Color(baseColor);
     const snake = base.clone();
@@ -477,7 +482,9 @@ export function configureSharedProgressMaterial(
     material.uniforms.uSnakeFrequency.value = frequency;
     // 不同质数频率仍保持差异，但所有蛇沿路线前进的速度完全一致，避免共线时相互追赶。
     material.uniforms.uSnakeSpeed.value = frequency * SHARED_SNAKE_ROUTE_SPEED;
-    material.uniforms.uSnakeLength.value = THREE.MathUtils.clamp(lengthPrime / 67, 0.18, 0.46);
+    material.uniforms.uSnakeLength.value = motionProfile === 'rm2-synchronized'
+        ? RM2_SNAKE_LENGTH
+        : THREE.MathUtils.clamp(lengthPrime / 67, 0.18, 0.46);
 }
 
 export function updateSharedRouteColorRanges(

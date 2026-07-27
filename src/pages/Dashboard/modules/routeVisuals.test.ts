@@ -35,4 +35,19 @@ describe('route snake overlay material', () => {
         first.dispose();
         second.dispose();
     });
+
+    it('uses one low frequency and one segment length for RM2 routes', () => {
+        const first = createSharedProgressMaterial('snake');
+        const second = createSharedProgressMaterial('snake');
+        configureSharedProgressMaterial(first, 0x3b82f6, 'route-blue-a', 'rm2-synchronized');
+        configureSharedProgressMaterial(second, 0xf59e0b, 'route-orange-b', 'rm2-synchronized');
+
+        expect(first.uniforms.uSnakeFrequency.value).toBe(5);
+        expect(second.uniforms.uSnakeFrequency.value).toBe(5);
+        expect(first.uniforms.uSnakeLength.value).toBeCloseTo(0.24, 10);
+        expect(second.uniforms.uSnakeLength.value).toBeCloseTo(0.24, 10);
+
+        first.dispose();
+        second.dispose();
+    });
 });

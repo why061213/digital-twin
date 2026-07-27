@@ -574,9 +574,9 @@ export function useRoadControls(
             const analysis = source.info.routeAnalysis;
             const orderKey = orderKeyFor(source.pathKey, source.info);
             const baseColor = routeColorFor(orderKey, source.info.routeColorIndex);
-            configureSharedProgressMaterial(material, baseColor, source.pathKey);
-            configureSharedProgressMaterial(travelledMaterial, baseColor, source.pathKey);
-            configureSharedProgressMaterial(snakeMaterial, baseColor, source.pathKey);
+            configureSharedProgressMaterial(material, baseColor, source.pathKey, 'rm2-synchronized');
+            configureSharedProgressMaterial(travelledMaterial, baseColor, source.pathKey, 'rm2-synchronized');
+            configureSharedProgressMaterial(snakeMaterial, baseColor, source.pathKey, 'rm2-synchronized');
             if (source.info.isBaselineRoute || !analysis || analysis.totalLengthM <= 0) {
                 updateSharedRouteColorRanges(material, []);
                 updateSharedRouteColorRanges(travelledMaterial, []);
@@ -955,7 +955,7 @@ export function useRoadControls(
             selectionTube.userData = { roadId: pathKey, objectType: info.isBaselineRoute ? '计划基线' : '路线结构' };
 
             const sharedProgressMaterial = createSharedProgressMaterial('untravelled');
-            configureSharedProgressMaterial(sharedProgressMaterial, routeColorFor(orderId, info.routeColorIndex), pathKey);
+            configureSharedProgressMaterial(sharedProgressMaterial, routeColorFor(orderId, info.routeColorIndex), pathKey, 'rm2-synchronized');
             const sharedProgressTube = new THREE.Mesh(
                 new THREE.TubeGeometry(displayCurve, tubularSegments, 0.28, radialSegments, false),
                 sharedProgressMaterial,
@@ -965,7 +965,7 @@ export function useRoadControls(
             sharedProgressTube.userData = { roadId: pathKey, objectType: '未走路线' };
             sharedProgressTube.visible = !info.isBaselineRoute;
             const travelledProgressMaterial = createSharedProgressMaterial('travelled');
-            configureSharedProgressMaterial(travelledProgressMaterial, routeColorFor(orderId, info.routeColorIndex), pathKey);
+            configureSharedProgressMaterial(travelledProgressMaterial, routeColorFor(orderId, info.routeColorIndex), pathKey, 'rm2-synchronized');
             const travelledProgressTube = new THREE.Mesh(
                 new THREE.TubeGeometry(displayCurve, tubularSegments, 0.30, radialSegments, false),
                 travelledProgressMaterial,
@@ -975,13 +975,14 @@ export function useRoadControls(
             travelledProgressTube.userData = { roadId: pathKey, objectType: '已走路线' };
             travelledProgressTube.visible = !info.isBaselineRoute;
             const snakeProgressMaterial = createSharedProgressMaterial('snake');
-            configureSharedProgressMaterial(snakeProgressMaterial, routeColorFor(orderId, info.routeColorIndex), pathKey);
+            configureSharedProgressMaterial(snakeProgressMaterial, routeColorFor(orderId, info.routeColorIndex), pathKey, 'rm2-synchronized');
             const snakeProgressTube = new THREE.Mesh(
                 new THREE.TubeGeometry(displayCurve, tubularSegments, 0.34, radialSegments, false),
                 snakeProgressMaterial,
             );
             snakeProgressTube.position.y = 0.09;
-            snakeProgressTube.renderOrder = 100;
+            // 路线之上、所有车辆之下：跟随车最低为 18，领头车/模型为 36/44。
+            snakeProgressTube.renderOrder = 14;
             snakeProgressTube.userData = { roadId: pathKey, objectType: '路线小蛇顶层' };
             snakeProgressTube.onBeforeRender = () => {
                 snakeProgressMaterial.uniforms.uTime.value = performance.now() / 1_000;
