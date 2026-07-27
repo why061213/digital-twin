@@ -42,6 +42,12 @@ export type RenderRouteDTO = {
         targetStopId?: string;
         targetOrderInstanceId?: string;
         targetAction?: 'PICKUP' | 'DELIVERY';
+        tripPhase?: string;
+        tripDecision?: string;
+        positionQuality?: string;
+        pendingOrderCount?: number;
+        onboardOrderCount?: number;
+        completedOrderCount?: number;
     };
 };
 
@@ -347,6 +353,13 @@ export function adaptRenderRoute(route: RenderRouteDTO): RoadPathMessage | null 
         targetStopId: route.meta?.targetStopId,
         targetOrderInstanceId: route.meta?.targetOrderInstanceId,
         targetAction: route.meta?.targetAction,
+        tripPhase: route.meta?.tripPhase,
+        tripDecision: route.meta?.tripDecision,
+        positionQuality: route.meta?.positionQuality,
+        pendingOrderCount: route.meta?.pendingOrderCount,
+        onboardOrderCount: route.meta?.onboardOrderCount,
+        completedOrderCount: route.meta?.completedOrderCount,
+        routeSignature: route.routeSignature,
         plate: route.plate,
         vehicleId: route.vehicleId,
         cargo: route.cargo,

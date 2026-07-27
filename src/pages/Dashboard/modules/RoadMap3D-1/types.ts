@@ -49,6 +49,12 @@ export type RoadObjectInfo = {
     targetStopId?: string;
     targetOrderInstanceId?: string;
     targetAction?: 'PICKUP' | 'DELIVERY';
+    tripPhase?: string;
+    tripDecision?: string;
+    positionQuality?: string;
+    pendingOrderCount?: number;
+    onboardOrderCount?: number;
+    completedOrderCount?: number;
 };
 
 export type VehicleBarState = {

@@ -28,6 +28,7 @@ import {
     safeTravelDurationMs,
     trustedTruckSpeedKmh,
 } from '../utils';
+import { routeVisualKey, sceneRouteId } from '../playback/rm2RouteIdentity';
 
 type RoadMapMotionHandle = {
     addRoadPath: (id: string, coords: [number, number][], info?: RoadObjectInfo) => void;
@@ -79,6 +80,17 @@ function positionDetailsPatch(message: TruckPositionMessage) {
         ...(message.routeDeviationReasonCode !== undefined ? { routeDeviationReasonCode: message.routeDeviationReasonCode } : {}),
         ...(message.routeDeviationConfidence !== undefined ? { routeDeviationConfidence: message.routeDeviationConfidence } : {}),
         ...(message.routeAnomalyScore !== undefined ? { routeAnomalyScore: message.routeAnomalyScore } : {}),
+        ...(message.tripId !== undefined ? { tripId: message.tripId } : {}),
+        ...(message.visualKey !== undefined ? { visualKey: message.visualKey } : {}),
+        ...(message.currentLegId !== undefined ? { currentLegId: message.currentLegId } : {}),
+        ...(message.planVersion !== undefined ? { planVersion: message.planVersion } : {}),
+        ...(message.targetAction !== undefined ? { targetAction: message.targetAction } : {}),
+        ...(message.tripPhase !== undefined ? { tripPhase: message.tripPhase } : {}),
+        ...(message.tripDecision !== undefined ? { tripDecision: message.tripDecision } : {}),
+        ...(message.positionQuality !== undefined ? { positionQuality: message.positionQuality } : {}),
+        ...(message.pendingOrderCount !== undefined ? { pendingOrderCount: message.pendingOrderCount } : {}),
+        ...(message.onboardOrderCount !== undefined ? { onboardOrderCount: message.onboardOrderCount } : {}),
+        ...(message.completedOrderCount !== undefined ? { completedOrderCount: message.completedOrderCount } : {}),
     };
 }
 
@@ -133,7 +145,7 @@ export function useTruckPositionController({
     }, [routeOrders]);
 
     const syncRoadRoute = useCallback((route: ActiveRoute) => {
-        roadMapRef.current?.addRoadPath(route.lineId, route.coordinates, {
+        roadMapRef.current?.addRoadPath(sceneRouteId(route), route.coordinates, {
             plate: route.plate,
             cargo: route.cargo,
             from: route.from,
@@ -166,11 +178,17 @@ export function useTruckPositionController({
             targetStopId: route.targetStopId,
             targetOrderInstanceId: route.targetOrderInstanceId,
             targetAction: route.targetAction,
+            tripPhase: route.tripPhase,
+            tripDecision: route.tripDecision,
+            positionQuality: route.positionQuality,
+            pendingOrderCount: route.pendingOrderCount,
+            onboardOrderCount: route.onboardOrderCount,
+            completedOrderCount: route.completedOrderCount,
         });
     }, [roadMapRef]);
 
     const renderTruckPosition = useCallback((route: ActiveRoute, now: number) => {
-        roadMapRef.current?.updateTruckPosition(route.lineId, predictedPosition(route, now), {
+        roadMapRef.current?.updateTruckPosition(sceneRouteId(route), predictedPosition(route, now), {
             plate: route.plate,
             cargo: route.cargo,
             from: route.from,
@@ -202,6 +220,12 @@ export function useTruckPositionController({
             targetStopId: route.targetStopId,
             targetOrderInstanceId: route.targetOrderInstanceId,
             targetAction: route.targetAction,
+            tripPhase: route.tripPhase,
+            tripDecision: route.tripDecision,
+            positionQuality: route.positionQuality,
+            pendingOrderCount: route.pendingOrderCount,
+            onboardOrderCount: route.onboardOrderCount,
+            completedOrderCount: route.completedOrderCount,
         });
     }, [roadMapRef]);
 
@@ -210,7 +234,10 @@ export function useTruckPositionController({
             if (!message.coordinates || message.coordinates.length < 2) return null;
 
             const now = performance.now();
-            const existing = activeRoutesRef.current.get(message.lineId);
+            const incomingVisualKey = routeVisualKey(message);
+            const existing = activeRoutesRef.current.get(message.lineId)
+                ?? [...activeRoutesRef.current.values()]
+                    .find((route) => routeVisualKey(route) === incomingVisualKey);
             const totalPathLength = pathLength(message.coordinates);
             const routeLengthKm = message.routeLengthKm ?? pathLengthKm(message.coordinates);
             const speedKmh = trustedTruckSpeedKmh(message.speedKmh)
@@ -227,6 +254,7 @@ export function useTruckPositionController({
                 const currentPosition = predictedPosition(existing, now);
                 const updated: ActiveRoute = {
                     ...existing,
+                    lineId: message.lineId,
                     orderId: message.orderId ?? existing.orderId,
                     orderFamilyId: message.orderFamilyId ?? existing.orderFamilyId,
                     orderName: message.orderName ?? existing.orderName,
@@ -244,6 +272,13 @@ export function useTruckPositionController({
                     targetStopId: message.targetStopId ?? existing.targetStopId,
                     targetOrderInstanceId: message.targetOrderInstanceId ?? existing.targetOrderInstanceId,
                     targetAction: message.targetAction ?? existing.targetAction,
+                    tripPhase: message.tripPhase ?? existing.tripPhase,
+                    tripDecision: message.tripDecision ?? existing.tripDecision,
+                    positionQuality: message.positionQuality ?? existing.positionQuality,
+                    pendingOrderCount: message.pendingOrderCount ?? existing.pendingOrderCount,
+                    onboardOrderCount: message.onboardOrderCount ?? existing.onboardOrderCount,
+                    completedOrderCount: message.completedOrderCount ?? existing.completedOrderCount,
+                    routeSignature: message.routeSignature ?? existing.routeSignature,
                     plate: message.plate ?? existing.plate,
                     cargo: message.cargo ?? existing.cargo,
                     cargoWeight: message.cargoWeight ?? existing.cargoWeight,
@@ -264,6 +299,7 @@ export function useTruckPositionController({
                     hasRealPosition: existing.hasRealPosition,
                     arrivalCheckRequested: false,
                 };
+                if (existing.lineId !== updated.lineId) activeRoutesRef.current.delete(existing.lineId);
                 activeRoutesRef.current.set(updated.lineId, updated);
                 return updated;
             }
@@ -294,6 +330,13 @@ export function useTruckPositionController({
                 targetStopId: message.targetStopId,
                 targetOrderInstanceId: message.targetOrderInstanceId,
                 targetAction: message.targetAction,
+                tripPhase: message.tripPhase,
+                tripDecision: message.tripDecision,
+                positionQuality: message.positionQuality,
+                pendingOrderCount: message.pendingOrderCount,
+                onboardOrderCount: message.onboardOrderCount,
+                completedOrderCount: message.completedOrderCount,
+                routeSignature: message.routeSignature,
                 from: message.from ?? '起点',
                 to: message.to ?? '目的地',
                 fromCoords: message.coordinates[0],
@@ -394,9 +437,10 @@ export function useTruckPositionController({
 
     const finishRoute = useCallback((lineId: string) => {
         const alreadyFinished = completedRouteIdsRef.current.has(lineId);
+        const route = activeRoutesRef.current.get(lineId);
         completedRouteIdsRef.current.add(lineId);
         activeRoutesRef.current.delete(lineId);
-        roadMapRef.current?.removeRoadPath(lineId);
+        if (route) roadMapRef.current?.removeRoadPath(sceneRouteId(route));
         setRouteOrders((prev) =>
             prev.map((item) => (item.lineId === lineId ? {...item, status: '已完成'} : item))
         );
@@ -453,7 +497,6 @@ export function useTruckPositionController({
 
             if (routeReplaced) {
                 // 校准完成后再换线，并在同一调用内恢复权威进度，禁止出现 0% 中间帧。
-                roadMapRef.current?.removeRoadPath(route.lineId);
                 syncRoadRoute(route);
             }
 

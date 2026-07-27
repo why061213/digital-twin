@@ -6,6 +6,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import type { RouteOrder } from '../hooks/useDashboardRealtime';
 import { routeColorKey, routeTone } from './routePresentation';
 import { resolveVehicleAlarmSeverity } from './vehicleAlertRipples';
+import { tripBusinessStage } from '../playback/rm2RouteIdentity';
 
 export type WarehouseFocusState = {
     cityName: string;
@@ -624,7 +625,7 @@ function VehicleTransportDetails({
                             {detailRoutes.length > 0 ? `${targetIndex + 1} / ${detailRoutes.length}` : '0 / 0'}
                         </div>
                         <div className="mt-1 rounded border border-emerald-300/25 bg-emerald-300/8 px-2 py-0.5 text-[10px] text-emerald-200">
-                            {targetRoute?.status || '等待数据'}
+                            {targetRoute ? tripBusinessStage(targetRoute) : '等待数据'}
                         </div>
                     </div>
                 </div>
@@ -905,7 +906,7 @@ function RoadGroupRightPanels({
                             </span>
                         )}
                         <span className={`rounded border px-2 py-0.5 text-[10px] ${statusClass}`}>
-                            {route.status}
+                            {tripBusinessStage(route)}
                         </span>
                     </span>
                 </div>

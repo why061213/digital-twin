@@ -16,6 +16,11 @@ import {
 import type { ActiveRoute, ViewMode } from '../types';
 import type { VehiclePositionsMessage } from './useDashboardRealtime';
 import { useTruckPositionController } from './useTruckPositionController';
+import {
+    removedSceneRouteIds,
+    routeRequiresSync,
+    routeVisualKey,
+} from '../playback/rm2RouteIdentity';
 
 const TOPOLOGY_REFRESH_INTERVAL_MS = 60_000;
 const TOPOLOGY_REFRESH_DEBOUNCE_MS = 250;
@@ -313,7 +318,12 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
         generationRef.current = generation;
         const previousNode = currentNodeRef.current;
         const previousGroupId = activeGroupIdRef.current;
-        const previousLineIds = new Set(activeRoutesRef.current.keys());
+        const previousRoutesByVisual = new Map(
+            [...activeRoutesRef.current.values()].map((route) => [
+                routeVisualKey(route),
+                { ...route, coordinates: route.coordinates.map((coordinate) => [...coordinate] as [number, number]) },
+            ]),
+        );
         const provinceChanged = previousNode?.provinceKey !== node.provinceKey
             || !sameKeys(previousNode?.provinceMapKeys, node.provinceMapKeys);
         const directionChanged = provinceChanged
@@ -421,13 +431,12 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 roadMapRef.current?.clearRoads();
                 showRoutes(activeRoutes);
             } else {
-                const nextLineIds = new Set(activeRoutes.map((route) => route.lineId));
-                previousLineIds.forEach((lineId) => {
-                    if (!nextLineIds.has(lineId)) roadMapRef.current?.removeRoadPath(lineId);
-                });
+                removedSceneRouteIds([...previousRoutesByVisual.values()], activeRoutes)
+                    .forEach((routeId) => roadMapRef.current?.removeRoadPath(routeId));
                 const now = performance.now();
                 activeRoutes.forEach((route) => {
-                    if (!previousLineIds.has(route.lineId)) syncRoadRoute(route);
+                    const previous = previousRoutesByVisual.get(routeVisualKey(route));
+                    if (routeRequiresSync(previous, route)) syncRoadRoute(route);
                     if (route.hasRealPosition) renderTruckPosition(route, now);
                 });
             }

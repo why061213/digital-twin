@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import type { HoverInfo, RoadObjectInfo } from '../types';
 import { formatNumber, screenPosition } from '../utils';
 import { useRoadMapRefs } from './useRoadMapRefs';
+import { tripBusinessStage } from '../../../playback/rm2RouteIdentity';
 
 function deviationStateLabel(state: RoadObjectInfo['routeDeviationState']) {
     switch (state) {
@@ -61,9 +62,12 @@ export function useRoadSelection(refs: ReturnType<typeof useRoadMapRefs>) {
             y,
             title: info.plate ?? (objectType === '车辆进度条' ? '车辆信息' : '路线信息'),
             subtitle: routeTitle,
-            status: info.status ?? '--',
+            status: tripBusinessStage(info),
             rows: [
                 ['订单', info.orderName ?? info.orderId ?? '--'],
+                ['Trip阶段', tripBusinessStage(info)],
+                ['定位质量', info.positionQuality ?? '--'],
+                ['订单进度', `${info.pendingOrderCount ?? 0}待装 / ${info.onboardOrderCount ?? 0}在途 / ${info.completedOrderCount ?? 0}完成`],
                 ['货物', info.cargo ?? '--'],
                 ['当前经度', formatNumber(coords[0], 6)],
                 ['当前纬度', formatNumber(coords[1], 6)],

@@ -53,6 +53,13 @@ export type RoadPathMessage = {
     targetStopId?: string;
     targetOrderInstanceId?: string;
     targetAction?: 'PICKUP' | 'DELIVERY';
+    tripPhase?: string;
+    tripDecision?: string;
+    positionQuality?: string;
+    pendingOrderCount?: number;
+    onboardOrderCount?: number;
+    completedOrderCount?: number;
+    routeSignature?: string;
 };
 
 export type TruckPositionMessage = {
@@ -98,6 +105,17 @@ export type TruckPositionMessage = {
     routeAnomalyScore?: number;
     routeDeviationSampleCount?: number;
     sequence?: number;
+    tripId?: string;
+    visualKey?: string;
+    currentLegId?: string;
+    planVersion?: number;
+    targetAction?: 'PICKUP' | 'DELIVERY';
+    tripPhase?: string;
+    tripDecision?: string;
+    positionQuality?: string;
+    pendingOrderCount?: number;
+    onboardOrderCount?: number;
+    completedOrderCount?: number;
 };
 
 export type VehiclePositionsMessage = {
@@ -165,6 +183,13 @@ export type RouteOrder = {
     targetStopId?: string;
     targetOrderInstanceId?: string;
     targetAction?: 'PICKUP' | 'DELIVERY';
+    tripPhase?: string;
+    tripDecision?: string;
+    positionQuality?: string;
+    pendingOrderCount?: number;
+    onboardOrderCount?: number;
+    completedOrderCount?: number;
+    routeSignature?: string;
     speedKmh?: number | null;
     driverName?: string;
     address?: string;
