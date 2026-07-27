@@ -46,6 +46,18 @@ export type RoadObjectInfo = {
     isBaselineRoute?: boolean;
     isVehicleRoute?: boolean;
     deviationCoordinates?: [number, number][];
+    routeAnalysis?: {
+        analysisVersion: string;
+        totalLengthM: number;
+        parts: Array<{
+            partId: string;
+            fromMeasureM: number;
+            toMeasureM: number;
+            routeRole: 'NORMAL' | 'DEVIATION';
+            sharedGroupId?: string | null;
+            sharedWith: Array<{ lineId: string }>;
+        }>;
+    };
     routeDeviationState?: 'BASELINE' | 'SUSPECTED' | 'ALTERNATIVE' | 'EXPECTED' | 'ANOMALOUS' | 'UNKNOWN';
     routeDeviationReasonCode?: string;
     routeDeviationConfidence?: number;

@@ -25,6 +25,7 @@ type RouteEndpointInfo = {
 };
 
 const SHARED_ROUTE_SEGMENT_COUNT = 14;
+const MAX_SHARED_ROUTE_RANGES = 8;
 
 export type SharedRouteColorRange = {
     start: number;
@@ -318,10 +319,9 @@ export function createSharedProgressMaterial() {
             uColor0: { value: new THREE.Color(0x00ff88) },
             uColor1: { value: new THREE.Color(0x00ccff) },
             uColor2: { value: new THREE.Color(0xffaa00) },
-            uSharedRange0: { value: new THREE.Vector2(-1, -1) },
-            uSharedRange1: { value: new THREE.Vector2(-1, -1) },
-            uSharedColor0: { value: new THREE.Color(0xffffff) },
-            uSharedColor1: { value: new THREE.Color(0xffffff) },
+            uSharedRanges: { value: Array.from({ length: MAX_SHARED_ROUTE_RANGES }, () => new THREE.Vector2(-1, -1)) },
+            uSharedColors: { value: Array.from({ length: MAX_SHARED_ROUTE_RANGES }, () => new THREE.Color(0xffffff)) },
+            uSharedRangeCount: { value: 0 },
             uSegmentCount: { value: SHARED_ROUTE_SEGMENT_COUNT },
         },
         vertexShader: `
@@ -337,10 +337,9 @@ export function createSharedProgressMaterial() {
             uniform vec3 uColor0;
             uniform vec3 uColor1;
             uniform vec3 uColor2;
-            uniform vec2 uSharedRange0;
-            uniform vec2 uSharedRange1;
-            uniform vec3 uSharedColor0;
-            uniform vec3 uSharedColor1;
+            uniform vec2 uSharedRanges[${MAX_SHARED_ROUTE_RANGES}];
+            uniform vec3 uSharedColors[${MAX_SHARED_ROUTE_RANGES}];
+            uniform int uSharedRangeCount;
             uniform float uSegmentCount;
             varying vec2 vUv;
 
@@ -349,15 +348,15 @@ export function createSharedProgressMaterial() {
                 bool active1 = uProgress.y > 0.0001 && vUv.x <= uProgress.y;
                 bool active2 = uProgress.z > 0.0001 && vUv.x <= uProgress.z;
                 bool ownRouteActive = active0 || active1 || active2;
-                bool shared0 = ownRouteActive
-                    && vUv.x >= uSharedRange0.x && vUv.x <= uSharedRange0.y;
-                bool shared1 = ownRouteActive
-                    && vUv.x >= uSharedRange1.x && vUv.x <= uSharedRange1.y;
                 float activeCount = (active0 ? 1.0 : 0.0)
                     + (active1 ? 1.0 : 0.0)
-                    + (active2 ? 1.0 : 0.0)
-                    + (shared0 ? 1.0 : 0.0)
-                    + (shared1 ? 1.0 : 0.0);
+                    + (active2 ? 1.0 : 0.0);
+                for (int i = 0; i < ${MAX_SHARED_ROUTE_RANGES}; i++) {
+                    if (i >= uSharedRangeCount) break;
+                    bool shared = ownRouteActive
+                        && vUv.x >= uSharedRanges[i].x && vUv.x <= uSharedRanges[i].y;
+                    if (shared) activeCount += 1.0;
+                }
                 if (activeCount < 0.5) discard;
 
                 float movingSegment = floor(
@@ -382,11 +381,15 @@ export function createSharedProgressMaterial() {
                     if (abs(targetOrdinal - ordinal) < 0.5) color = uColor2;
                     ordinal += 1.0;
                 }
-                if (shared0) {
-                    if (abs(targetOrdinal - ordinal) < 0.5) color = uSharedColor0;
-                    ordinal += 1.0;
+                for (int i = 0; i < ${MAX_SHARED_ROUTE_RANGES}; i++) {
+                    if (i >= uSharedRangeCount) break;
+                    bool shared = ownRouteActive
+                        && vUv.x >= uSharedRanges[i].x && vUv.x <= uSharedRanges[i].y;
+                    if (shared) {
+                        if (abs(targetOrdinal - ordinal) < 0.5) color = uSharedColors[i];
+                        ordinal += 1.0;
+                    }
                 }
-                if (shared1 && abs(targetOrdinal - ordinal) < 0.5) color = uSharedColor1;
 
                 float crown = 0.72 + 0.28 * pow(abs(sin(vUv.y * 3.14159265)), 4.0);
                 gl_FragColor = vec4(color, 0.94 + crown * 0.06);
@@ -415,10 +418,14 @@ export function updateSharedRouteColorRanges(
     material: THREE.ShaderMaterial,
     ranges: SharedRouteColorRange[],
 ) {
-    for (let index = 0; index < 2; index += 1) {
-        const range = ranges[index];
-        const rangeUniform = material.uniforms[`uSharedRange${index}`].value as THREE.Vector2;
-        const colorUniform = material.uniforms[`uSharedColor${index}`].value as THREE.Color;
+    const visible = ranges.slice(0, MAX_SHARED_ROUTE_RANGES);
+    const rangeUniforms = material.uniforms.uSharedRanges.value as THREE.Vector2[];
+    const colorUniforms = material.uniforms.uSharedColors.value as THREE.Color[];
+    material.uniforms.uSharedRangeCount.value = visible.length;
+    for (let index = 0; index < MAX_SHARED_ROUTE_RANGES; index += 1) {
+        const range = visible[index];
+        const rangeUniform = rangeUniforms[index];
+        const colorUniform = colorUniforms[index];
         if (!range) {
             rangeUniform.set(-1, -1);
             continue;

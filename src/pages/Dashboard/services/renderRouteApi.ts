@@ -2,6 +2,25 @@ import { API_BASE_URL } from '../constants';
 import { dashboardFetch } from './dashboardAuth';
 import type { RoadPathMessage, TruckPositionMessage } from '../hooks/useDashboardRealtime';
 
+export type RouteAnalysisDTO = {
+    analysisVersion: string;
+    totalLengthM: number;
+    parts: Array<{
+        partId: string;
+        fromMeasureM: number;
+        toMeasureM: number;
+        routeRole: 'NORMAL' | 'DEVIATION';
+        coordinates: [number, number][];
+        sharedGroupId?: string | null;
+        sharedWith: Array<{
+            lineId: string;
+            visualKey?: string | null;
+            orderId?: string | null;
+            plate?: string | null;
+        }>;
+    }>;
+};
+
 export type RenderRouteDTO = {
     lineId: string;
     orderId?: string;
@@ -33,6 +52,7 @@ export type RenderRouteDTO = {
     coordinateSystem: string;
     updatedAt?: string;
     routeSignature: string;
+    analysis?: RouteAnalysisDTO;
     meta?: {
         tripId?: string;
         visualKey?: string;

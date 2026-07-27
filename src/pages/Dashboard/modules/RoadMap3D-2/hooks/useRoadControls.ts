@@ -13,7 +13,6 @@ import {
     updateSharedRouteColorRanges,
     updateSharedProgressMaterial,
 } from '../../routeVisuals';
-import type { SharedRouteColorRange } from '../../routeVisuals';
 import { syncVehicleAlertRipple } from '../../vehicleAlertRipples';
 
 // const ORDER_COLORS = [
@@ -57,11 +56,6 @@ const TRUCK_HIGH_CAMERA_SCALE = 1.55;
 const VEHICLE_UPGRADE_MS = 420;
 const NORTH_UP_MAX_FIT_DISTANCE = 320;
 const NORTH_UP_VIEW_DIRECTION = new THREE.Vector3(0, 0.82, -0.58).normalize();
-const SHARED_ROAD_MATCH_TOLERANCE = 0.42;
-const SHARED_ROAD_DIRECTION_DOT = 0.97;
-const SHARED_ROAD_SAMPLE_LIMIT = 96;
-const SHARED_ROAD_MIN_MATCHED_SAMPLES = 4;
-const SHARED_ROAD_MAX_TARGET_PROGRESS_STEP = 0.08;
 
 let truckTemplatePromise: Promise<THREE.Object3D> | null = null;
 
@@ -129,101 +123,6 @@ function geometryKeyFor(coords: [number, number][]) {
 
 function orderKeyFor(lineId: string, info: RoadObjectInfo) {
     return info.colorKey ?? info.orderFamilyId ?? info.orderId ?? `order-${lineId}`;
-}
-
-function sampledPathIndices(length: number) {
-    if (length <= SHARED_ROAD_SAMPLE_LIMIT) return Array.from({ length }, (_, index) => index);
-    return Array.from({ length: SHARED_ROAD_SAMPLE_LIMIT }, (_, index) => (
-        Math.round(index / (SHARED_ROAD_SAMPLE_LIMIT - 1) * (length - 1))
-    ));
-}
-
-function pathTangentAt(samples: THREE.Vector3[], index: number) {
-    const previous = samples[Math.max(0, index - 1)] ?? samples[index];
-    const next = samples[Math.min(samples.length - 1, index + 1)] ?? samples[index];
-    const tangent = next.clone().sub(previous).setY(0);
-    if (tangent.lengthSq() <= 0.000001) return null;
-    return tangent.normalize();
-}
-
-function sampledPath(samples: THREE.Vector3[]) {
-    const denominator = Math.max(1, samples.length - 1);
-    return sampledPathIndices(samples.length).flatMap((index) => {
-        const tangent = pathTangentAt(samples, index);
-        return tangent ? [{
-            index,
-            point: samples[index],
-            progress: index / denominator,
-            tangent,
-        }] : [];
-    });
-}
-
-function sharedRangeOnRoad(source: RoadState, target: RoadState, targetProgress: number) {
-    if (source.samples.length < 2 || target.samples.length < 2) return null;
-    const sourcePath = sampledPath(source.samples);
-    const targetPath = sampledPath(target.samples);
-    const toleranceSq = SHARED_ROAD_MATCH_TOLERANCE * SHARED_ROAD_MATCH_TOLERANCE;
-    const targetLimit = THREE.MathUtils.clamp(targetProgress, 0, 1)
-        + 0.5 / Math.max(1, targetPath.length - 1);
-    const matched = sourcePath.map((sourceSample) => {
-        let nearest: { targetProgress: number; directionSign: number; distanceSq: number } | null = null;
-        for (const targetSample of targetPath) {
-            if (targetSample.progress > targetLimit) continue;
-            const dx = sourceSample.point.x - targetSample.point.x;
-            const dz = sourceSample.point.z - targetSample.point.z;
-            if (dx * dx + dz * dz > toleranceSq) continue;
-            const directionDot = sourceSample.tangent.dot(targetSample.tangent);
-            if (Math.abs(directionDot) < SHARED_ROAD_DIRECTION_DOT) continue;
-            const distanceSq = dx * dx + dz * dz;
-            if (!nearest || distanceSq < nearest.distanceSq) {
-                nearest = {
-                    targetProgress: targetSample.progress,
-                    directionSign: Math.sign(directionDot) || 1,
-                    distanceSq,
-                };
-            }
-        }
-        return nearest ? {
-            sourceProgress: sourceSample.progress,
-            ...nearest,
-        } : null;
-    });
-
-    let bestStart = -1;
-    let bestEnd = -1;
-    let runStart = -1;
-    for (let index = 0; index <= matched.length; index += 1) {
-        const current = matched[index];
-        const previous = index > 0 ? matched[index - 1] : null;
-        const targetProgressStep = current !== null && previous !== null
-            ? current.targetProgress - previous.targetProgress
-            : 0;
-        const continuous = current !== null && (
-            runStart < 0
-            || (previous !== null
-                && current.directionSign === previous.directionSign
-                && Math.abs(targetProgressStep) <= SHARED_ROAD_MAX_TARGET_PROGRESS_STEP
-                && targetProgressStep * current.directionSign >= -0.002)
-        );
-        if (continuous) {
-            if (runStart < 0) runStart = index;
-            continue;
-        }
-        if (runStart >= 0 && index - runStart >= SHARED_ROAD_MIN_MATCHED_SAMPLES
-            && index - 1 - runStart > bestEnd - bestStart) {
-            bestStart = runStart;
-            bestEnd = index - 1;
-        }
-        runStart = current ? index : -1;
-    }
-    if (bestStart < 0 || bestEnd < bestStart) return null;
-
-    const padding = 0.5 / Math.max(1, sourcePath.length - 1);
-    return {
-        start: Math.max(0, matched[bestStart]!.sourceProgress - padding),
-        end: Math.min(1, matched[bestEnd]!.sourceProgress + padding),
-    };
 }
 
 function drawTubeProgress(tube: THREE.Mesh, progress: number, tubularSegments: number, radialSegments: number) {
@@ -626,36 +525,29 @@ export function useRoadControls(
 
     const refreshSharedRoadColorRanges = useCallback(() => {
         const roads = Array.from(refs.roadsMapRef.current.values());
+        const roadByLineId = new Map<string, RoadState>();
+        roads.forEach((road) => road.lineIds.forEach((lineId) => roadByLineId.set(lineId, road)));
         roads.forEach((source) => {
             const material = source.sharedProgressTube.material as THREE.ShaderMaterial;
-            if (source.info.isBaselineRoute) {
+            const analysis = source.info.routeAnalysis;
+            if (source.info.isBaselineRoute || !analysis || analysis.totalLengthM <= 0) {
                 updateSharedRouteColorRanges(material, []);
                 return;
             }
-
-            const sourceColors = new Set(Array.from(source.orders.values(), (lane) => lane.color));
-            const candidates: Array<SharedRouteColorRange & { length: number }> = [];
-            roads.forEach((target) => {
-                if (target === source || target.info.isBaselineRoute) return;
-                target.orders.forEach((lane) => {
-                    if (sourceColors.has(lane.color)) return;
-                    const range = sharedRangeOnRoad(source, target, lane.maxProgress);
-                    if (!range) return;
-                    if (candidates.some((candidate) => (
-                        candidate.color === lane.color
-                        && Math.abs(candidate.start - range.start) < 0.01
-                        && Math.abs(candidate.end - range.end) < 0.01
-                    ))) return;
-                    candidates.push({
-                        ...range,
-                        color: lane.color,
-                        length: range.end - range.start,
-                    });
-                });
-            });
-
-            candidates.sort((left, right) => right.length - left.length);
-            updateSharedRouteColorRanges(material, candidates.slice(0, 2));
+            const ranges = analysis.parts.flatMap((part) => part.sharedWith.flatMap((participant) => {
+                const target = roadByLineId.get(participant.lineId);
+                if (!target || target === source) return [];
+                const lane = Array.from(target.orders.values()).find((candidate) => (
+                    candidate.vehicles.has(participant.lineId)
+                )) ?? target.orders.values().next().value;
+                if (!lane) return [];
+                return [{
+                    start: part.fromMeasureM / analysis.totalLengthM,
+                    end: part.toMeasureM / analysis.totalLengthM,
+                    color: lane.color,
+                }];
+            }));
+            updateSharedRouteColorRanges(material, ranges);
         });
     }, [refs.roadsMapRef]);
 

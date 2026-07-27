@@ -51,6 +51,7 @@ function routeInfo(route: RenderRouteDTO): RoadObjectInfo {
         isBaselineRoute: !hasVehicleRoute,
         isVehicleRoute: hasVehicleRoute,
         deviationCoordinates: route.deviationCoordinates,
+        routeAnalysis: route.analysis,
         tripId: route.meta?.tripId,
         visualKey: route.meta?.visualKey,
         currentLegId: route.meta?.currentLegId,
