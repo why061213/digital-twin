@@ -33,7 +33,7 @@ function nextFrame() {
     return new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
-function routeInfo(route: RenderRouteDTO, routeIndex: number): RoadObjectInfo {
+function routeInfo(route: RenderRouteDTO, routeIndex: number, routeColorIndex: number): RoadObjectInfo {
     const hasVehicleRoute = typeof route.routeRevision === 'number'
         && Number.isFinite(route.routeRevision);
     return {
@@ -53,6 +53,7 @@ function routeInfo(route: RenderRouteDTO, routeIndex: number): RoadObjectInfo {
         deviationCoordinates: route.deviationCoordinates,
         routeAnalysis: route.analysis,
         routeIndex,
+        routeColorIndex,
         showRouteEndpoints: true,
         tripId: route.meta?.tripId,
         visualKey: route.meta?.visualKey,
@@ -145,6 +146,7 @@ export function createRm2SceneAdapter(
             const rejectedLineIds: string[] = [];
             const preparedRoutes: Rm2PreparedRoute[] = [];
             const seenLineIds = new Set<string>();
+            const orderColorIndexes = new Map<string, number>();
 
             routes.forEach((rawRoute, routeIndex) => {
                 if (!adaptRenderRoute(rawRoute)
@@ -155,6 +157,12 @@ export function createRm2SceneAdapter(
                 }
 
                 seenLineIds.add(rawRoute.lineId);
+                const orderColorKey = rawRoute.orderId?.trim()
+                    || rawRoute.businessLineId?.trim()
+                    || rawRoute.lineId;
+                if (!orderColorIndexes.has(orderColorKey)) {
+                    orderColorIndexes.set(orderColorKey, orderColorIndexes.size);
+                }
                 const lineIds = pathLineIds.get(rawRoute.pathKey) ?? [];
                 lineIds.push(rawRoute.lineId);
                 pathLineIds.set(rawRoute.pathKey, lineIds);
@@ -165,7 +173,7 @@ export function createRm2SceneAdapter(
                     baselineCoordinates: rawRoute.baselineCoordinates,
                     baselinePathKey: rawRoute.baselinePathKey,
                     initialPosition: rawRoute.coordinates[0],
-                    info: routeInfo(rawRoute, routeIndex),
+                    info: routeInfo(rawRoute, routeIndex, orderColorIndexes.get(orderColorKey) ?? 0),
                     visualKey: rawRoute.meta?.visualKey ?? rawRoute.lineId,
                 });
             });
