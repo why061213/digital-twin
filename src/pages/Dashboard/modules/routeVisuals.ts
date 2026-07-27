@@ -37,8 +37,9 @@ export type RouteStopVisualInfo = {
 const MAX_SHARED_ROUTE_RANGES = 24;
 // Shader 相位为 x * frequency - time * speed，因此真实沿线速度是 speed / frequency。
 const SHARED_SNAKE_ROUTE_SPEED = 0.014;
-const RM2_SNAKE_FREQUENCY = 5;
-const RM2_SNAKE_LENGTH = 0.24;
+const RM2_SNAKE_WORLD_SPEED = 0.7;
+const RM2_SNAKE_WORLD_SPACING = 10;
+const RM2_SNAKE_WORLD_LENGTH = 2.4;
 
 export type SharedRouteColorRange = {
     start: number;
@@ -368,6 +369,11 @@ export function createSharedProgressMaterial(
             uSnakeFrequency: { value: 17 },
             uSnakeSpeed: { value: 0.23 },
             uSnakeLength: { value: 0.29 },
+            uUseWorldMotion: { value: 0 },
+            uRouteLength: { value: 1 },
+            uSnakeWorldSpeed: { value: RM2_SNAKE_WORLD_SPEED },
+            uSnakeWorldSpacing: { value: RM2_SNAKE_WORLD_SPACING },
+            uSnakeWorldLength: { value: RM2_SNAKE_WORLD_LENGTH },
             uLayerMode: {
                 value: layerMode === 'untravelled' ? 1 : layerMode === 'travelled' ? 2 : layerMode === 'snake' ? 3 : 0,
             },
@@ -391,6 +397,11 @@ export function createSharedProgressMaterial(
             uniform float uSnakeFrequency;
             uniform float uSnakeSpeed;
             uniform float uSnakeLength;
+            uniform int uUseWorldMotion;
+            uniform float uRouteLength;
+            uniform float uSnakeWorldSpeed;
+            uniform float uSnakeWorldSpacing;
+            uniform float uSnakeWorldLength;
             uniform int uLayerMode;
             uniform vec2 uSharedRanges[${MAX_SHARED_ROUTE_RANGES}];
             uniform vec3 uSharedColors[${MAX_SHARED_ROUTE_RANGES}];
@@ -414,6 +425,13 @@ export function createSharedProgressMaterial(
                 float phase = fract(vUv.x * uSnakeFrequency - uTime * uSnakeSpeed);
                 float tail = smoothstep(0.0, 0.055, phase);
                 float head = 1.0 - smoothstep(uSnakeLength - 0.07, uSnakeLength, phase);
+                if (uUseWorldMotion == 1) {
+                    float spacing = max(0.001, uSnakeWorldSpacing);
+                    float phaseDistance = mod(vUv.x * uRouteLength - uTime * uSnakeWorldSpeed, spacing);
+                    float edge = min(0.35, uSnakeWorldLength * 0.2);
+                    tail = smoothstep(0.0, edge, phaseDistance);
+                    head = 1.0 - smoothstep(max(edge, uSnakeWorldLength - edge), uSnakeWorldLength, phaseDistance);
+                }
                 float movingSnake = travelled * tail * head;
                 float snakeMask = movingSnake;
                 if (uLayerMode == 1) {
@@ -460,6 +478,7 @@ export function configureSharedProgressMaterial(
     baseColor: number,
     routeKey: string,
     motionProfile: 'varied' | 'rm2-synchronized' = 'varied',
+    routeLength = 1,
 ) {
     const primes = [11, 13, 17, 19, 23, 29, 31];
     let hash = 2166136261;
@@ -468,9 +487,7 @@ export function configureSharedProgressMaterial(
         hash = Math.imul(hash, 16777619);
     }
     const positiveHash = hash >>> 0;
-    const frequency = motionProfile === 'rm2-synchronized'
-        ? RM2_SNAKE_FREQUENCY
-        : primes[positiveHash % primes.length];
+    const frequency = primes[positiveHash % primes.length];
     const lengthPrime = primes[Math.floor(positiveHash / (primes.length * primes.length)) % primes.length];
     const base = new THREE.Color(baseColor);
     const snake = base.clone();
@@ -482,9 +499,12 @@ export function configureSharedProgressMaterial(
     material.uniforms.uSnakeFrequency.value = frequency;
     // 不同质数频率仍保持差异，但所有蛇沿路线前进的速度完全一致，避免共线时相互追赶。
     material.uniforms.uSnakeSpeed.value = frequency * SHARED_SNAKE_ROUTE_SPEED;
-    material.uniforms.uSnakeLength.value = motionProfile === 'rm2-synchronized'
-        ? RM2_SNAKE_LENGTH
-        : THREE.MathUtils.clamp(lengthPrime / 67, 0.18, 0.46);
+    material.uniforms.uSnakeLength.value = THREE.MathUtils.clamp(lengthPrime / 67, 0.18, 0.46);
+    material.uniforms.uUseWorldMotion.value = motionProfile === 'rm2-synchronized' ? 1 : 0;
+    material.uniforms.uRouteLength.value = Math.max(0.001, routeLength);
+    material.uniforms.uSnakeWorldSpeed.value = RM2_SNAKE_WORLD_SPEED;
+    material.uniforms.uSnakeWorldSpacing.value = RM2_SNAKE_WORLD_SPACING;
+    material.uniforms.uSnakeWorldLength.value = RM2_SNAKE_WORLD_LENGTH;
 }
 
 export function updateSharedRouteColorRanges(

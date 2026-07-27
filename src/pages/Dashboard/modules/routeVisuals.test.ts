@@ -37,16 +37,19 @@ describe('route snake overlay material', () => {
         second.dispose();
     });
 
-    it('uses one low frequency and one segment length for RM2 routes', () => {
+    it('uses one absolute world speed, spacing and segment length for all RM2 routes', () => {
         const first = createSharedProgressMaterial('snake');
         const second = createSharedProgressMaterial('snake');
-        configureSharedProgressMaterial(first, 0x3b82f6, 'route-blue-a', 'rm2-synchronized');
-        configureSharedProgressMaterial(second, 0xf59e0b, 'route-orange-b', 'rm2-synchronized');
+        configureSharedProgressMaterial(first, 0x3b82f6, 'route-blue-a', 'rm2-synchronized', 20);
+        configureSharedProgressMaterial(second, 0xf59e0b, 'route-orange-b', 'rm2-synchronized', 200);
 
-        expect(first.uniforms.uSnakeFrequency.value).toBe(5);
-        expect(second.uniforms.uSnakeFrequency.value).toBe(5);
-        expect(first.uniforms.uSnakeLength.value).toBeCloseTo(0.24, 10);
-        expect(second.uniforms.uSnakeLength.value).toBeCloseTo(0.24, 10);
+        expect(first.uniforms.uUseWorldMotion.value).toBe(1);
+        expect(second.uniforms.uUseWorldMotion.value).toBe(1);
+        expect(first.uniforms.uRouteLength.value).toBe(20);
+        expect(second.uniforms.uRouteLength.value).toBe(200);
+        expect(first.uniforms.uSnakeWorldSpeed.value).toBe(second.uniforms.uSnakeWorldSpeed.value);
+        expect(first.uniforms.uSnakeWorldSpacing.value).toBe(second.uniforms.uSnakeWorldSpacing.value);
+        expect(first.uniforms.uSnakeWorldLength.value).toBe(second.uniforms.uSnakeWorldLength.value);
 
         first.dispose();
         second.dispose();
