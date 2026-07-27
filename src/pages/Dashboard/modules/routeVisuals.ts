@@ -408,7 +408,9 @@ export function createSharedProgressMaterial() {
                 float snakeMask = max(movingSnake, currentHead);
                 color = mix(color, snakeColor, snakeMask * 0.96);
                 float crown = 0.72 + 0.28 * pow(abs(sin(vUv.y * 3.14159265)), 4.0);
-                gl_FragColor = vec4(color, 0.88 + crown * 0.12);
+                float travelledAlpha = 0.88 + crown * 0.12;
+                float routeAlpha = mix(0.10, travelledAlpha, travelled);
+                gl_FragColor = vec4(color, routeAlpha);
             }
         `,
         transparent: true,
