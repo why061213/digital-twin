@@ -159,8 +159,9 @@ function createEndpointLayer(
             markerColor: stop.markerColor,
         }];
     });
+    const isCompositeTrip = new Set((info.tripStops ?? []).map((stop) => stop.orderInstanceId)).size > 1;
     return stops.length > 0
-        ? createRouteStopLayer(stops, 'rm2', color)
+        ? createRouteStopLayer(stops, 'rm2', color, isCompositeTrip)
         : createRouteEndpointLayer(samples, 'rm2', info, color, laneIndex);
 }
 

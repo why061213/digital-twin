@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { registerRouteLabel } from './routeLabelLayout';
 
 /* Hallmark: restrained route hierarchy for an operational map surface. */
 type RouteVisualPreset = {
@@ -242,6 +243,7 @@ function createEndpointLabel(
     mode: 'rm1' | 'rm2',
     laneIndex: number,
     routeName?: string,
+    collisionPriority?: number,
 ) {
     const canvas = document.createElement('canvas');
     const label = `${routeName ? `${routeName} · ` : ''}${prefix} · ${fullEndpoint(value)}`;
@@ -277,7 +279,7 @@ function createEndpointLabel(
     });
     const sprite = new THREE.Sprite(material);
     const baseHeight = mode === 'rm2' ? 3.02 : 1.58;
-    const baseScale = [baseHeight * (canvas.width / canvas.height), baseHeight];
+    const baseScale: [number, number] = [baseHeight * (canvas.width / canvas.height), baseHeight];
     const referenceDistance = mode === 'rm2' ? 115 : 180;
     const offset = mode === 'rm2' ? 3.7 : 1.85;
     const offsetVariant = Array.from(value ?? prefix)
@@ -290,6 +292,9 @@ function createEndpointLabel(
         + offsetVariant * (mode === 'rm2' ? 0.34 : 0.16)
         + laneSpread * (mode === 'rm2' ? 1.05 : 0.48);
     sprite.renderOrder = 58;
+    if (typeof collisionPriority === 'number') {
+        registerRouteLabel(sprite, { baseScale, referenceDistance, priority: collisionPriority });
+    }
     const worldPosition = new THREE.Vector3();
     sprite.onBeforeRender = (_renderer, _scene, camera) => {
         const distance = camera.position.distanceTo(sprite.getWorldPosition(worldPosition));
@@ -333,6 +338,7 @@ export function createRouteStopLayer(
     stops: RouteStopVisualInfo[],
     mode: 'rm1' | 'rm2',
     routeColor: number,
+    avoidLabelCollisions = false,
 ) {
     const preset = PRESETS[mode];
     const layer = new THREE.Group();
@@ -356,6 +362,10 @@ export function createRouteStopLayer(
             colorText(routeColor),
             mode,
             index,
+            undefined,
+            avoidLabelCollisions
+                ? stop.currentTarget ? 0 : index === 0 || index === stops.length - 1 ? 10 + index : 30 + index
+                : undefined,
         );
         layer.add(marker, label);
     });

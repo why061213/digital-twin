@@ -8,6 +8,7 @@ import { loadProvinceGeoJson, MAP_HORIZONTAL_SCALE, projection } from '../geo';
 import { useRoadMapRefs } from './useRoadMapRefs';
 import { useRoadControls } from './useRoadControls';
 import { useRoadSelection } from './useRoadSelection';
+import { updateRouteLabelLayout } from '../../routeLabelLayout';
 
 type MapLayer = {
     group: THREE.Group;
@@ -502,6 +503,14 @@ export function useRoadMapScene(
                 camera.position.distanceTo(orbitControls.target),
             );
             updateRegionLabels();
+            const routeLabelLayers: THREE.Group[] = [];
+            refs.roadsMapRef.current.forEach((road) => {
+                road.orders.forEach((lane) => routeLabelLayers.push(lane.endpointLayer));
+            });
+            updateRouteLabelLayout(routeLabelLayers, camera, {
+                width: container.clientWidth,
+                height: container.clientHeight,
+            });
             renderer.render(scene, camera);
         };
         animate();
