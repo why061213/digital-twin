@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     removedSceneRouteIds,
     routeRequiresSync,
+    sceneFocusId,
     sceneRouteId,
     tripBusinessStage,
 } from './rm2RouteIdentity';
@@ -17,6 +18,15 @@ describe('RM2 Trip identity and route replacement', () => {
         expect(sceneRouteId(next)).toBe('trip-1');
         expect(routeRequiresSync(previous, next)).toBe(true);
         expect(removedSceneRouteIds([previous], [next])).toEqual([]);
+    });
+
+    it('uses the stable scene identity when the side panel focuses a composite trip', () => {
+        expect(sceneFocusId({
+            lineId: 'trip-instance-line-id',
+            visualKey: 'trip-桂L91622-1785199502352',
+        })).toBe('trip-桂L91622-1785199502352');
+        expect(sceneFocusId({ lineId: 'ordinary-line-id' })).toBe('ordinary-line-id');
+        expect(sceneFocusId(null)).toBeNull();
     });
 
     it('replaces geometry when lineId stays unchanged', () => {

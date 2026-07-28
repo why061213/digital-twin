@@ -305,24 +305,12 @@ export function useRoadControls(
     }, []);
 
     const findVehicle = useCallback((lineId: string) => {
-        // 先用 lineId 直查
         const trackKey = refs.lineTrackMapRef.current.get(lineId);
         const road = trackKey ? refs.roadsMapRef.current.get(trackKey) : undefined;
-        if (road) {
-            const vehicle = road.orders.values()
-                .find((lane) => lane.vehicles.has(lineId))
-                ?.vehicles.get(lineId);
-            if (vehicle) return { road, lane: [...road.orders.values()].find((l) => l.vehicles.has(lineId))!, vehicle };
-        }
-        // 直查失败，遍历所有路线（面板的 lineId 和场景 visualKey 可能不一致）
-        for (const r of refs.roadsMapRef.current.values()) {
-            for (const lane of r.orders.values()) {
-                for (const [vid, v] of lane.vehicles) {
-                    if (v.info?.lineId === lineId || vid === lineId) {
-                        return { road: r, lane, vehicle: v };
-                    }
-                }
-            }
+        if (!road) return null;
+        for (const lane of road.orders.values()) {
+            const vehicle = lane.vehicles.get(lineId);
+            if (vehicle) return { road, lane, vehicle };
         }
         return null;
     }, [refs.lineTrackMapRef, refs.roadsMapRef]);

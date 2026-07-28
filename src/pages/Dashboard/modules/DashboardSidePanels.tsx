@@ -6,7 +6,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import type { RouteOrder, TripStop } from '../hooks/useDashboardRealtime';
 import { routeColorKey, routeTone } from './routePresentation';
 import { resolveVehicleAlarmSeverity } from './vehicleAlertRipples';
-import { tripBusinessStage } from '../playback/rm2RouteIdentity';
+import { sceneFocusId, tripBusinessStage } from '../playback/rm2RouteIdentity';
 
 export type WarehouseFocusState = {
     cityName: string;
@@ -684,6 +684,7 @@ function VehicleTransportDetails({
     const selectedIndex = detailRoutes.findIndex((route) => route.lineId === activeVehicleLineId);
     const targetIndex = selectedIndex >= 0 ? selectedIndex : 0;
     const targetRoute = detailRoutes[targetIndex];
+    const targetSceneFocusId = sceneFocusId(targetRoute);
     const targetTone = routeTone(targetRoute, roadGroup.routes);
     const fromAddress = splitAdministrativeAddress(targetRoute?.from);
     const toAddress = splitAdministrativeAddress(targetRoute?.to);
@@ -704,8 +705,8 @@ function VehicleTransportDetails({
             : 'text-emerald-100';
 
     useEffect(() => {
-        onActiveVehicleChange?.(targetRoute?.lineId ?? null);
-    }, [onActiveVehicleChange, targetRoute?.lineId]);
+        onActiveVehicleChange?.(targetSceneFocusId);
+    }, [onActiveVehicleChange, targetSceneFocusId]);
 
     useEffect(() => () => {
         onActiveVehicleChange?.(null);

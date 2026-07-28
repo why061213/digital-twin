@@ -20,6 +20,11 @@ export function sceneRouteId(route: TripRouteIdentity) {
     return routeVisualKey(route);
 }
 
+/** 侧栏选择必须转换成场景身份；复合行程的 lineId 与 visualKey 并不相同。 */
+export function sceneFocusId(route: TripRouteIdentity | null | undefined) {
+    return route ? sceneRouteId(route) : null;
+}
+
 export function coordinatesSignature(coordinates: TripRouteIdentity['coordinates']) {
     return (coordinates ?? [])
         .map(([lng, lat]) => `${lng.toFixed(6)},${lat.toFixed(6)}`)
