@@ -18,6 +18,10 @@ type UseGlobalPlaybackControllerOptions = {
     rm1GroupCount: number;
     /** RM2 路线组数量 */
     rm2GroupCount: number;
+    /** 拉取 RM1 数据（触发 refreshRoadGroups） */
+    fetchRm1Data: () => Promise<unknown>;
+    /** 拉取 RM2 数据（触发 refreshRm2） */
+    fetchRm2Data: () => Promise<unknown>;
     /** 是否启用全局播放 */
     enabled?: boolean;
 };
@@ -36,6 +40,8 @@ export function useGlobalPlaybackController({
     isChinaMapVisualReady,
     rm1GroupCount,
     rm2GroupCount,
+    fetchRm1Data,
+    fetchRm2Data,
     enabled = true,
 }: UseGlobalPlaybackControllerOptions): UseGlobalPlaybackControllerResult {
     const chainRef = useRef<GlobalNode>(buildGlobalChain());
@@ -123,17 +129,26 @@ export function useGlobalPlaybackController({
                 break;
             }
             case 'rm1Judge': {
-                // Judge 节点不切换视图，保持前一个视图的内容播放（避免黑屏）
+                // Judge 节点：先拉取 RM1 数据，等待结果后再判断
                 advancingRef.current = false;
-                const nextRm1 = node.next!;       // RM1
-                const nextRm2Judge = nextRm1.next!; // RM2_Judge
-                if (rm1GroupCount > 0) {
-                    console.info('[GlobalPlayback] RM1 has content, advancing to RM1');
-                    advanceTo(nextRm1);
-                } else {
-                    console.info('[GlobalPlayback] RM1 empty, skipping to RM2_Judge');
+                const nextRm1 = node.next!;
+                const nextRm2Judge = nextRm1.next!;
+                console.info('[GlobalPlayback] RM1 Judge: fetching data...');
+                fetchRm1Data().then(() => {
+                    // 数据拉取完成后，等一个微任务让 state 更新
+                    setTimeout(() => {
+                        if (rm1GroupCount > 0) {
+                            console.info('[GlobalPlayback] RM1 has data (' + rm1GroupCount + ' groups), advancing to RM1');
+                            advanceTo(nextRm1);
+                        } else {
+                            console.info('[GlobalPlayback] RM1 still empty, skipping to RM2_Judge');
+                            advanceTo(nextRm2Judge);
+                        }
+                    }, 500);
+                }).catch((err: unknown) => {
+                    console.warn('[GlobalPlayback] RM1 fetch failed, skipping', err);
                     advanceTo(nextRm2Judge);
-                }
+                });
                 break;
             }
             case 'rm1': {
@@ -148,16 +163,25 @@ export function useGlobalPlaybackController({
                 break;
             }
             case 'rm2Judge': {
+                // Judge 节点：先拉取 RM2 数据，等待结果后再判断
                 advancingRef.current = false;
-                const nextRm2 = node.next!;  // RM2
-                const nextEnd = nextRm2.next!; // End
-                if (rm2GroupCount > 0) {
-                    console.info('[GlobalPlayback] RM2 has content, advancing to RM2');
-                    advanceTo(nextRm2);
-                } else {
-                    console.info('[GlobalPlayback] RM2 empty, skipping to End');
+                const nextRm2 = node.next!;
+                const nextEnd = nextRm2.next!;
+                console.info('[GlobalPlayback] RM2 Judge: fetching data...');
+                fetchRm2Data().then(() => {
+                    setTimeout(() => {
+                        if (rm2GroupCount > 0) {
+                            console.info('[GlobalPlayback] RM2 has data (' + rm2GroupCount + ' groups), advancing to RM2');
+                            advanceTo(nextRm2);
+                        } else {
+                            console.info('[GlobalPlayback] RM2 still empty, skipping to End');
+                            advanceTo(nextEnd);
+                        }
+                    }, 500);
+                }).catch((err: unknown) => {
+                    console.warn('[GlobalPlayback] RM2 fetch failed, skipping', err);
                     advanceTo(nextEnd);
-                }
+                });
                 break;
             }
             case 'rm2': {
@@ -187,7 +211,7 @@ export function useGlobalPlaybackController({
                 break;
             }
         }
-    }, [clearEmptyRetry, onViewChange, rm1GroupCount, rm2GroupCount, currentView, chinaMapRef]);
+    }, [clearEmptyRetry, onViewChange, rm1GroupCount, rm2GroupCount, currentView, chinaMapRef, fetchRm1Data, fetchRm2Data]);
 
     const advanceToNext = useCallback(() => {
         const next = currentNodeRef.current.next;

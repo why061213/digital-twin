@@ -122,6 +122,7 @@ function DashboardPage() {
         routeOrders: rm2RouteOrders,
         isLoading: isLoadingRm2Group,
         loadGroup: loadRm2Group,
+        refreshRm2,
         handleSnapshotChanged,
         handleVehiclePositions: handleRm2VehiclePositions,
     } = useRm2PlaybackController({
@@ -138,6 +139,8 @@ function DashboardPage() {
         isChinaMapVisualReady,
         rm1GroupCount: roadGroups.length,
         rm2GroupCount: rm2Groups.length,
+        fetchRm1Data: () => refreshRoadGroups(),
+        fetchRm2Data: () => refreshRm2(),
         enabled: true,
     });
 
