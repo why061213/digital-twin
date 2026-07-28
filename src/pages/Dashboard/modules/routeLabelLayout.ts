@@ -26,6 +26,7 @@ type RouteLabelMeta = {
     baseScale: [number, number];
     referenceDistance: number;
     priority: number;
+    pinRightGap: number;
 };
 
 const ROUTE_LABEL_META = 'routeLabelLayout';
@@ -105,13 +106,20 @@ export function arrangeRouteLabelRects(
 
 export function registerRouteLabel(
     sprite: THREE.Sprite,
-    config: { baseScale: [number, number]; referenceDistance: number; priority: number },
+    config: {
+        anchor?: THREE.Vector3;
+        baseScale: [number, number];
+        referenceDistance: number;
+        priority: number;
+        pinRightGap?: number;
+    },
 ) {
     sprite.userData[ROUTE_LABEL_META] = {
-        anchor: sprite.position.clone(),
+        anchor: config.anchor?.clone() ?? sprite.position.clone(),
         baseScale: config.baseScale,
         referenceDistance: config.referenceDistance,
         priority: config.priority,
+        pinRightGap: config.pinRightGap ?? 0,
     } satisfies RouteLabelMeta;
 }
 
@@ -168,7 +176,9 @@ export function updateRouteLabelLayout(
                 anchorWorld,
                 input: {
                     id,
-                    x: (center.x + 1) * viewport.width / 2,
+                    x: (center.x + 1) * viewport.width / 2
+                        + Math.max(24, Math.abs(rightEdge.x - center.x) * viewport.width) / 2
+                        + meta.pinRightGap,
                     y: (1 - center.y) * viewport.height / 2,
                     width: Math.max(24, Math.abs(rightEdge.x - center.x) * viewport.width),
                     height: Math.max(18, Math.abs(topEdge.y - center.y) * viewport.height),

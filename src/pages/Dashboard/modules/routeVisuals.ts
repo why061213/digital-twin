@@ -293,7 +293,13 @@ function createEndpointLabel(
         + laneSpread * (mode === 'rm2' ? 1.05 : 0.48);
     sprite.renderOrder = 58;
     if (typeof collisionPriority === 'number') {
-        registerRouteLabel(sprite, { baseScale, referenceDistance, priority: collisionPriority });
+        registerRouteLabel(sprite, {
+            anchor: point,
+            baseScale,
+            referenceDistance,
+            priority: collisionPriority,
+            pinRightGap: 12,
+        });
     }
     const worldPosition = new THREE.Vector3();
     sprite.onBeforeRender = (_renderer, _scene, camera) => {
@@ -348,7 +354,9 @@ export function createRouteStopLayer(
             ? 0xef4444
             : new THREE.Color(stop.markerColor || '#38bdf8').getHex();
         const point = stop.point.clone();
-        const markerScale = preset.markerScale * (stop.currentTarget ? 1.24 : 1);
+        const markerScale = preset.markerScale
+            * (avoidLabelCollisions ? 1.35 : 1)
+            * (stop.currentTarget ? (avoidLabelCollisions ? 1.16 : 1.24) : 1);
         const marker = createEndpointMarker(point, markerScale, color, 30 + index, mode);
         const role = index === 0
             ? '第一起点'
