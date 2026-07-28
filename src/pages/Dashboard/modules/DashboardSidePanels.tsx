@@ -336,10 +336,19 @@ function routeRemainingText(route: RouteOrder, progress: number) {
 function orderedTripStops(route: RouteOrder) {
     const stops = route.tripStops ?? [];
     return [...stops].sort((left, right) => {
-        const actionDifference = (left.action === 'PICKUP' ? 0 : 1)
-            - (right.action === 'PICKUP' ? 0 : 1);
-        return actionDifference || left.sequence - right.sequence || left.stopId.localeCompare(right.stopId);
+        return left.sequence - right.sequence || left.stopId.localeCompare(right.stopId);
     });
+}
+
+function tripBusinessAddresses(route?: RouteOrder, orderedStops?: TripStop[]) {
+    const stops = route ? (orderedStops ?? orderedTripStops(route)) : [];
+    const pickup = stops.find((stop) => stop.action === 'PICKUP' && stop.locationName?.trim());
+    const delivery = [...stops].reverse().find((stop) => stop.action === 'DELIVERY' && stop.locationName?.trim());
+
+    return {
+        from: splitAdministrativeAddress(pickup?.locationName ?? route?.from),
+        to: splitAdministrativeAddress(delivery?.locationName ?? route?.to),
+    };
 }
 
 function stopStateLabel(stop: TripStop) {
@@ -686,9 +695,8 @@ function VehicleTransportDetails({
     const targetRoute = detailRoutes[targetIndex];
     const targetSceneFocusId = sceneFocusId(targetRoute);
     const targetTone = routeTone(targetRoute, roadGroup.routes);
-    const fromAddress = splitAdministrativeAddress(targetRoute?.from);
-    const toAddress = splitAdministrativeAddress(targetRoute?.to);
     const targetTripStops = targetRoute ? orderedTripStops(targetRoute) : [];
+    const { from: fromAddress, to: toAddress } = tripBusinessAddresses(targetRoute, targetTripStops);
     const targetPickupCount = targetTripStops.filter((stop) => stop.action === 'PICKUP').length;
     const targetDeliveryCount = targetTripStops.filter((stop) => stop.action === 'DELIVERY').length;
     const targetIsCompositeTrip = new Set(targetTripStops.map((stop) => stop.orderInstanceId)).size > 1;
@@ -783,7 +791,7 @@ function VehicleTransportDetails({
                         </div>
                         <div className="grid h-[6rem] min-w-0 grid-rows-2 gap-1 overflow-hidden">
                             <div className="flex min-w-0 items-center gap-2 overflow-hidden rounded border border-sky-300/10 bg-sky-300/[0.025] px-2.5 opacity-80">
-                                <div className="shrink-0 text-[10px] text-slate-500">起点</div>
+                                <div className="shrink-0 text-[10px] text-slate-500">订单起点</div>
                                 <OverflowMarquee value={fromAddress.detail} className="min-w-0 flex-1 text-xs font-medium leading-6 text-slate-300" />
                             </div>
                             <div className="flex min-w-0 items-center gap-2 overflow-hidden rounded border border-emerald-300/15 bg-emerald-300/[0.045] px-2.5">
@@ -969,8 +977,7 @@ function RoadGroupRightPanels({
         const deliveryStops = tripStops.filter((stop) => stop.action === 'DELIVERY');
         const isCompositeTrip = new Set(tripStops.map((stop) => stop.orderInstanceId)).size > 1;
         const isSelected = variant === 'vehicle' && route.lineId === activeVehicleLineId;
-        const fromAddress = splitAdministrativeAddress(route.from);
-        const toAddress = splitAdministrativeAddress(route.to);
+        const { from: fromAddress, to: toAddress } = tripBusinessAddresses(route, tripStops);
         const alarmSeverity = resolveVehicleAlarmSeverity({
             alarmStr: route.alarmStr,
             alarmSeverity: route.alarmSeverity,
@@ -1046,7 +1053,7 @@ function RoadGroupRightPanels({
                         </span>
                     </span>
                 </div>
-                <div className="mt-2 grid grid-cols-[minmax(0,0.8fr)_auto_minmax(0,1.2fr)] items-center gap-1.5 text-[11px]" title={isCompositeTrip ? tripStops.map((stop) => stop.locationName).filter(Boolean).join(' → ') : `${route.from} → ${route.to}`}>
+                <div className="mt-2 grid grid-cols-[minmax(0,0.8fr)_auto_minmax(0,1.2fr)] items-center gap-1.5 text-[11px]" title={isCompositeTrip ? tripStops.map((stop) => stop.locationName).filter(Boolean).join(' → ') : `${fromAddress.fullAddress} → ${toAddress.fullAddress}`}>
                     <span className="truncate text-slate-500">
                         {isCompositeTrip ? `${pickupStops.length} 个装载点` : fromAddress.region}
                     </span>
@@ -1122,26 +1129,29 @@ function RoadGroupRightPanels({
                     {recentFinished.length > 0 ? (
                         <div className="space-y-1">
                             <div className="mb-1 text-xs font-semibold text-cyan-300">已完成车辆</div>
-                            {recentFinished.map((route) => (
-                                <button
-                                    type="button"
-                                    key={`finished-${route.lineId}`}
-                                    disabled={variant !== 'vehicle'}
-                                    aria-pressed={variant === 'vehicle' ? route.lineId === activeVehicleLineId : undefined}
-                                    onClick={() => onVehicleSelect(route.lineId)}
-                                    className={`flex w-full items-center justify-between gap-2 rounded border px-2 py-1 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${
-                                        route.lineId === activeVehicleLineId
-                                            ? 'border-white/20 bg-white/[0.045]'
-                                            : 'border-emerald-300/10 bg-emerald-300/5'
-                                    } ${variant === 'vehicle' ? 'cursor-pointer hover:bg-emerald-300/10' : ''}`}
-                                >
-                                    <span className="truncate font-medium text-cyan-200" title={route.plate}>{route.plate}</span>
-                                    <span className="truncate text-[11px] text-slate-400" title={`${route.from} → ${route.to}`}>
-                                        {route.from} → {route.to}
-                                    </span>
-                                    <span className="flex shrink-0 items-center gap-1 text-[11px] text-emerald-300"><span aria-hidden="true">✓</span>完成</span>
-                                </button>
-                            ))}
+                            {recentFinished.map((route) => {
+                                const addresses = tripBusinessAddresses(route);
+                                return (
+                                    <button
+                                        type="button"
+                                        key={`finished-${route.lineId}`}
+                                        disabled={variant !== 'vehicle'}
+                                        aria-pressed={variant === 'vehicle' ? route.lineId === activeVehicleLineId : undefined}
+                                        onClick={() => onVehicleSelect(route.lineId)}
+                                        className={`flex w-full items-center justify-between gap-2 rounded border px-2 py-1 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${
+                                            route.lineId === activeVehicleLineId
+                                                ? 'border-white/20 bg-white/[0.045]'
+                                                : 'border-emerald-300/10 bg-emerald-300/5'
+                                        } ${variant === 'vehicle' ? 'cursor-pointer hover:bg-emerald-300/10' : ''}`}
+                                    >
+                                        <span className="truncate font-medium text-cyan-200" title={route.plate}>{route.plate}</span>
+                                        <span className="truncate text-[11px] text-slate-400" title={`${addresses.from.fullAddress} → ${addresses.to.fullAddress}`}>
+                                            {addresses.from.fullAddress} → {addresses.to.fullAddress}
+                                        </span>
+                                        <span className="flex shrink-0 items-center gap-1 text-[11px] text-emerald-300"><span aria-hidden="true">✓</span>完成</span>
+                                    </button>
+                                );
+                            })}
                         </div>
                     ) : (
                         <div className="mt-2 text-center text-xs text-slate-500">
