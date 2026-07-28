@@ -96,6 +96,11 @@ function orderKeyFor(lineId: string, info: RoadObjectInfo) {
     return info.colorKey ?? info.orderId ?? info.orderFamilyId ?? `order-${lineId}`;
 }
 
+/** 车道分组键：同一订单的多辆车应共享车道，用 orderFamilyId 或 orderId */
+function laneKeyFor(info: RoadObjectInfo) {
+    return info.orderFamilyId ?? info.orderId ?? `lane-${info.lineId ?? 'unknown'}`;
+}
+
 function stableHash(value: string) {
     let hash = 2166136261;
     for (let index = 0; index < value.length; index += 1) {
@@ -745,8 +750,8 @@ export function useRoadControls(
         });
     }, [refs.roadsMapRef]);
 
-    const ensureOrderLane = useCallback((road: RoadState, orderId: string, info: RoadObjectInfo) => {
-        let lane = road.orders.get(orderId);
+    const ensureOrderLane = useCallback((road: RoadState, laneKey: string, orderId: string, info: RoadObjectInfo) => {
+        let lane = road.orders.get(laneKey);
         if (lane) return lane;
 
         const laneIndex = road.orders.size;
@@ -775,7 +780,7 @@ export function useRoadControls(
         road.group.add(endpointLayer);
 
         lane = {
-            orderId,
+            orderId: laneKey,
             color,
             progressTube,
             endpointLayer,
@@ -783,7 +788,7 @@ export function useRoadControls(
             maxProgress: 0,
             laneIndex,
         };
-        road.orders.set(orderId, lane);
+        road.orders.set(laneKey, lane);
         return lane;
     }, []);
 
@@ -834,6 +839,7 @@ export function useRoadControls(
 
             const pathKey = trackKeyFor(id, coords, info);
             const orderId = orderKeyFor(id, info);
+            const laneKey = laneKeyFor(info);
             const existing = refs.roadsMapRef.current.get(pathKey);
             if (existing) {
                 const nextGeometryKey = geometryKeyFor(coords);
@@ -910,7 +916,7 @@ export function useRoadControls(
                         existing.geometryKey = nextGeometryKey;
                     }
                 }
-                const lane = ensureOrderLane(existing, orderId, info);
+                const lane = ensureOrderLane(existing, laneKey, orderId, info);
                 ensureVehicleBar(existing, lane, id, info);
                 existing.info = { ...existing.info, ...info };
                 existing.snakeProgressTube.visible = SHOW_ROUTE_SNAKES && !existing.info.isBaselineRoute;
@@ -1042,7 +1048,7 @@ export function useRoadControls(
             };
 
             refs.roadsMapRef.current.set(pathKey, road);
-            const lane = ensureOrderLane(road, orderId, info);
+            const lane = ensureOrderLane(road, laneKey, orderId, info);
             ensureVehicleBar(road, lane, id, info);
             updateOrderVisuals(road);
             scheduleSharedRoadColorRangesRefresh();
@@ -1137,7 +1143,7 @@ export function useRoadControls(
         if (!road) return;
         const existingLane = Array.from(road.orders.values())
             .find((candidate) => candidate.vehicles.has(lineId));
-        const lane = existingLane ?? ensureOrderLane(road, orderKeyFor(lineId, info), info);
+        const lane = existingLane ?? ensureOrderLane(road, laneKeyFor(info), orderKeyFor(lineId, info), info);
         const vehicle = existingLane?.vehicles.get(lineId)
             ?? ensureVehicleBar(road, lane, lineId, info);
         vehicle.bar.visible = true;
