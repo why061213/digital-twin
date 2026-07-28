@@ -3,7 +3,7 @@ import EChart from '@/components/Charts/EChart';
 import type { EChartsOption } from 'echarts';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import type { RouteOrder } from '../hooks/useDashboardRealtime';
+import type { RouteOrder, TripStop } from '../hooks/useDashboardRealtime';
 import { routeColorKey, routeTone } from './routePresentation';
 import { resolveVehicleAlarmSeverity } from './vehicleAlertRipples';
 import { tripBusinessStage } from '../playback/rm2RouteIdentity';
@@ -331,6 +331,79 @@ function routeRemainingText(route: RouteOrder, progress: number) {
     const minutes = navigationMinutes % 60;
     const duration = hours > 0 ? `${hours}h${minutes}m` : `${minutes}m`;
     return `剩余 ${distance} · 导航预计 ${duration}`;
+}
+
+function orderedTripStops(route: RouteOrder) {
+    const stops = route.tripStops ?? [];
+    return [...stops].sort((left, right) => {
+        const actionDifference = (left.action === 'PICKUP' ? 0 : 1)
+            - (right.action === 'PICKUP' ? 0 : 1);
+        return actionDifference || left.sequence - right.sequence || left.stopId.localeCompare(right.stopId);
+    });
+}
+
+function stopStateLabel(stop: TripStop) {
+    if (stop.visitState === 'VISITED') return '已完成';
+    if (stop.visitState === 'ARRIVED') return '已到达';
+    if (stop.visitState === 'DWELLING') return stop.action === 'PICKUP' ? '装载中' : '卸货中';
+    if (stop.currentTarget) return '当前目标';
+    return '待执行';
+}
+
+function TripMilestoneProgress({
+    stops,
+    progress,
+    accent,
+}: {
+    stops: TripStop[];
+    progress: number;
+    accent: string;
+}) {
+    return (
+        <div className="mt-3 rounded border border-white/8 bg-slate-950/45 px-2.5 py-2.5">
+            <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="text-[10px] font-medium tracking-wide text-slate-400">运输里程碑</span>
+                <span className="text-[10px] tabular-nums text-slate-300">当前路段 {progress}%</span>
+            </div>
+            <div className="space-y-0">
+                {stops.map((stop, index) => {
+                    const completed = stop.visitState === 'VISITED';
+                    const active = stop.currentTarget || stop.visitState === 'ARRIVED' || stop.visitState === 'DWELLING';
+                    const address = splitAdministrativeAddress(stop.locationName ?? undefined);
+                    const dotColor = completed ? '#34d399' : active ? accent : '#475569';
+                    return (
+                        <div key={stop.stopId} className="relative grid min-h-9 grid-cols-[14px_54px_minmax(0,1fr)_42px] items-start gap-1.5">
+                            {index < stops.length - 1 && (
+                                <span
+                                    aria-hidden="true"
+                                    className="absolute left-[5px] top-[13px] h-[calc(100%-2px)] w-px"
+                                    style={{ backgroundColor: completed ? '#34d399' : 'rgba(71,85,105,0.7)' }}
+                                />
+                            )}
+                            <span
+                                aria-hidden="true"
+                                className={`relative z-10 mt-1 h-[11px] w-[11px] rounded-full border-2 ${active ? 'motion-safe:animate-pulse' : ''}`}
+                                style={{
+                                    borderColor: dotColor,
+                                    backgroundColor: completed || active ? dotColor : '#0f172a',
+                                    boxShadow: active ? `0 0 9px ${dotColor}` : undefined,
+                                }}
+                            />
+                            <span className={`pt-0.5 text-[10px] ${stop.action === 'PICKUP' ? 'text-sky-300' : 'text-rose-300'}`}>
+                                {stop.action === 'PICKUP' ? `装载 ${stop.sequence}` : `送达 ${stop.sequence}`}
+                            </span>
+                            <span className="min-w-0 truncate pt-0.5 text-[10px] text-slate-300" title={address.fullAddress}>
+                                {address.detail || address.region}
+                            </span>
+                            <span className={`pt-0.5 text-right text-[9px] ${completed ? 'text-emerald-300' : active ? 'text-cyan-200' : 'text-slate-600'}`}>
+                                {stopStateLabel(stop)}
+                            </span>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
 }
 
 function OverflowMarquee({
@@ -832,6 +905,10 @@ function RoadGroupRightPanels({
     const renderRouteCard = (route: RouteOrder, keySuffix = '') => {
         const progress = routeProgress(route);
         const tone = routeTone(route, routes);
+        const tripStops = orderedTripStops(route);
+        const pickupStops = tripStops.filter((stop) => stop.action === 'PICKUP');
+        const deliveryStops = tripStops.filter((stop) => stop.action === 'DELIVERY');
+        const isCompositeTrip = new Set(tripStops.map((stop) => stop.orderInstanceId)).size > 1;
         const isSelected = variant === 'vehicle' && route.lineId === activeVehicleLineId;
         const fromAddress = splitAdministrativeAddress(route.from);
         const toAddress = splitAdministrativeAddress(route.to);
@@ -910,19 +987,27 @@ function RoadGroupRightPanels({
                         </span>
                     </span>
                 </div>
-                <div className="mt-2 grid grid-cols-[minmax(0,0.8fr)_auto_minmax(0,1.2fr)] items-center gap-1.5 text-[11px]" title={`${route.from} → ${route.to}`}>
-                    <span className="truncate text-slate-500">{fromAddress.region}</span>
+                <div className="mt-2 grid grid-cols-[minmax(0,0.8fr)_auto_minmax(0,1.2fr)] items-center gap-1.5 text-[11px]" title={isCompositeTrip ? tripStops.map((stop) => stop.locationName).filter(Boolean).join(' → ') : `${route.from} → ${route.to}`}>
+                    <span className="truncate text-slate-500">
+                        {isCompositeTrip ? `${pickupStops.length} 个装载点` : fromAddress.region}
+                    </span>
                     <span className="text-slate-600">→</span>
-                    <span className="truncate font-medium text-emerald-100">{toAddress.detail || toAddress.region}</span>
-                </div>
-                <div className="mt-3 flex items-center gap-2">
-                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-950/90 ring-1 ring-white/5">
-                        <div className="h-full rounded-full bg-gradient-to-r from-cyan-300 via-sky-400 to-emerald-300 shadow-[0_0_10px_rgba(34,211,238,0.45)] transition-all duration-500" style={{ width: `${progress}%` }} />
-                    </div>
-                    <span className="w-10 text-right text-[10px] font-medium tabular-nums text-slate-300">
-                        {progress}%
+                    <span className="truncate font-medium text-emerald-100">
+                        {isCompositeTrip ? `${deliveryStops.length} 个目的地` : toAddress.detail || toAddress.region}
                     </span>
                 </div>
+                {isCompositeTrip ? (
+                    <TripMilestoneProgress stops={tripStops} progress={progress} accent={tone.color} />
+                ) : (
+                    <div className="mt-3 flex items-center gap-2">
+                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-950/90 ring-1 ring-white/5">
+                            <div className="h-full rounded-full bg-gradient-to-r from-cyan-300 via-sky-400 to-emerald-300 shadow-[0_0_10px_rgba(34,211,238,0.45)] transition-all duration-500" style={{ width: `${progress}%` }} />
+                        </div>
+                        <span className="w-10 text-right text-[10px] font-medium tabular-nums text-slate-300">
+                            {progress}%
+                        </span>
+                    </div>
+                )}
                 <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-slate-400">
                     <span className="min-w-0 truncate tabular-nums" title={routeRemainingText(route, progress)}>
                         {routeRemainingText(route, progress)}

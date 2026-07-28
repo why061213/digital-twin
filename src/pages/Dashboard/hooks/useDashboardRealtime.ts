@@ -54,6 +54,8 @@ export type RoadPathMessage = {
     targetStopId?: string;
     targetOrderInstanceId?: string;
     targetAction?: 'PICKUP' | 'DELIVERY';
+    tripStatusText?: string;
+    tripStops?: TripStop[];
     tripPhase?: string;
     tripDecision?: string;
     positionQuality?: string;
@@ -61,6 +63,18 @@ export type RoadPathMessage = {
     onboardOrderCount?: number;
     completedOrderCount?: number;
     routeSignature?: string;
+};
+
+export type TripStop = {
+    stopId: string;
+    orderInstanceId: string;
+    action: 'PICKUP' | 'DELIVERY';
+    sequence: number;
+    locationName?: string | null;
+    coordinates?: [number, number] | null;
+    visitState: 'PENDING' | 'ARRIVED' | 'DWELLING' | 'VISITED';
+    currentTarget: boolean;
+    markerColor: string;
 };
 
 export type TruckPositionMessage = {
@@ -186,6 +200,8 @@ export type RouteOrder = {
     targetStopId?: string;
     targetOrderInstanceId?: string;
     targetAction?: 'PICKUP' | 'DELIVERY';
+    tripStatusText?: string;
+    tripStops?: TripStop[];
     tripPhase?: string;
     tripDecision?: string;
     positionQuality?: string;

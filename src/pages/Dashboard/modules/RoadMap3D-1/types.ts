@@ -50,6 +50,18 @@ export type RoadObjectInfo = {
     targetStopId?: string;
     targetOrderInstanceId?: string;
     targetAction?: 'PICKUP' | 'DELIVERY';
+    tripStatusText?: string;
+    tripStops?: Array<{
+        stopId: string;
+        orderInstanceId: string;
+        action: 'PICKUP' | 'DELIVERY';
+        sequence: number;
+        locationName?: string | null;
+        coordinates?: [number, number] | null;
+        visitState: 'PENDING' | 'ARRIVED' | 'DWELLING' | 'VISITED';
+        currentTarget: boolean;
+        markerColor: string;
+    }>;
     tripPhase?: string;
     tripDecision?: string;
     positionQuality?: string;

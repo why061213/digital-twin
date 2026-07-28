@@ -386,6 +386,8 @@ export function adaptRenderRoute(route: RenderRouteDTO): RoadPathMessage | null 
         targetStopId: route.meta?.targetStopId,
         targetOrderInstanceId: route.meta?.targetOrderInstanceId,
         targetAction: route.meta?.targetAction,
+        tripStatusText: route.meta?.tripStatusText,
+        tripStops: route.meta?.tripStops,
         tripPhase: route.meta?.tripPhase,
         tripDecision: route.meta?.tripDecision,
         positionQuality: route.meta?.positionQuality,
