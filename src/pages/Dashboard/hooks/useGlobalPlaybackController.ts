@@ -148,13 +148,8 @@ export function useGlobalPlaybackController({
                 break;
             }
             case 'rm1': {
-                if (rm1GroupCount > 0) {
-                    onViewChange('roadMap');
-                } else {
-                    console.info('[GlobalPlayback] RM1 became empty, advancing');
-                    advanceTo(node.next!);
-                    return;
-                }
+                // Judge 已确认有数据，直接切换视图
+                onViewChange('roadMap');
                 advancingRef.current = false;
                 break;
             }
@@ -178,13 +173,8 @@ export function useGlobalPlaybackController({
                 break;
             }
             case 'rm2': {
-                if (rm2GroupCount > 0) {
-                    onViewChange('roadMap2');
-                } else {
-                    console.info('[GlobalPlayback] RM2 became empty, advancing');
-                    advanceTo(node.next!);
-                    return;
-                }
+                // Judge 已确认有数据，直接切换视图
+                onViewChange('roadMap2');
                 advancingRef.current = false;
                 break;
             }
