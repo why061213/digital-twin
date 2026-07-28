@@ -132,8 +132,10 @@ function DashboardPage() {
 
     // 全局播放控制器：管理 ChinaMap → RM1_Judge → RM1 → RM2_Judge → RM2 → End 链表循环
     const globalPlayback = useGlobalPlaybackController({
+        currentView: view,
         onViewChange: requestViewChange,
         chinaMapRef: mapRef,
+        isChinaMapVisualReady,
         rm1GroupCount: roadGroups.length,
         rm2GroupCount: rm2Groups.length,
         enabled: true,

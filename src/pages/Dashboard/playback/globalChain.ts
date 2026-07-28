@@ -39,6 +39,10 @@ export function buildGlobalChain(): GlobalNode {
 export type GlobalPlaybackConfig = {
     /** ChinaMap 仓库巡游循环次数，达到后进入下一节点 */
     chinaMapLoopCount: number;
+    /** 整个大循环总次数，0=无限 */
+    totalLoopCount: number;
     /** 空视图重试间隔（ms） */
     emptyViewRetryMs: number;
+    /** RM1 每组展示停留（ms），0=立即切换 */
+    rm1GroupHoldMs: number;
 };

@@ -86,6 +86,8 @@ export const LABEL_CONFIG = {
     globalPlayback: {
         /** ChinaMap 仓库巡游循环次数，达到后进入 RM1 */
         chinaMapLoopCount: 2,
+        /** 整个大循环 (ChinaMap→RM1→RM2→End) 的总次数，0=无限循环 */
+        totalLoopCount: 2,
         /** RM1 每个路线组展示完毕后停留（ms），0 表示立即切换下一个 */
         rm1GroupHoldMs: 0,
         /** RM2 视图中无内容时等待后重试的间隔（ms） */
