@@ -350,6 +350,46 @@ function stopStateLabel(stop: TripStop) {
     return '待执行';
 }
 
+function compositeStopRole(stop: TripStop, index: number, total: number) {
+    if (index === 0) return '第一起点';
+    if (index === total - 1) return '最终终点';
+    return stop.action === 'PICKUP' ? '途经装载点' : '途经目的地';
+}
+
+function CompositeTripNodeList({ stops }: { stops: TripStop[] }) {
+    return (
+        <div className="min-w-0 rounded border border-white/8 bg-slate-950/35 px-2.5 py-2">
+            {stops.map((stop, index) => {
+                const completed = stop.visitState === 'VISITED';
+                const active = stop.currentTarget || stop.visitState === 'ARRIVED' || stop.visitState === 'DWELLING';
+                const role = compositeStopRole(stop, index, stops.length);
+                const color = completed ? '#34d399' : active ? '#67e8f9' : stop.action === 'PICKUP' ? '#38bdf8' : '#fb7185';
+                return (
+                    <div key={stop.stopId} className="relative grid min-h-11 grid-cols-[16px_68px_minmax(0,1fr)] gap-x-2 py-1">
+                        {index < stops.length - 1 && (
+                            <span className="absolute left-[5px] top-[18px] h-[calc(100%-4px)] w-px bg-slate-600/60" aria-hidden="true" />
+                        )}
+                        <span
+                            className={`relative z-10 mt-1 h-3 w-3 rounded-full border-2 ${active ? 'motion-safe:animate-pulse' : ''}`}
+                            style={{ borderColor: color, backgroundColor: completed || active ? color : '#0f172a', boxShadow: active ? `0 0 10px ${color}` : undefined }}
+                            aria-hidden="true"
+                        />
+                        <span className={`pt-0.5 text-[10px] font-medium ${stop.action === 'PICKUP' ? 'text-sky-300' : 'text-rose-300'}`}>
+                            {role}
+                        </span>
+                        <div className="min-w-0">
+                            <OverflowMarquee value={stop.locationName || '--'} className="text-[11px] font-medium text-slate-200" />
+                            <div className={`mt-0.5 text-[9px] ${completed ? 'text-emerald-300' : active ? 'text-cyan-200' : 'text-slate-600'}`}>
+                                {stopStateLabel(stop)}
+                            </div>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
 function TripMilestoneProgress({
     stops,
     progress,
@@ -359,48 +399,58 @@ function TripMilestoneProgress({
     progress: number;
     accent: string;
 }) {
+    const segmentCount = Math.max(1, stops.length - 1);
+    const activeIndex = stops.findIndex((stop) => (
+        stop.currentTarget || stop.visitState === 'ARRIVED' || stop.visitState === 'DWELLING'
+    ));
+    const lastVisitedIndex = stops.reduce((last, stop, index) => stop.visitState === 'VISITED' ? index : last, -1);
+    const allVisited = stops.length > 0 && lastVisitedIndex === stops.length - 1;
+    const routeProgress = allVisited
+        ? 100
+        : activeIndex > 0
+            ? ((activeIndex - 1 + progress / 100) / segmentCount) * 100
+            : Math.max(0, lastVisitedIndex / segmentCount) * 100;
+
     return (
         <div className="mt-3 rounded border border-white/8 bg-slate-950/45 px-2.5 py-2.5">
             <div className="mb-2 flex items-center justify-between gap-2">
                 <span className="text-[10px] font-medium tracking-wide text-slate-400">运输里程碑</span>
                 <span className="text-[10px] tabular-nums text-slate-300">当前路段 {progress}%</span>
             </div>
-            <div className="space-y-0">
+            <div className="relative px-1 pt-1">
+                <div className="absolute left-2 right-2 top-[8px] h-1 rounded-full bg-slate-800 ring-1 ring-white/5" aria-hidden="true">
+                    <div
+                        className="h-full rounded-full transition-[width] duration-500 motion-reduce:transition-none"
+                        style={{ width: `${Math.max(0, Math.min(100, routeProgress))}%`, background: `linear-gradient(90deg, #22d3ee, ${accent})`, boxShadow: `0 0 8px ${accent}` }}
+                    />
+                </div>
+                <div className="relative grid" style={{ gridTemplateColumns: `repeat(${Math.max(1, stops.length)}, minmax(0, 1fr))` }}>
                 {stops.map((stop, index) => {
                     const completed = stop.visitState === 'VISITED';
                     const active = stop.currentTarget || stop.visitState === 'ARRIVED' || stop.visitState === 'DWELLING';
                     const address = splitAdministrativeAddress(stop.locationName ?? undefined);
                     const dotColor = completed ? '#34d399' : active ? accent : '#475569';
                     return (
-                        <div key={stop.stopId} className="relative grid min-h-9 grid-cols-[14px_54px_minmax(0,1fr)_42px] items-start gap-1.5">
-                            {index < stops.length - 1 && (
-                                <span
-                                    aria-hidden="true"
-                                    className="absolute left-[5px] top-[13px] h-[calc(100%-2px)] w-px"
-                                    style={{ backgroundColor: completed ? '#34d399' : 'rgba(71,85,105,0.7)' }}
-                                />
-                            )}
+                        <div key={stop.stopId} className="relative flex min-w-0 flex-col items-center text-center" title={`${compositeStopRole(stop, index, stops.length)} · ${address.fullAddress} · ${stopStateLabel(stop)}`}>
                             <span
                                 aria-hidden="true"
-                                className={`relative z-10 mt-1 h-[11px] w-[11px] rounded-full border-2 ${active ? 'motion-safe:animate-pulse' : ''}`}
+                                className={`relative z-10 h-3 w-3 rounded-full border-2 ${active ? 'motion-safe:animate-pulse' : ''}`}
                                 style={{
                                     borderColor: dotColor,
                                     backgroundColor: completed || active ? dotColor : '#0f172a',
                                     boxShadow: active ? `0 0 9px ${dotColor}` : undefined,
                                 }}
                             />
-                            <span className={`pt-0.5 text-[10px] ${stop.action === 'PICKUP' ? 'text-sky-300' : 'text-rose-300'}`}>
-                                {stop.action === 'PICKUP' ? `装载 ${stop.sequence}` : `送达 ${stop.sequence}`}
+                            <span className={`mt-1.5 truncate text-[9px] font-medium ${stop.action === 'PICKUP' ? 'text-sky-300' : 'text-rose-300'}`}>
+                                {compositeStopRole(stop, index, stops.length)}
                             </span>
-                            <span className="min-w-0 truncate pt-0.5 text-[10px] text-slate-300" title={address.fullAddress}>
+                            <span className="mt-0.5 w-full truncate text-[9px] text-slate-500">
                                 {address.detail || address.region}
-                            </span>
-                            <span className={`pt-0.5 text-right text-[9px] ${completed ? 'text-emerald-300' : active ? 'text-cyan-200' : 'text-slate-600'}`}>
-                                {stopStateLabel(stop)}
                             </span>
                         </div>
                     );
                 })}
+                </div>
             </div>
         </div>
     );
@@ -637,6 +687,10 @@ function VehicleTransportDetails({
     const targetTone = routeTone(targetRoute, roadGroup.routes);
     const fromAddress = splitAdministrativeAddress(targetRoute?.from);
     const toAddress = splitAdministrativeAddress(targetRoute?.to);
+    const targetTripStops = targetRoute ? orderedTripStops(targetRoute) : [];
+    const targetPickupCount = targetTripStops.filter((stop) => stop.action === 'PICKUP').length;
+    const targetDeliveryCount = targetTripStops.filter((stop) => stop.action === 'DELIVERY').length;
+    const targetIsCompositeTrip = new Set(targetTripStops.map((stop) => stop.orderInstanceId)).size > 1;
     const targetSeverity = resolveVehicleAlarmSeverity({
         alarmStr: targetRoute?.alarmStr,
         alarmSeverity: targetRoute?.alarmSeverity,
@@ -706,17 +760,20 @@ function VehicleTransportDetails({
                 <div className="no-scrollbar mt-3 flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto rounded border border-white/8 bg-slate-900/55 px-3 py-3">
                     <div className="mb-3 grid min-w-0 grid-cols-2 gap-2">
                         <div className="min-w-0 rounded border border-white/8 bg-white/[0.025] px-2.5 py-2">
-                            <div className="text-[9px] text-slate-500">始发省市</div>
-                            <OverflowMarquee value={fromAddress.region} className="mt-1 text-[11px] font-medium text-slate-300" />
+                            <div className="text-[9px] text-slate-500">{targetIsCompositeTrip ? '装载地点' : '始发省市'}</div>
+                            <OverflowMarquee value={targetIsCompositeTrip ? `${targetPickupCount} 个` : fromAddress.region} className="mt-1 text-[11px] font-medium text-slate-300" />
                         </div>
                         <div className="min-w-0 rounded border border-emerald-300/25 bg-emerald-300/[0.07] px-2.5 py-2 shadow-[inset_0_0_18px_rgba(52,211,153,0.04)]">
                             <div className="flex items-center justify-between gap-2 text-[9px] text-emerald-200/65">
-                                <span>目的省市</span>
+                                <span>{targetIsCompositeTrip ? '目的地点' : '目的省市'}</span>
                                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-300 shadow-[0_0_8px_rgba(110,231,183,0.8)]" />
                             </div>
-                            <OverflowMarquee value={toAddress.region} className="mt-1 text-xs font-semibold text-emerald-100" />
+                            <OverflowMarquee value={targetIsCompositeTrip ? `${targetDeliveryCount} 个` : toAddress.region} className="mt-1 text-xs font-semibold text-emerald-100" />
                         </div>
                     </div>
+                    {targetIsCompositeTrip ? (
+                        <CompositeTripNodeList stops={targetTripStops} />
+                    ) : (
                     <div className="grid min-w-0 shrink-0 grid-cols-[1rem_minmax(0,1fr)] gap-x-3 overflow-hidden">
                         <div className="flex h-[6rem] flex-col items-center py-1">
                             <span className="h-2.5 w-2.5 rounded-full border-2 border-sky-200 bg-sky-500 shadow-[0_0_10px_rgba(56,189,248,0.7)]" />
@@ -734,6 +791,7 @@ function VehicleTransportDetails({
                             </div>
                         </div>
                     </div>
+                    )}
                     <div className="mt-3 grid min-w-0 grid-cols-[repeat(2,minmax(0,1fr))] gap-2 border-t border-white/8 pt-3 text-xs">
                         <div className="min-w-0 overflow-hidden rounded bg-white/[0.035] px-2.5 py-2">
                             <div className="text-[10px] text-slate-500">速度</div>

@@ -236,7 +236,7 @@ function fullEndpoint(value: string | undefined) {
 
 function createEndpointLabel(
     point: THREE.Vector3,
-    prefix: '起点' | '终点',
+    prefix: string,
     value: string | undefined,
     color: string,
     mode: 'rm1' | 'rm2',
@@ -245,7 +245,7 @@ function createEndpointLabel(
 ) {
     const canvas = document.createElement('canvas');
     const label = `${routeName ? `${routeName} · ` : ''}${prefix} · ${fullEndpoint(value)}`;
-    const fontWeight = prefix === '终点' ? 600 : 500;
+    const fontWeight = prefix.includes('终点') || prefix.includes('目的地') ? 600 : 500;
     const font = `${fontWeight} 22px "Microsoft YaHei", sans-serif`;
     const measuringContext = canvas.getContext('2d');
     if (!measuringContext) return new THREE.Group();
@@ -257,7 +257,7 @@ function createEndpointLabel(
 
     context.fillStyle = color;
     context.beginPath();
-    context.arc(22, 44, prefix === '终点' ? 8 : 6, 0, Math.PI * 2);
+    context.arc(22, 44, prefix.includes('终点') || prefix.includes('目的地') ? 8 : 6, 0, Math.PI * 2);
     context.fill();
     context.font = font;
     context.lineWidth = 7;
@@ -343,14 +343,18 @@ export function createRouteStopLayer(
         const point = stop.point.clone();
         const markerScale = preset.markerScale * (stop.currentTarget ? 1.24 : 1);
         const marker = createEndpointMarker(point, markerScale, color, 30 + index, mode);
+        const role = index === 0
+            ? '第一起点'
+            : index === stops.length - 1
+                ? '最终终点'
+                : delivery ? '途经目的地' : '途经装载点';
         const label = createEndpointLabel(
             point,
-            delivery ? '终点' : '起点',
+            role,
             stop.locationName ?? undefined,
             colorText(color),
             mode,
             index,
-            `${delivery ? '目的地' : '装载点'}${stop.sequence}`,
         );
         layer.add(marker, label);
     });

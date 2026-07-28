@@ -160,6 +160,7 @@ export function createRm2SceneAdapter(
             const rejectedLineIds: string[] = [];
             const preparedRoutes: Rm2PreparedRoute[] = [];
             const seenLineIds = new Set<string>();
+            const seenCompositeStopVisualKeys = new Set<string>();
             // 颜色槽必须以后端分组使用的业务路线 ID 为准。复合行程中的多张订单
             // 可能共享同一个 orderId；用 orderId 分色会把它们错误地压进同一颜色。
             const {
@@ -182,6 +183,15 @@ export function createRm2SceneAdapter(
                 const lineIds = pathLineIds.get(rawRoute.pathKey) ?? [];
                 lineIds.push(rawRoute.lineId);
                 pathLineIds.set(rawRoute.pathKey, lineIds);
+                const info = routeInfo(rawRoute, routeIndex, routeColorIndex);
+                const visualKey = rawRoute.meta?.visualKey ?? rawRoute.lineId;
+                const compositeOrderCount = new Set(
+                    (rawRoute.meta?.tripStops ?? []).map((stop) => stop.orderInstanceId),
+                ).size;
+                if (compositeOrderCount > 1) {
+                    if (seenCompositeStopVisualKeys.has(visualKey)) info.tripStops = undefined;
+                    else seenCompositeStopVisualKeys.add(visualKey);
+                }
                 preparedRoutes.push({
                     lineId: rawRoute.lineId,
                     pathKey: rawRoute.pathKey,
@@ -189,8 +199,8 @@ export function createRm2SceneAdapter(
                     baselineCoordinates: rawRoute.baselineCoordinates,
                     baselinePathKey: rawRoute.baselinePathKey,
                     initialPosition: rawRoute.coordinates[0],
-                    info: routeInfo(rawRoute, routeIndex, routeColorIndex),
-                    visualKey: rawRoute.meta?.visualKey ?? rawRoute.lineId,
+                    info,
+                    visualKey,
                 });
             });
 
