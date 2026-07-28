@@ -716,7 +716,8 @@ export function useRoadControls(
             cancelAnimationFrame(sharedRangeRefreshFrameRef.current);
             sharedRangeRefreshFrameRef.current = null;
         }
-        highlightedLineIdRef.current = null;
+        // 保留侧栏请求聚焦的 lineId；同组路线重建完成后，ensureVehicleBar
+        // 会自动恢复车辆模型放大和定位圆圈。
         highlightGenerationRef.current += 1;
         Array.from(refs.roadsMapRef.current.keys()).forEach((id) => clearRoad(id));
         refs.roadsMapRef.current.clear();
