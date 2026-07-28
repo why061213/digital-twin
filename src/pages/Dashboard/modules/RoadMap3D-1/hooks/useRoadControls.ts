@@ -280,8 +280,8 @@ export function useRoadControls(
         );
     }, []);
 
-    const updateVehicleScaleForCamera = useCallback((cameraHeight: number) => {
-        const normalized = THREE.MathUtils.smoothstep(Math.abs(cameraHeight), 480, 2200);
+    const updateVehicleScaleForCamera = useCallback((cameraDistance: number) => {
+        const normalized = THREE.MathUtils.smoothstep(Math.abs(cameraDistance), 480, 2200);
         const nextScale = THREE.MathUtils.lerp(1, TRUCK_HIGH_CAMERA_SCALE, normalized);
         if (Math.abs(nextScale - cameraTruckScaleRef.current) < 0.002) return;
         cameraTruckScaleRef.current = nextScale;

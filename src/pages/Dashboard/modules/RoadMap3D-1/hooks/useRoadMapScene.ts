@@ -131,7 +131,9 @@ export function useRoadMapScene(
             });
             selectionRef.current.updateHoverPosition();
             orbitControls.update();
-            controlsRef.current.updateVehicleScaleForCamera(camera.position.y);
+            controlsRef.current.updateVehicleScaleForCamera(
+                camera.position.distanceTo(orbitControls.target),
+            );
             renderer.render(scene, camera);
         };
         animate();
