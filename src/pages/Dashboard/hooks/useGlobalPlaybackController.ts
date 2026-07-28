@@ -18,10 +18,10 @@ type UseGlobalPlaybackControllerOptions = {
     rm1GroupCount: number;
     /** RM2 路线组数量 */
     rm2GroupCount: number;
-    /** 拉取 RM1 数据（触发 refreshRoadGroups） */
-    fetchRm1Data: () => Promise<unknown>;
-    /** 拉取 RM2 数据（触发 refreshRm2） */
-    fetchRm2Data: () => Promise<unknown>;
+    /** 检查 RM1 是否有可播放数据（直接调 API，返回 boolean） */
+    fetchRm1Data: () => Promise<boolean>;
+    /** 检查 RM2 是否有可播放数据（直接调 API，返回 boolean） */
+    fetchRm2Data: () => Promise<boolean>;
     /** 是否启用全局播放 */
     enabled?: boolean;
 };
@@ -129,22 +129,18 @@ export function useGlobalPlaybackController({
                 break;
             }
             case 'rm1Judge': {
-                // Judge 节点：先拉取 RM1 数据，等待结果后再判断
                 advancingRef.current = false;
                 const nextRm1 = node.next!;
                 const nextRm2Judge = nextRm1.next!;
-                console.info('[GlobalPlayback] RM1 Judge: fetching data...');
-                fetchRm1Data().then(() => {
-                    // 数据拉取完成后，等一个微任务让 state 更新
-                    setTimeout(() => {
-                        if (rm1GroupCount > 0) {
-                            console.info('[GlobalPlayback] RM1 has data (' + rm1GroupCount + ' groups), advancing to RM1');
-                            advanceTo(nextRm1);
-                        } else {
-                            console.info('[GlobalPlayback] RM1 still empty, skipping to RM2_Judge');
-                            advanceTo(nextRm2Judge);
-                        }
-                    }, 500);
+                console.info('[GlobalPlayback] RM1 Judge: checking data...');
+                fetchRm1Data().then((hasData) => {
+                    if (hasData) {
+                        console.info('[GlobalPlayback] RM1 has data, advancing to RM1');
+                        advanceTo(nextRm1);
+                    } else {
+                        console.info('[GlobalPlayback] RM1 no data, skipping to RM2_Judge');
+                        advanceTo(nextRm2Judge);
+                    }
                 }).catch((err: unknown) => {
                     console.warn('[GlobalPlayback] RM1 fetch failed, skipping', err);
                     advanceTo(nextRm2Judge);
@@ -163,21 +159,18 @@ export function useGlobalPlaybackController({
                 break;
             }
             case 'rm2Judge': {
-                // Judge 节点：先拉取 RM2 数据，等待结果后再判断
                 advancingRef.current = false;
                 const nextRm2 = node.next!;
                 const nextEnd = nextRm2.next!;
-                console.info('[GlobalPlayback] RM2 Judge: fetching data...');
-                fetchRm2Data().then(() => {
-                    setTimeout(() => {
-                        if (rm2GroupCount > 0) {
-                            console.info('[GlobalPlayback] RM2 has data (' + rm2GroupCount + ' groups), advancing to RM2');
-                            advanceTo(nextRm2);
-                        } else {
-                            console.info('[GlobalPlayback] RM2 still empty, skipping to End');
-                            advanceTo(nextEnd);
-                        }
-                    }, 500);
+                console.info('[GlobalPlayback] RM2 Judge: checking data...');
+                fetchRm2Data().then((hasData) => {
+                    if (hasData) {
+                        console.info('[GlobalPlayback] RM2 has data, advancing to RM2');
+                        advanceTo(nextRm2);
+                    } else {
+                        console.info('[GlobalPlayback] RM2 no data, skipping to End');
+                        advanceTo(nextEnd);
+                    }
                 }).catch((err: unknown) => {
                     console.warn('[GlobalPlayback] RM2 fetch failed, skipping', err);
                     advanceTo(nextEnd);

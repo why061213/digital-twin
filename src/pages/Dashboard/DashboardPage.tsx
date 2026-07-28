@@ -22,6 +22,8 @@ import {
     dispatchBulkRoutes,
     dispatchRoute,
 } from './services/roadApi';
+import { fetchRoadGroupsByStrategy } from './services/roadApi';
+import { fetchRm2ChainStructure } from './services/renderRouteApi';
 
 function DashboardPage() {
     const [isDispatching, setIsDispatching] = useState(false);
@@ -139,8 +141,18 @@ function DashboardPage() {
         isChinaMapVisualReady,
         rm1GroupCount: roadGroups.length,
         rm2GroupCount: rm2Groups.length,
-        fetchRm1Data: () => refreshRoadGroups(),
-        fetchRm2Data: () => refreshRm2(),
+        fetchRm1Data: async () => {
+            try {
+                const groups = await fetchRoadGroupsByStrategy('business-priority');
+                return groups.length > 0;
+            } catch { return false; }
+        },
+        fetchRm2Data: async () => {
+            try {
+                const structure = await fetchRm2ChainStructure();
+                return structure.leafGroupIds.length > 0;
+            } catch { return false; }
+        },
         enabled: true,
     });
 
