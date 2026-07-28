@@ -97,8 +97,8 @@ function orderKeyFor(lineId: string, info: RoadObjectInfo) {
 }
 
 /** 车道分组键：同一订单的多辆车应共享车道，用 orderFamilyId 或 orderId */
-function laneKeyFor(info: RoadObjectInfo) {
-    return info.orderFamilyId ?? info.orderId ?? `lane-${info.lineId ?? 'unknown'}`;
+function laneKeyFor(lineId: string, info: RoadObjectInfo) {
+    return info.orderFamilyId ?? info.orderId ?? `lane-${lineId}`;
 }
 
 function stableHash(value: string) {
@@ -160,7 +160,7 @@ function createEndpointLayer(
         }];
     });
     return stops.length > 0
-        ? createRouteStopLayer(stops, 'rm2')
+        ? createRouteStopLayer(stops, 'rm2', color)
         : createRouteEndpointLayer(samples, 'rm2', info, color, laneIndex);
 }
 
@@ -839,7 +839,7 @@ export function useRoadControls(
 
             const pathKey = trackKeyFor(id, coords, info);
             const orderId = orderKeyFor(id, info);
-            const laneKey = laneKeyFor(info);
+            const laneKey = laneKeyFor(id, info);
             const existing = refs.roadsMapRef.current.get(pathKey);
             if (existing) {
                 const nextGeometryKey = geometryKeyFor(coords);
@@ -1143,7 +1143,7 @@ export function useRoadControls(
         if (!road) return;
         const existingLane = Array.from(road.orders.values())
             .find((candidate) => candidate.vehicles.has(lineId));
-        const lane = existingLane ?? ensureOrderLane(road, laneKeyFor(info), orderKeyFor(lineId, info), info);
+        const lane = existingLane ?? ensureOrderLane(road, laneKeyFor(lineId, info), orderKeyFor(lineId, info), info);
         const vehicle = existingLane?.vehicles.get(lineId)
             ?? ensureVehicleBar(road, lane, lineId, info);
         vehicle.bar.visible = true;

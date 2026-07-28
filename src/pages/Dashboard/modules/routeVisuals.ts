@@ -332,6 +332,7 @@ export function createRouteEndpointLayer(
 export function createRouteStopLayer(
     stops: RouteStopVisualInfo[],
     mode: 'rm1' | 'rm2',
+    routeColor: number,
 ) {
     const preset = PRESETS[mode];
     const layer = new THREE.Group();
@@ -352,7 +353,7 @@ export function createRouteStopLayer(
             point,
             role,
             stop.locationName ?? undefined,
-            colorText(color),
+            colorText(routeColor),
             mode,
             index,
         );
