@@ -13,6 +13,7 @@ export function useWarehouseTour(
     findCityKey: (cityName: string) => string | undefined,
     showCachedCityPanels: (cityName: string) => boolean,
     onTourStateChange?: (state: { mode: 'overview' | 'focus'; cityName?: string; displayData?: Record<string, any> }) => void,
+    onLoopCompleted?: () => void,
 ) {
     const startWarehouseTour = useCallback(() => {
         const runId = refs.warehouseTourRunRef.current + 1;
@@ -109,12 +110,13 @@ export function useWarehouseTour(
                 await focusPoints(overviewPoints, undefined, 'overview');
                 if (refs.warehouseTourRunRef.current !== runId) return;
                 refreshWarehouseLabels();
+                onLoopCompleted?.();
                 await wait(WAREHOUSE_TOUR_LOOP_HOLD);
             }
         };
 
         void runTour();
-    }, [refs, focusPoints, refreshWarehouseLabels, setLabelVisibility, findCityKey, showCachedCityPanels, onTourStateChange]);
+    }, [refs, focusPoints, refreshWarehouseLabels, setLabelVisibility, findCityKey, showCachedCityPanels, onTourStateChange, onLoopCompleted]);
 
     return { startWarehouseTour };
 }

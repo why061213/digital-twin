@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle } from 'react';
+import { forwardRef, useImperativeHandle, useRef, useCallback } from 'react';
 import { ChinaMap3DHandle } from './types';
 import { useChinaMapRefs } from './hooks/useChinaMapRefs';
 import { useCityControls } from './hooks/useCityControls';
@@ -13,16 +13,22 @@ import { useMapScene } from './hooks/useMapScene';
 type ChinaMap3DProps = {
     onVisualReady?: () => void;
     onTourStateChange?: (state: { mode: 'overview' | 'focus'; cityName?: string; displayData?: Record<string, any> }) => void;
+    onTourLoopCompleted?: () => void;
 };
 
-const ChinaMap3D = forwardRef<ChinaMap3DHandle, ChinaMap3DProps>(({ onVisualReady, onTourStateChange }, ref) => {
+const ChinaMap3D = forwardRef<ChinaMap3DHandle, ChinaMap3DProps>(({ onVisualReady, onTourStateChange, onTourLoopCompleted }, ref) => {
     const refs = useChinaMapRefs();
+    const tourLoopCallbackRef = useRef<(() => void) | null>(null);
 
     const labels = useWarehouseLabels(refs);
     const camera = useCameraControls(refs, labels.setLabelVisibility, labels.applyLabelVisibility);
     const cities = useCityControls(refs, labels, camera.focusFreightNodes);
     const flyLines = useFlyLines(refs, camera.focusFreightNodes);
     const panels = useCityPanels(refs, cities.findCityKey, labels.applyLabelVisibility);
+    const handleTourLoopCompleted = useCallback(() => {
+        tourLoopCallbackRef.current?.();
+        onTourLoopCompleted?.();
+    }, [onTourLoopCompleted]);
     const tour = useWarehouseTour(
         refs,
         camera.focusPoints,
@@ -31,6 +37,7 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle, ChinaMap3DProps>(({ onVisualRead
         cities.findCityKey,
         panels.showCachedCityPanels,
         onTourStateChange,
+        handleTourLoopCompleted,
     );
     const hover = useMapHover(refs);
 
@@ -54,6 +61,7 @@ const ChinaMap3D = forwardRef<ChinaMap3DHandle, ChinaMap3DProps>(({ onVisualRead
         focusOnCities: camera.focusOnCities,
         isReady: () => Boolean(refs.mapGroupRef.current && Object.keys(refs.meshMapRef.current).length > 0),
         startWarehouseTour: tour.startWarehouseTour,
+        onTourLoopCompleted: (callback) => { tourLoopCallbackRef.current = callback; },
         showCityPanels: panels.showCityPanels,
         clearCityPanels: panels.clearCityPanels,
         cacheCityPanels: panels.cacheCityPanels,

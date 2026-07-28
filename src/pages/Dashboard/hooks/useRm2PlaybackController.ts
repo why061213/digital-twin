@@ -29,6 +29,8 @@ type Options = {
     roadMapRef: RefObject<RoadMap3D2Handle | null>;
     view: ViewMode;
     sceneReady: boolean;
+    /** 全局播放：RM2 所有路线组耗尽时回调 */
+    onExhausted?: () => void;
 };
 
 function isCompletedRoute(route: RenderRouteDTO) {
@@ -136,7 +138,7 @@ export function assignRm2RouteColorSlots(
     }));
 }
 
-export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Options) {
+export function useRm2PlaybackController({ roadMapRef, view, sceneReady, onExhausted }: Options) {
     const [groups, setGroups] = useState<Rm2GroupDTO[]>([]);
     const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -310,6 +312,7 @@ export function useRm2PlaybackController({ roadMapRef, view, sceneReady }: Optio
                 activeRoutesRef.current.clear();
                 setRouteOrders([]);
                 roadMapRef.current?.clearRoads();
+                onExhausted?.();
                 return;
             }
 

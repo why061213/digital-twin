@@ -56,6 +56,8 @@ type UseRoadGroupsControllerOptions = {
     syncRoadRoute: (route: ActiveRoute) => void;
     renderTruckPosition: (route: ActiveRoute, now: number) => void;
     setRouteOrders: Dispatch<SetStateAction<RouteOrder[]>>;
+    /** 全局播放：RM1 所有路线组耗尽时回调 */
+    onExhausted?: () => void;
 };
 
 type UseRoadGroupsControllerResult = {
@@ -85,6 +87,7 @@ export function useRoadGroupsController({
     syncRoadRoute,
     renderTruckPosition,
     setRouteOrders,
+    onExhausted,
 }: UseRoadGroupsControllerOptions): UseRoadGroupsControllerResult {
     const pendingNextGroupIdRef = useRef<string | null>(null);
     const [roadGroups, setRoadGroups] = useState<RoadGroupSummary[]>([]);
@@ -211,6 +214,9 @@ export function useRoadGroupsController({
         currentRoadGroupSummaries().delete(groupId);
         currentRoadGroupRouteIds().delete(groupId);
         setRoadGroups((prev) => prev.filter((group) => group.groupId !== groupId));
+        if (ring.nodes.size === 0) {
+            onExhausted?.();
+        }
         if (activeRoadGroupIdRef.current === groupId) {
             activeRoadGroupIdRef.current = null;
             setActiveRoadGroupId(null);

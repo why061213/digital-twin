@@ -11,6 +11,7 @@ import { useRoadGroupsController } from './hooks/useRoadGroupsController';
 import { useTruckPositionController } from './hooks/useTruckPositionController';
 import { useRm2PlaybackController } from './hooks/useRm2PlaybackController';
 import { useWarehouseController } from './hooks/useWarehouseController';
+import { useGlobalPlaybackController } from './hooks/useGlobalPlaybackController';
 import type { ViewMode } from './types';
 import { DispatchButtons } from './components/DispatchButtons';
 import { DashboardCenterPanel } from './components/DashboardCenterPanel';
@@ -128,6 +129,16 @@ function DashboardPage() {
         view,
         sceneReady: isRoadMap2VisualReady,
     });
+
+    // 全局播放控制器：管理 ChinaMap → RM1_Judge → RM1 → RM2_Judge → RM2 → End 链表循环
+    const globalPlayback = useGlobalPlaybackController({
+        onViewChange: requestViewChange,
+        chinaMapRef: mapRef,
+        rm1GroupCount: roadGroups.length,
+        rm2GroupCount: rm2Groups.length,
+        enabled: true,
+    });
+
     const handleRouteRaise = useCallback(() => {
         // 城市飞线事件由 ChinaMap3D 处理；道路级地图只加载后端分组后的路线。
     }, []);

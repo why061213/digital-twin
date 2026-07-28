@@ -83,4 +83,12 @@ export const LABEL_CONFIG = {
         loopHold: 900,       // 每轮巡游结束后的等待时间
         startDelay: 3000,     // 开始到镜头爬升的等待时间
     },
+    globalPlayback: {
+        /** ChinaMap 仓库巡游循环次数，达到后进入 RM1 */
+        chinaMapLoopCount: 2,
+        /** RM1 每个路线组展示完毕后停留（ms），0 表示立即切换下一个 */
+        rm1GroupHoldMs: 0,
+        /** RM2 视图中无内容时等待后重试的间隔（ms） */
+        emptyViewRetryMs: 5000,
+    },
 };

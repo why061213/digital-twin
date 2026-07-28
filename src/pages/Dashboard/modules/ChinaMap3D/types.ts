@@ -28,6 +28,7 @@ export type ChinaMap3DHandle = {
     focusOnCities: (cityNames: string[], mode: CameraFocusMode) => void;
     isReady: () => boolean;
     startWarehouseTour: () => void;
+    onTourLoopCompleted: (callback: (() => void) | null) => void;
     showCityPanels: (cityName: string, panels: PanelData[], style?: PanelStyle) => void;
     cacheCityPanels: (cityName: string, panels: PanelData[], style?: PanelStyle) => void;
     showCachedCityPanels: (cityName: string) => boolean;
