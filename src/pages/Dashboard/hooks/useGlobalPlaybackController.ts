@@ -76,6 +76,7 @@ export function useGlobalPlaybackController({
     }, [isChinaMapVisualReady]);
 
     // ChinaMap 巡游循环完成回调（用 ref 避免闭包问题）
+    const advanceTimerRef = useRef<number | null>(null);
     const handleChinaMapLoopCompletedRef = useRef<() => void>(() => {});
     handleChinaMapLoopCompletedRef.current = () => {
         if (currentNodeRef.current.kind !== 'chinaMap') return;
@@ -83,7 +84,15 @@ export function useGlobalPlaybackController({
         console.info('[GlobalPlayback] ChinaMap loop completed:', chinaMapLoopRef.current, '/', chinaMapLoopCount);
         if (chinaMapLoopRef.current >= chinaMapLoopCount) {
             const next = currentNodeRef.current.next;
-            if (next) advanceTo(next);
+            if (!next) return;
+            // 使用 setTimeout 异步推进，避免在 onLoopCompleted 回调栈中同步完成整条链。
+            // 否则 RM1_Judge→RM2_Judge→End→ChinaMap 同步执行，计数器被立即重置为 0。
+            if (advanceTimerRef.current !== null) window.clearTimeout(advanceTimerRef.current);
+            advanceTimerRef.current = window.setTimeout(() => {
+                advanceTimerRef.current = null;
+                console.info('[GlobalPlayback] ChinaMap loop count reached, advancing to', next.label);
+                advanceTo(next);
+            }, 300);
         }
     };
     const handleChinaMapLoopCompleted = useCallback(() => {
@@ -224,7 +233,13 @@ export function useGlobalPlaybackController({
     }, [enabled, isChinaMapVisualReady, chinaMapRef]);
 
     // 清理
-    useEffect(() => () => clearEmptyRetry(), [clearEmptyRetry]);
+    useEffect(() => () => {
+        clearEmptyRetry();
+        if (advanceTimerRef.current !== null) {
+            window.clearTimeout(advanceTimerRef.current);
+            advanceTimerRef.current = null;
+        }
+    }, [clearEmptyRetry]);
 
     return {
         currentNodeKind,
