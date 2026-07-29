@@ -408,29 +408,20 @@ function TripMilestoneProgress({
     progress: number;
     accent: string;
 }) {
-    const segmentCount = Math.max(1, stops.length - 1);
-    const activeIndex = stops.findIndex((stop) => (
-        stop.currentTarget || stop.visitState === 'ARRIVED' || stop.visitState === 'DWELLING'
-    ));
-    const lastVisitedIndex = stops.reduce((last, stop, index) => stop.visitState === 'VISITED' ? index : last, -1);
-    const allVisited = stops.length > 0 && lastVisitedIndex === stops.length - 1;
-    const routeProgress = allVisited
-        ? 100
-        : activeIndex > 0
-            ? ((activeIndex - 1 + progress / 100) / segmentCount) * 100
-            : Math.max(0, lastVisitedIndex / segmentCount) * 100;
+    // route.progress 已经是合并路线的全程进度，不能再按当前节点二次折算。
+    const routeProgress = Math.max(0, Math.min(100, progress));
 
     return (
         <div className="mt-3 rounded border border-white/8 bg-slate-950/45 px-2.5 py-2.5">
             <div className="mb-2 flex items-center justify-between gap-2">
                 <span className="text-[10px] font-medium tracking-wide text-slate-400">运输里程碑</span>
-                <span className="text-[10px] tabular-nums text-slate-300">当前路段 {progress}%</span>
+                <span className="text-[10px] tabular-nums text-slate-300">全程进度 {Math.round(routeProgress)}%</span>
             </div>
             <div className="relative px-1 pt-1">
                 <div className="absolute left-2 right-2 top-[8px] h-1 rounded-full bg-slate-800 ring-1 ring-white/5" aria-hidden="true">
                     <div
                         className="h-full rounded-full transition-[width] duration-500 motion-reduce:transition-none"
-                        style={{ width: `${Math.max(0, Math.min(100, routeProgress))}%`, background: `linear-gradient(90deg, #22d3ee, ${accent})`, boxShadow: `0 0 8px ${accent}` }}
+                        style={{ width: `${routeProgress}%`, background: `linear-gradient(90deg, #22d3ee, ${accent})`, boxShadow: `0 0 8px ${accent}` }}
                     />
                 </div>
                 <div className="relative grid" style={{ gridTemplateColumns: `repeat(${Math.max(1, stops.length)}, minmax(0, 1fr))` }}>

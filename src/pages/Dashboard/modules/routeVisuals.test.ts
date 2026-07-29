@@ -1,5 +1,23 @@
+import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { configureSharedProgressMaterial, createSharedProgressMaterial } from './routeVisuals';
+import { configureSharedProgressMaterial, createSharedProgressMaterial, groupRouteStopsByPoint } from './routeVisuals';
+
+describe('route stop visualization', () => {
+    it('keeps business milestones but groups repeated physical locations into one pin', () => {
+        const origin = new THREE.Vector3(1, 0, 1);
+        const station = new THREE.Vector3(2, 0, 2);
+        const groups = groupRouteStopsByPoint([
+            { point: origin, action: 'PICKUP', sequence: 1 },
+            { point: station, action: 'DELIVERY', sequence: 2 },
+            { point: station.clone(), action: 'PICKUP', sequence: 3, currentTarget: true },
+            { point: origin.clone(), action: 'DELIVERY', sequence: 4 },
+        ]);
+
+        expect(groups).toHaveLength(2);
+        expect(groups[0]).toMatchObject({ firstIndex: 0, lastIndex: 3 });
+        expect(groups[1].stops.map((stop) => stop.action)).toEqual(['DELIVERY', 'PICKUP']);
+    });
+});
 
 describe('route snake overlay material', () => {
     it('uses a dedicated overlay mode that remains occluded by vehicles', () => {

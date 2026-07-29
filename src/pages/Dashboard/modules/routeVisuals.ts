@@ -35,6 +35,49 @@ export type RouteStopVisualInfo = {
     markerColor?: string;
 };
 
+export type RouteStopVisualGroup = {
+    point: THREE.Vector3;
+    stops: RouteStopVisualInfo[];
+    firstIndex: number;
+    lastIndex: number;
+};
+
+const SAME_STOP_POINT_DISTANCE_SQ = 0.001 ** 2;
+
+/**
+ * 同一个园区可能既是上一单卸货点，也是下一单装货点；业务动作保留，地图实体合并。
+ */
+export function groupRouteStopsByPoint(stops: RouteStopVisualInfo[]): RouteStopVisualGroup[] {
+    return stops.reduce<RouteStopVisualGroup[]>((groups, stop, index) => {
+        const existing = groups.find((group) => (
+            group.point.distanceToSquared(stop.point) <= SAME_STOP_POINT_DISTANCE_SQ
+        ));
+        if (existing) {
+            existing.stops.push(stop);
+            existing.lastIndex = index;
+            return groups;
+        }
+        groups.push({
+            point: stop.point.clone(),
+            stops: [stop],
+            firstIndex: index,
+            lastIndex: index,
+        });
+        return groups;
+    }, []);
+}
+
+function groupedStopRole(group: RouteStopVisualGroup, stopCount: number) {
+    const isStart = group.firstIndex === 0;
+    const isEnd = group.lastIndex === stopCount - 1;
+    if (isStart && isEnd) return '起点 / 最终终点';
+    if (isStart) return group.stops.length > 1 ? '第一起点 / 途经点' : '第一起点';
+    if (isEnd) return group.stops.length > 1 ? '途经点 / 最终终点' : '最终终点';
+    const actions = new Set(group.stops.map((stop) => stop.action));
+    if (actions.size > 1) return '途经卸货 / 装货点';
+    return actions.has('DELIVERY') ? '途经目的地' : '途经装载点';
+}
+
 const MAX_SHARED_ROUTE_RANGES = 24;
 // Shader 相位为 x * frequency - time * speed，因此真实沿线速度是 speed / frequency。
 const SHARED_SNAKE_ROUTE_SPEED = 0.014;
@@ -348,21 +391,21 @@ export function createRouteStopLayer(
 ) {
     const preset = PRESETS[mode];
     const layer = new THREE.Group();
-    stops.forEach((stop, index) => {
+    const groupedStops = groupRouteStopsByPoint(stops);
+    groupedStops.forEach((group, index) => {
+        const stop = group.stops.find((candidate) => candidate.currentTarget)
+            ?? group.stops[group.stops.length - 1];
         const delivery = stop.action === 'DELIVERY';
         const color = delivery
             ? 0xef4444
             : new THREE.Color(stop.markerColor || '#38bdf8').getHex();
-        const point = stop.point.clone();
+        const point = group.point.clone();
+        const currentTarget = group.stops.some((candidate) => candidate.currentTarget);
         const markerScale = preset.markerScale
             * (avoidLabelCollisions ? 1.35 : 1)
-            * (stop.currentTarget ? (avoidLabelCollisions ? 1.16 : 1.24) : 1);
+            * (currentTarget ? (avoidLabelCollisions ? 1.16 : 1.24) : 1);
         const marker = createEndpointMarker(point, markerScale, color, 30 + index, mode);
-        const role = index === 0
-            ? '第一起点'
-            : index === stops.length - 1
-                ? '最终终点'
-                : delivery ? '途经目的地' : '途经装载点';
+        const role = groupedStopRole(group, stops.length);
         const label = createEndpointLabel(
             point,
             role,
@@ -372,7 +415,7 @@ export function createRouteStopLayer(
             index,
             undefined,
             avoidLabelCollisions
-                ? stop.currentTarget ? 0 : index === 0 || index === stops.length - 1 ? 10 + index : 30 + index
+                ? currentTarget ? 0 : group.firstIndex === 0 || group.lastIndex === stops.length - 1 ? 10 + index : 30 + index
                 : undefined,
         );
         layer.add(marker, label);
