@@ -102,5 +102,10 @@ export const LABEL_CONFIG = {
             roadMap: false,
             roadMap2: false,
         },
+        /** 顶部路线组直达按钮；仅隐藏人工切组入口，不影响自动组轮播。 */
+        directGroupButtons: {
+            rm1: false,
+            rm2: false,
+        },
     },
 };

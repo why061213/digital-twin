@@ -309,7 +309,8 @@ function DashboardPage() {
         />
     );
 
-    const roadGroupQueue = view === 'roadMap' && roadGroups.length > 0 && (
+    const roadGroupQueue = LABEL_CONFIG.globalPlayback.directGroupButtons.rm1
+        && view === 'roadMap' && roadGroups.length > 0 && (
         <RoadGroupQueue
             groups={roadGroups}
             activeGroupId={activeRoadGroupId}
@@ -317,7 +318,8 @@ function DashboardPage() {
             onSelectGroup={(groupId) => void loadRoadGroup(groupId)}
         />
     );
-    const rm2GroupQueue = view === 'roadMap2' && rm2Groups.length > 0 && (
+    const rm2GroupQueue = LABEL_CONFIG.globalPlayback.directGroupButtons.rm2
+        && view === 'roadMap2' && rm2Groups.length > 0 && (
         <RoadGroupQueue
             groups={rm2Groups}
             activeGroupId={activeRm2GroupId}

@@ -1215,4 +1215,4 @@ npm run build
 
 - 城市、中心图表结构、图表数据各提供一个外部 POST 接口和一个我方主动 GET 同步接口，共六个；完整协议见后端 `docs/CHINA_MAP_MANAGEMENT_API.md`。
 - 全局环形链保持 `ChinaMap → RM1_Judge → RM1 → RM2_Judge → RM2 → End → ChinaMap`。`viewCooldownMs` 默认 5000；冷却结束会主动复检耗尽状态。
-- `labelLayout.ts/globalPlayback.enabled` 控制自动循环；`directViewButtons.chinaMap/roadMap/roadMap2` 分别控制三个直达按钮，默认全部隐藏。开放按钮后，点击通过 `jumpToView` 同步链表节点。
+- `labelLayout.ts/globalPlayback.enabled` 控制自动循环；`directViewButtons.chinaMap/roadMap/roadMap2` 控制底部三个视图直达按钮，`directGroupButtons.rm1/rm2` 控制顶部 RM1/RM2 组别直达按钮，默认全部隐藏。开放视图按钮后，点击通过 `jumpToView` 同步链表节点；组别按钮只提供人工切组，不影响自动组轮播。
