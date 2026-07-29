@@ -50,6 +50,7 @@ export function useGlobalPlaybackController({
     const chinaMapLoopRef = useRef(0);
     const totalLoopRef = useRef(0);
     const advancingRef = useRef(false);
+    const viewEnteredAtRef = useRef(0);  // 进入 rm1/rm2 的时间戳，用于冷却期
     const emptyRetryTimerRef = useRef<number | null>(null);
     const loopCallbackInstalledRef = useRef(false);
     const config = LABEL_CONFIG.globalPlayback;
@@ -149,6 +150,7 @@ export function useGlobalPlaybackController({
             }
             case 'rm1': {
                 // Judge 已确认有数据，直接切换视图
+                viewEnteredAtRef.current = Date.now();
                 onViewChange('roadMap');
                 advancingRef.current = false;
                 break;
@@ -174,6 +176,7 @@ export function useGlobalPlaybackController({
             }
             case 'rm2': {
                 // Judge 已确认有数据，直接切换视图
+                viewEnteredAtRef.current = Date.now();
                 onViewChange('roadMap2');
                 advancingRef.current = false;
                 break;
@@ -201,10 +204,13 @@ export function useGlobalPlaybackController({
         if (next) advanceTo(next);
     }, [advanceTo]);
 
-    // 监听 RM1/RM2 的 groupCount 变化，组耗尽时推进
+    // 监听 RM1/RM2 的 groupCount 变化，组耗尽时推进（含冷却期避免刚进入就误判）
+    const VIEW_COOLDOWN_MS = 5000;
     useEffect(() => {
         if (!enabled) return;
         const node = currentNodeRef.current;
+        // 冷却期内不检测：刚切换视图后数据还在加载中
+        if (Date.now() - viewEnteredAtRef.current < VIEW_COOLDOWN_MS) return;
 
         if (node.kind === 'rm1' && rm1GroupCount === 0 && !advancingRef.current) {
             console.info('[GlobalPlayback] RM1 exhausted, advancing to next');
