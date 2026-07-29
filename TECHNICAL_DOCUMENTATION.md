@@ -1216,3 +1216,8 @@ npm run build
 - 城市、中心图表结构、图表数据各提供一个外部 POST 接口和一个我方主动 GET 同步接口，共六个；完整协议见后端 `docs/CHINA_MAP_MANAGEMENT_API.md`。
 - 全局环形链保持 `ChinaMap → RM1_Judge → RM1 → RM2_Judge → RM2 → End → ChinaMap`。`viewCooldownMs` 默认 5000；冷却结束会主动复检耗尽状态。
 - `labelLayout.ts/globalPlayback.enabled` 控制自动循环；`directViewButtons.chinaMap/roadMap/roadMap2` 控制底部三个视图直达按钮，`directGroupButtons.rm1/rm2` 控制顶部 RM1/RM2 组别直达按钮，默认全部隐藏。开放视图按钮后，点击通过 `jumpToView` 同步链表节点；组别按钮只提供人工切组，不影响自动组轮播。
+
+### 2026-07-29 RM2 重合路线与标签避让
+
+- 同一业务线路的多车保持原子分组；不同订单的同向/反向起终点均在 0.75km 内时强制拆到不同展示组，避免多条路线压成一条。
+- RM2 单订单、复合订单和起终点兜底标签全部加入 `updateRouteLabelLayout` 的逐帧屏幕空间避让。标签可移动，钉子仍固定在真实节点。

@@ -375,9 +375,11 @@ export function createRouteEndpointLayer(
     const routeName = `路线${routeIndex + 1}${info.plate ? ` · ${info.plate}` : ''}`;
     const startLabel = createEndpointLabel(
         samples[0], '起点', info.from, colorText(color), mode, routeIndex, routeName,
+        mode === 'rm2' ? routeIndex * 2 : undefined,
     );
     const endLabel = createEndpointLabel(
         samples[samples.length - 1], '终点', info.to, colorText(color), mode, routeIndex, routeName,
+        mode === 'rm2' ? routeIndex * 2 + 1 : undefined,
     );
     layer.add(start, end, startLabel, endLabel);
     return layer;
