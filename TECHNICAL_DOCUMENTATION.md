@@ -380,6 +380,7 @@ Head → ChinaMap → RM1_Judge → RM1 → RM2_Judge → RM2 → End → (回�
   - 有数据 → 进入对应视图节点
   - 无数据 → 跳过，进入下一个 Judge
 - **RM1 / RM2**：切换视图，交由各自的 PlaybackController 播放路线组。
+- **RM2 内部圈数**：只有分组环从尾节点回到头节点时计为一圈；拓扑刷新、位置更新和普通组切换不重置计数。达到 `rm2LoopCount` 后调用 `onExhausted`，推进到 End；离开并重新进入 RM2 时才重新初始化为 0。
 - **End**：累计总循环次数。达到 `totalLoopCount` 后停止，否则回到 ChinaMap。
 - **冷却期**：进入 RM1/RM2 后 5 秒内不触发耗尽检测，避免数据加载期间误判。
 
@@ -405,8 +406,9 @@ Head → ChinaMap → RM1_Judge → RM1 → RM2_Judge → RM2 → End → (回�
 ```typescript
 // config/labelLayout.ts
 globalPlayback: {
-    chinaMapLoopCount: 2,   // ChinaMap 巡游几轮后进入 RM1_Judge
-    totalLoopCount: 2,      // 整个大循环执行几次（0=无限）
+chinaMapLoopCount: 2,   // ChinaMap 巡游几轮后进入 RM1_Judge
+rm2LoopCount: 2,        // RM2 内部分组完整巡游几轮后进入 End（0=无限）
+totalLoopCount: 2,      // 整个大循环执行几次（0=无限）
     rm1GroupHoldMs: 0,      // RM1 组间停留
     emptyViewRetryMs: 5000, // 空视图重试间隔
 }
@@ -420,8 +422,9 @@ ChinaMap 仓库巡游 N 轮 (onTourLoopCompleted 计数)
     → RM1_Judge: fetchRoadGroupsByStrategy() → 有数据? → RM1 : RM2_Judge
       → RM1: 切换视图 → RoadMap3D-1 自动加载 → 播放所有组
         → 耗尽 → RM2_Judge: fetchRm2ChainStructure() → 有数据? → RM2 : End
-          → RM2: 切换视图 → RoadMap3D-2 自动加载 → 播放所有组
-            → 耗尽 → End: totalLoopRef++ → 达到上限? → ChinaMap(停) : ChinaMap(继续)
+→ RM2: 切换视图 → RoadMap3D-2 自动加载 → 环形播放所有组
+→ 环尾回到环头时 rm2LoopRef++ → 达到 rm2LoopCount 后触发 onExhausted
+→ End: totalLoopRef++ → 达到上限? → ChinaMap(停) : ChinaMap(继续)
 ```
 
 ---
@@ -1203,6 +1206,7 @@ npm run build
 | `orderKeyFor` | useRoadControls.ts | 颜色键（colorKey+lineId） |
 | `API_BASE_URL` | constants.ts | `VITE_API_BASE_URL \|\| '/api'` |
 | `chinaMapLoopCount` | labelLayout.ts | **2**（ChinaMap巡游循环次数） |
+| `rm2LoopCount` | labelLayout.ts | **2**（RM2内部分组完整巡游次数，0=无限） |
 | `totalLoopCount` | labelLayout.ts | **2**（大循环总次数，0=无限） |
 | `VIEW_COOLDOWN_MS` | useGlobalPlaybackController.ts | **5000**（视图冷却期ms） |
 

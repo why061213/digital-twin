@@ -88,6 +88,8 @@ export const LABEL_CONFIG = {
         enabled: true,
         /** ChinaMap 仓库巡游循环次数，达到后进入 RM1 */
         chinaMapLoopCount: 2,
+        /** RM2 内部分组完整巡游次数，达到后进入大循环 End；0 表示无限循环。 */
+        rm2LoopCount: 2,
         /** 整个大循环 (ChinaMap→RM1→RM2→End) 的总次数，0=无限循环 */
         totalLoopCount: 2,
         /** RM1 每个路线组展示完毕后停留（ms），0 表示立即切换下一个 */

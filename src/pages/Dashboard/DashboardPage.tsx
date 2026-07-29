@@ -33,6 +33,8 @@ function DashboardPage() {
     const [isRoadMapVisualReady, setIsRoadMapVisualReady] = useState(false);
     const [isRoadMap2VisualReady, setIsRoadMap2VisualReady] = useState(false);
     const mapRef = useRef<ChinaMap3DHandle>(null);
+    const rm2ExhaustedHandlerRef = useRef<() => void>(() => {});
+    const handleRm2Exhausted = useCallback(() => rm2ExhaustedHandlerRef.current(), []);
     const roadMapRef = useRef<RoadMap3D1Handle>(null);
     const roadMap2Ref = useRef<RoadMap3D2Handle>(null);
     const handleActiveRm1VehicleChange = useCallback((lineId: string | null) => {
@@ -131,6 +133,8 @@ function DashboardPage() {
         roadMapRef: roadMap2Ref,
         view,
         sceneReady: isRoadMap2VisualReady,
+        loopCount: LABEL_CONFIG.globalPlayback.rm2LoopCount,
+        onExhausted: handleRm2Exhausted,
     });
 
     // 全局播放控制器：管理 ChinaMap → RM1_Judge → RM1 → RM2_Judge → RM2 → End 链表循环
@@ -155,6 +159,9 @@ function DashboardPage() {
         },
         enabled: LABEL_CONFIG.globalPlayback.enabled,
     });
+    useEffect(() => {
+        rm2ExhaustedHandlerRef.current = globalPlayback.advanceToNext;
+    }, [globalPlayback.advanceToNext]);
 
     const handleRouteRaise = useCallback(() => {
         // 城市飞线事件由 ChinaMap3D 处理；道路级地图只加载后端分组后的路线。
