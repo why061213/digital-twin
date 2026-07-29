@@ -1,6 +1,6 @@
 # 聚申数字孪生平台 — 技术交接文档
 
-> 版本：2026-07-28 | 前端 `jushen-digital-twin` | 后端 `jushen-digital-twin-service`
+> 版本：2026-07-29 | 前端 `jushen-digital-twin`（`8db2081`） | 后端 `jushen-digital-twin-service`（`8e2e5c4`）
 
 ---
 
@@ -18,8 +18,9 @@
 9. [位置投影算法](#9-位置投影算法)
 10. [后端关键服务](#10-后端关键服务)
 11. [配置参考](#11-配置参考)
-12. [附录 A — 文件索引](#附录-a--文件索引)
-13. [附录 B — 关键变量速查](#附录-b--关键变量速查)
+12. [RM2 多订单复合行程](#12-rm2-多订单复合行程)
+13. [附录 A — 文件索引](#附录-a--文件索引)
+14. [附录 B — 关键变量速查](#附录-b--关键变量速查)
 
 ---
 
@@ -250,16 +251,18 @@
 | 方法 | 路径 | 说明 | 鉴权 |
 |------|------|------|------|
 | `GET` | `/api/public/vehicle-order-chain/transit-metrics` | 运输指标快照 | **免登录** |
+| `GET` | `/api/public/vehicle-order-chain/trips` | 当前车辆 Trip、成员集合、节点计划与状态 | **免登录** |
 
 ### 4.3 鉴权 — `/api/auth` & `/api/bootstrap`
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `POST` | `/api/auth/login` | 登录获取 Dashboard 访问 token |
+| `POST` | `/api/auth/session` | 通过 MAC 白名单/设备令牌签发 Dashboard 会话密钥 |
+| `GET` | `/api/auth/session` | 校验当前 Bearer 会话密钥 |
+| `POST` | `/api/auth/session/refresh` | 刷新即将过期的会话密钥 |
 | `GET` | `/api/bootstrap/status` | 系统启动状态 |
-| `GET` | `/api/bootstrap/config` | 系统公开配置 |
 
-鉴权机制：MAC 地址白名单（通过局域网 ARP/邻居表识别）+ 设备令牌兜底（跨 VLAN 场景）。会话密钥在 `/api/auth/login` 签发，token 通过 `?token=` 参数或 HTTP Header 传递。
+鉴权机制：MAC 地址白名单（通过局域网 ARP/邻居表识别）+ 设备令牌兜底（跨 VLAN 场景）。会话密钥在 `/api/auth/session` 签发；REST 使用 `Authorization: Bearer <token>`，WebSocket 握手可使用同一密钥。
 
 ### 4.4 其他
 
@@ -445,7 +448,7 @@ ChinaMap 仓库巡游 N 轮 (onTourLoopCompleted 计数)
 │   │   ├── endpointLayer → 起终点标记
 │   │   │   ├── createEndpointMarker → 地图钉(halo光环+stem杆+pin钉子)
 │   │   │   └── createEndpointLabel → 起点·xxx / 终点·xxx 标签
-│   │   ├── stopLayer → 经停点标记（复合订单的装卸货点）
+│   │   ├── stopLayer → 经停点标记（保留业务节点，同坐标节点合并为一个地图钉）
 │   │   └── VehicleBar[] → 每辆车
 │   │       ├── bar → 车辆进度条方块(BoxGeometry)
 │   │       ├── truckVisual → 3D卡车模型(GLTF, /models/rm2-truck.glb)
@@ -703,21 +706,31 @@ RM2数据管线的主入口。`processAndBroadcastInternal()` 串联全部处理
 ### 10.4 VehicleOrderChainStore
 
 车辆订单链日库存储，基于 instanceId 的差分机制：
-- `ingest(expandedOrders)` — 摄入展开后的订单，差分出 new/updated/removed
-- 持久化到 `runtime-data/vehicle-order-chain/` JSON文件
+- `ingest(expandedOrders)` — 摄入展开后的订单，按订单、线路、车辆实例去重并差分出 new/updated/unchanged
+- 同一车辆、同一订单只选取外部快照和内部审核链中的最新有效实例
+- 上游正式状态和本地推断状态分别保存为审计事件，状态不会相互覆盖
+- `在途-2` 表示轨迹推断已装载出发；`在途-1` 表示随后收到正式在途确认
+- `已完成-2` 表示到达目的地并满足停留/离站证据后的推断完成；正式确认到达后追加 `已完成-1`，保留原 `已完成-2`
+- 任一完成证据生效后，整张订单的 PICKUP/DELIVERY 链从开放 Trip 和渲染路线中清除
+- 持久化根目录为 `runtime-data/vehicle-order-chain/`：日库在 `records/`，车辆审计链在 `vehicles/`，Trip 运行态在 `trips/`
 
 ### 10.5 VehicleOrderEligibilityService
 
 车辆资格判定服务，分析车辆处于"装卸"还是"运输中"：
 - `analyzeLatestVehicleOrders()` — 核心判定逻辑
 - `advanceTripsFromLocalPositionHistory()` — 基于本地位置历史推进Trip里程碑
-- 输出 `tripDecision`（PICKUP/DELIVERY/TRANSPORTING/COMPLETED 等）
+- 输出 `tripDecision`、`targetStopId`、`targetAction`、`tripStops` 和各状态订单数量
 - 位置预热：判定阶段即批量查询供应商位置
+- 真实车和模拟车共用同一判断入口；模拟车的位置样本也写入 `runtime-data/vehicle-position-history/`，重启后仍可按真实轨迹规则重放
 
 ### 10.6 VehicleTripRuntimeService / VehicleTripTopologyService
 
-- `VehicleTripRuntimeService`: 解析 Trip 的里程进度（基于 GPS轨迹投影+路线规划对比）
-- `VehicleTripTopologyService`: 判断到离站事件（trip-arrival-radius-km=0.5, trip-departure-radius-km=0.8, trip-minimum-dwell-ms=60000）
+- `VehicleTripRuntimeService`：按车辆聚合同期开放订单，持久化 Trip 身份、成员、当前位置质量、当前 Leg 和单调递增的 Stop 状态
+- `VehicleTripTopologyService`：生成每单 PICKUP/DELIVERY Stop、物理 Node、`plannedStopIds` 与 Leg；节点融合半径为 **0.3 km**，到离站判断仍使用独立的 0.5/0.8 km 迟滞半径
+- 计划使用车辆位置与节点直线距离做带约束的贪心排序；允许“先送已载订单、再取下一单”，但每张原订单始终严格先取后送
+- 同址同时存在合法卸货和装货动作时必须先卸后装；旧缓存即使强制指向装货点，也会由该规则纠正
+- `CompositeStopView.sequence` 是整条 Trip 的全局执行序号，不能让 PICKUP 和 DELIVERY 分别从 1 编号
+- `planVersion` 只随节点执行顺序变化，普通 GPS 位移不应制造新版本；`visualKey` 保持车辆 Three.js 对象稳定
 
 ### 10.7 RoutePlanningService
 
@@ -886,6 +899,146 @@ server: {
   }
 }
 ```
+
+---
+
+## 12. RM2 多订单复合行程
+
+### 12.1 领域模型与不变量
+
+同一车辆在有效时间窗内同时存在多张开放订单时，后端生成一个独立的 Composite Trip；它不与旧的单订单渲染路线做字符串或坐标拼接。每张订单产生两个业务 Stop：
+
+~~~text
+orderInstanceId::PICKUP
+orderInstanceId::DELIVERY
+~~~
+
+必须始终满足以下不变量：
+
+1. 单张原订单严格 PICKUP 在 DELIVERY 之前。
+2. 车辆已经载货时，允许先完成该订单 DELIVERY，再执行另一订单 PICKUP。
+3. 同一物理地点同时存在卸货和装货动作时，先卸后装。
+4. 已访问节点构成不可回滚的前缀；动态重排只处理未完成后缀。
+5. Stop 是业务动作，Node 是物理地点。多个 Stop 可以属于同一 Node，但不能因此丢失业务里程碑。
+6. 已完成订单整链退出开放 Trip；不能只隐藏某一个端点。
+7. visitState 单调递增：PENDING → ARRIVED → DWELLING → VISITED。
+
+### 12.2 初始规划与动态修正
+
+~~~text
+有效车辆位置
+  ↓
+构造合法 Stop 集合（订单级先取后送约束）
+  ↓
+直线距离最近邻生成候选顺序
+  ↓
+同址动作按 DELIVERY → PICKUP 消除歧义
+  ↓
+调用百度路线规划，失败后回退高德
+  ↓
+道路距离风险校验
+  ├─ 规划失败：保留稳定旧计划
+  ├─ 道路/直线比异常：保留旧计划并记录 road-risk
+  ├─ 收益小于 0.5 km 或 2%：避免抖动，不换序
+  └─ 通过：更新 plannedStopIds、Leg、planVersion
+~~~
+
+动态规划有 120 秒冷却期。该策略是风险控制而非全局最优求解：直线贪心负责快速给出确定性候选，道路规划负责验证候选没有明显绕路；未来接入更强求解器时仍应保留“原订单先取后送、已访问前缀不可修改、低收益不重排”三条约束。
+
+路线供应商请求使用“起点 + 最多10个途经点 + 终点”。连续相同坐标在请求前去重，避免同址卸货/装货让供应商生成回环；供应商返回后再按前向最近位置把每个业务锚点钉回路线，确保首轮响应就包含全部沿途节点。
+
+### 12.3 缓存与写入时机
+
+| 数据 | 位置 | 写入时机 | 有效性规则 |
+|------|------|----------|------------|
+| 订单日库 | runtime-data/vehicle-order-chain/records/{date}.json | 每次外部订单快照摄入后 | 按日期保留原始最新实例与分类 |
+| 车辆审计链 | runtime-data/vehicle-order-chain/vehicles/*.json | 本地/正式状态事件产生时 | 推断事件和正式事件追加保存，不覆盖 |
+| Trip 运行态 | runtime-data/vehicle-order-chain/trips/{plate}.json | reconcile、到离站、插单或重排后 | 临时文件写入后原子替换；损坏时由订单日库重建 |
+| 位置历史 | runtime-data/vehicle-position-history/*.json | 真实或模拟位置样本被接受后 | 用于重启重放和到离站判定 |
+| 地图供应商路线 | RoutePlanningService.cache | 百度/高德规划成功后 | **仅进程内缓存**，键包含起点、终点和途经点，默认 TTL 24h |
+
+“本地 Trip 有文件”不等于“地图供应商路线有磁盘缓存”。进程重启后，Trip 会恢复节点状态，但供应商路线内存缓存为空，需要重新规划；若外部订单源同时不可用，RM2 原子快照可能暂时为空。恢复顺序应是：
+
+1. 检查 records/{today}.json、trips/{plate}.json 和位置历史的更新时间。
+2. 优先恢复/重新摄入当天订单快照，再执行 Trip reconcile。
+3. 重新规划缺失 Leg，规划成功后才发布新 snapshotVersion。
+4. 不允许因为某段缓存未命中就静默丢弃该段；失败必须保留旧完整路线或返回可诊断的 unavailable/road-risk。
+
+联调时可将日库中的 orders.*.record POST 到 /api/road/town/provinces/raw，让缓存数据重新走正式管线；该接口需要 Dashboard Bearer 会话。
+
+### 12.4 后端到前端的数据契约
+
+复合路线通过一条稳定的渲染路线输出，关键 meta 字段如下：
+
+| 字段 | 语义 |
+|------|------|
+| tripId | 车辆复合行程身份 |
+| visualKey | 前端 Three.js 车辆对象稳定身份 |
+| currentLegId | 当前执行路段 |
+| planVersion | 节点顺序版本 |
+| targetStopId / targetAction | 当前业务目标 |
+| tripDecision / tripPhase | 面板状态文案依据 |
+| tripStops[] | 全部业务节点，含全局 sequence、action、visitState、currentTarget、坐标和颜色 |
+| pendingOrderCount / onboardOrderCount / completedOrderCount | Trip 订单集合摘要 |
+
+前端不得自行用订单 ID、PICKUP/DELIVERY 类型重新排序 tripStops；只使用后端全局 sequence。route.progress 已是整条合并路线的全程进度，里程碑组件不得再按当前节点索引二次换算。
+
+### 12.5 前端多订单适配
+
+多订单逻辑只在 tripStops 涉及两个及以上 orderInstanceId 时启用：
+
+- 左侧详情：起点/目的地显示数量，并按全局 sequence 展示所有业务节点及状态。
+- 右侧卡片：使用里程碑进度条；进度文本为“全程进度”。
+- 地图：路线颜色、标签文字颜色和车辆色槽使用同一 routeTone。
+- 地图钉：业务节点不删除，但 groupRouteStopsByPoint() 将同坐标 Stop 合并成一个物理钉和一个标签；例如“途经卸货 / 装货点”“起点 / 最终终点”。
+- 标签：交给 routeLabelLayout 做屏幕空间碰撞避让；当前目标优先级最高。
+- 车辆聚焦：面板 lineId 必须经 sceneFocusId() 转成 visualKey，否则会出现圆圈、放大和聚焦同时失效。
+
+单订单仍沿用原始起点/终点面板和普通线性进度条，不受上述适配影响。
+
+### 12.6 状态识别
+
+到站不能由单个 GPS 点直接完成。判断使用 0.5 km 到达半径、0.8 km 离站半径、至少两次样本及最短 60 秒停留，形成迟滞状态机：
+
+~~~text
+EN_ROUTE → ARRIVED → DWELLING → DEPARTED
+                         └────→ VISITED / 本地完成证据
+~~~
+
+订单状态可能晚于真实车辆动作，因此优先使用轨迹事实推进 Stop，但不得回滚正式或已推断完成状态。模拟车辆必须生成与真实车相同格式的位置、时间戳、速度、路线进度和历史文件，不能只更新屏幕坐标。
+
+### 12.7 排障清单
+
+当出现“路线乱、钉子乱、面板进度不一致”时，按以下顺序检查：
+
+1. /api/public/vehicle-order-chain/trips：确认该车开放订单、plannedStopIds、currentLegId。
+2. /api/road/groups/structure?scope=rm2：取得当前 snapshotVersion。
+3. /api/road/groups?scope=rm2&snapshotVersion=...：定位车辆所在组。
+4. /api/road/groups/{groupId}/routes?...：核对 tripStops.sequence、targetStopId、targetAction、路线坐标数。
+5. 检查 trips/{plate}.json 是否保留旧强制目标，以及日库/位置历史文件更新时间。
+6. 若两个业务 Stop 坐标相同：面板应显示两步，地图应只有一个合并钉。
+7. 若路线首尾之间出现直线或缺段：检查规划日志的 provider、waypointCount、success/error，不能只看前端折线。
+8. 若前端仍显示旧顺序：确认 snapshotVersion 已变化、planVersion 已同步，且场景按 visualKey 更新而不是复制车辆。
+
+### 12.8 回归验证
+
+后端：
+
+~~~powershell
+mvn test
+~~~
+
+重点测试包括 VehicleTripTopologyServiceTest、VehicleTripRuntimeServiceTest、VehicleOrderChainStoreTest、TownRoadRenderServicePipelineCutTest。
+
+前端：
+
+~~~powershell
+npm test -- --run
+npm run lint
+npm run build
+~~~
+
+重点测试包括 routeVisuals.test.ts、rm2RouteIdentity.test.ts 及播放控制相关测试。
 
 ---
 
