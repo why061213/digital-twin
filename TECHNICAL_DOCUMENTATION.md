@@ -11,6 +11,7 @@
 3. [完整数据流水线](#3-完整数据流水线)
 4. [API 接口清单](#4-api-接口清单)
 5. [前端视图体系](#5-前端视图体系)
+    - [5.4 全局播放链表](#54-全局播放链表useglobalplaybackcontroller)
 6. [RoadMap3D-2 核心架构](#6-roadmap3d-2-核心架构)
 7. [路线颜色系统](#7-路线颜色系统)
 8. [3D 车辆系统](#8-3d-车辆系统)
@@ -317,6 +318,7 @@
 
 ```
 DashboardPage
+├── useGlobalPlaybackController()  → 全局链表循环(ChinaMap→RM1→RM2自动编排)
 ├── useDashboardRealtime()          → WebSocket实时连接(心跳+重连+scope订阅)
 ├── useRoadGroupsController()       → RM1路线组数据+策略切换
 ├── useRm2PlaybackController()      → RM2核心：拓扑刷新+组巡游+位置批量注入
@@ -358,6 +360,65 @@ DashboardPage
   │      └─ 仅处理当前活跃组的车辆，时序去重后校准进度
   │
   └─ 8. handleMotionRouteFinished → 所有活跃车辆完成 → playNode(playbackNext)
+```
+
+### 5.4 全局播放链表（`useGlobalPlaybackController`）
+
+全局控制器管理整个大屏的自动循环播放，将 ChinaMap / RM1 / RM2 串联为一条环形链表：
+
+```
+Head → ChinaMap → RM1_Judge → RM1 → RM2_Judge → RM2 → End → (回到ChinaMap)
+```
+
+**核心设计：**
+
+- **ChinaMap**：仓库巡游，每次完整循环触发 `onTourLoopCompleted` 回调。达到配置次数后进入下一节点。
+- **RM*_Judge**：**不切换视图**（保持前一画面不黑屏），直接调用后端 API 判断对应视图是否有可播放数据。
+  - 有数据 → 进入对应视图节点
+  - 无数据 → 跳过，进入下一个 Judge
+- **RM1 / RM2**：切换视图，交由各自的 PlaybackController 播放路线组。
+- **End**：累计总循环次数。达到 `totalLoopCount` 后停止，否则回到 ChinaMap。
+- **冷却期**：进入 RM1/RM2 后 5 秒内不触发耗尽检测，避免数据加载期间误判。
+
+**Judge 数据判断方式：**
+
+| Judge 节点 | 调用 API | 判断依据 |
+|-----------|----------|---------|
+| RM1_Judge | `fetchRoadGroupsByStrategy('business-priority')` | `groups.length > 0` |
+| RM2_Judge | `fetchRm2ChainStructure()` | `leafGroupIds.length > 0` |
+
+> Judge 节点**直接调用 API** 而不依赖 React state，因为在非对应视图下 hook state 不会被更新。
+
+**关键文件：**
+
+| 文件 | 说明 |
+|------|------|
+| `playback/globalChain.ts` | 链表类型定义 + `buildGlobalChain()` 构建函数 |
+| `hooks/useGlobalPlaybackController.ts` | 核心控制器（节点切换、循环计数、Judge判断、冷却期） |
+| `config/labelLayout.ts` | `globalPlayback` 配置节 |
+
+**配置：**
+
+```typescript
+// config/labelLayout.ts
+globalPlayback: {
+    chinaMapLoopCount: 2,   // ChinaMap 巡游几轮后进入 RM1_Judge
+    totalLoopCount: 2,      // 整个大循环执行几次（0=无限）
+    rm1GroupHoldMs: 0,      // RM1 组间停留
+    emptyViewRetryMs: 5000, // 空视图重试间隔
+}
+```
+
+**视图切换流程：**
+
+```
+ChinaMap 仓库巡游 N 轮 (onTourLoopCompleted 计数)
+  → N 达到 chinaMapLoopCount → 异步推进(300ms, 避免同步重置)
+    → RM1_Judge: fetchRoadGroupsByStrategy() → 有数据? → RM1 : RM2_Judge
+      → RM1: 切换视图 → RoadMap3D-1 自动加载 → 播放所有组
+        → 耗尽 → RM2_Judge: fetchRm2ChainStructure() → 有数据? → RM2 : End
+          → RM2: 切换视图 → RoadMap3D-2 自动加载 → 播放所有组
+            → 耗尽 → End: totalLoopRef++ → 达到上限? → ChinaMap(停) : ChinaMap(继续)
 ```
 
 ---
@@ -909,6 +970,7 @@ server: {
 | 文件 | 行数 | 说明 |
 |------|------|------|
 | `DashboardPage.tsx` | 395 | 主页面（Hook编排+视图切换） |
+| `hooks/useGlobalPlaybackController.ts` | 230+ | 全局链表循环控制器 |
 | `hooks/useDashboardRealtime.ts` | 530 | WebSocket实时连接（心跳+重连+scope订阅） |
 | `hooks/useRm2PlaybackController.ts` | 609 | RM2核心控制（拓扑刷新+组巡游+位置批量注入） |
 | `hooks/useTruckPositionController.ts` | 631 | 车辆位置管理（createActiveRoute+死推+校准） |
@@ -927,6 +989,7 @@ server: {
 | `modules/DashboardSidePanels.tsx` | - | 侧面板（仓库/车辆运输详情） |
 | `modules/TownRoadMap3D/` | - | 城镇道路3D模块 |
 | `playback/chain.ts` | 223 | 省→方向→组巡游链表构建 |
+| `playback/globalChain.ts` | 45 | 全局播放链表类型定义+buildGlobalChain |
 | `playback/rm2RouteIdentity.ts` | - | 路线ID映射（sceneRouteId/routeVisualKey） |
 | `playback/rm2SceneAdapter.ts` | - | RM2场景适配器 |
 | `playback/routeGroupRing.ts` | - | 路线组环形链表 |
@@ -987,6 +1050,9 @@ server: {
 | `laneKeyFor` | useRoadControls.ts | 车道分组键（orderFamilyId） |
 | `orderKeyFor` | useRoadControls.ts | 颜色键（colorKey+lineId） |
 | `API_BASE_URL` | constants.ts | `VITE_API_BASE_URL \|\| '/api'` |
+| `chinaMapLoopCount` | labelLayout.ts | **2**（ChinaMap巡游循环次数） |
+| `totalLoopCount` | labelLayout.ts | **2**（大循环总次数，0=无限） |
+| `VIEW_COOLDOWN_MS` | useGlobalPlaybackController.ts | **5000**（视图冷却期ms） |
 
 ---
 
