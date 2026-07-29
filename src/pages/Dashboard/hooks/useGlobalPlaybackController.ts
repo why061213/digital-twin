@@ -31,6 +31,8 @@ type UseGlobalPlaybackControllerResult = {
     currentNodeKind: GlobalNodeKind;
     /** 手动推进到下一个节点 */
     advanceToNext: () => void;
+    /** 手动直达视图，同时同步链表当前节点。 */
+    jumpToView: (view: ViewMode) => void;
 };
 
 export function useGlobalPlaybackController({
@@ -44,8 +46,8 @@ export function useGlobalPlaybackController({
     fetchRm2Data,
     enabled = true,
 }: UseGlobalPlaybackControllerOptions): UseGlobalPlaybackControllerResult {
-    const chainRef = useRef<GlobalNode>(buildGlobalChain());
-    const currentNodeRef = useRef<GlobalNode>(chainRef.current);
+    const [chain] = useState(buildGlobalChain);
+    const currentNodeRef = useRef<GlobalNode>(chain);
     const [currentNodeKind, setCurrentNodeKind] = useState<GlobalNodeKind>('chinaMap');
     const chinaMapLoopRef = useRef(0);
     const totalLoopRef = useRef(0);
@@ -53,11 +55,14 @@ export function useGlobalPlaybackController({
     const viewEnteredAtRef = useRef(0);  // 进入 rm1/rm2 的时间戳，用于冷却期
     const emptyRetryTimerRef = useRef<number | null>(null);
     const loopCallbackInstalledRef = useRef(false);
+    const advanceTimerRef = useRef<number | null>(null);
+    const advanceToRef = useRef<(node: GlobalNode) => void>(() => {});
     const config = LABEL_CONFIG.globalPlayback;
     const chinaMapLoopCount = config.chinaMapLoopCount;
     const totalLoopCount = config.totalLoopCount ?? 0; // 0=无限循环
     const emptyViewRetryMs = config.emptyViewRetryMs;
     const rm1GroupHoldMs = config.rm1GroupHoldMs;
+    const viewCooldownMs = config.viewCooldownMs;
 
     const clearEmptyRetry = useCallback(() => {
         if (emptyRetryTimerRef.current !== null) {
@@ -66,26 +71,7 @@ export function useGlobalPlaybackController({
         }
     }, []);
 
-    // 安装/卸载 ChinaMap 巡游循环回调。用 isChinaMapVisualReady 触发重装。
-    useEffect(() => {
-        if (isChinaMapVisualReady && chinaMapRef.current && !loopCallbackInstalledRef.current) {
-            chinaMapRef.current.onTourLoopCompleted(handleChinaMapLoopCompleted);
-            loopCallbackInstalledRef.current = true;
-            console.info('[GlobalPlayback] installed ChinaMap loop callback');
-        }
-        return () => {
-            if (loopCallbackInstalledRef.current && chinaMapRef.current) {
-                chinaMapRef.current.onTourLoopCompleted(null);
-                loopCallbackInstalledRef.current = false;
-            }
-        };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isChinaMapVisualReady]);
-
-    // ChinaMap 巡游循环完成回调（用 ref 避免闭包问题）
-    const advanceTimerRef = useRef<number | null>(null);
-    const handleChinaMapLoopCompletedRef = useRef<() => void>(() => {});
-    handleChinaMapLoopCompletedRef.current = () => {
+    const handleChinaMapLoopCompleted = useCallback(() => {
         if (currentNodeRef.current.kind !== 'chinaMap') return;
         chinaMapLoopRef.current += 1;
         console.info('[GlobalPlayback] ChinaMap loop completed:', chinaMapLoopRef.current, '/', chinaMapLoopCount);
@@ -98,13 +84,26 @@ export function useGlobalPlaybackController({
             advanceTimerRef.current = window.setTimeout(() => {
                 advanceTimerRef.current = null;
                 console.info('[GlobalPlayback] ChinaMap loop count reached, advancing to', next.label);
-                advanceTo(next);
+                advanceToRef.current(next);
             }, 300);
         }
-    };
-    const handleChinaMapLoopCompleted = useCallback(() => {
-        handleChinaMapLoopCompletedRef.current();
-    }, []);
+    }, [chinaMapLoopCount]);
+
+    // 安装/卸载 ChinaMap 巡游循环回调。用 isChinaMapVisualReady 触发重装。
+    useEffect(() => {
+        const chinaMap = chinaMapRef.current;
+        if (isChinaMapVisualReady && chinaMap && !loopCallbackInstalledRef.current) {
+            chinaMap.onTourLoopCompleted(handleChinaMapLoopCompleted);
+            loopCallbackInstalledRef.current = true;
+            console.info('[GlobalPlayback] installed ChinaMap loop callback');
+        }
+        return () => {
+            if (loopCallbackInstalledRef.current && chinaMap) {
+                chinaMap.onTourLoopCompleted(null);
+                loopCallbackInstalledRef.current = false;
+            }
+        };
+    }, [chinaMapRef, handleChinaMapLoopCompleted, isChinaMapVisualReady]);
 
     const advanceTo = useCallback((node: GlobalNode) => {
         if (advancingRef.current) return;
@@ -137,14 +136,14 @@ export function useGlobalPlaybackController({
                 fetchRm1Data().then((hasData) => {
                     if (hasData) {
                         console.info('[GlobalPlayback] RM1 has data, advancing to RM1');
-                        advanceTo(nextRm1);
+                        advanceToRef.current(nextRm1);
                     } else {
                         console.info('[GlobalPlayback] RM1 no data, skipping to RM2_Judge');
-                        advanceTo(nextRm2Judge);
+                        advanceToRef.current(nextRm2Judge);
                     }
                 }).catch((err: unknown) => {
                     console.warn('[GlobalPlayback] RM1 fetch failed, skipping', err);
-                    advanceTo(nextRm2Judge);
+                    advanceToRef.current(nextRm2Judge);
                 });
                 break;
             }
@@ -163,14 +162,14 @@ export function useGlobalPlaybackController({
                 fetchRm2Data().then((hasData) => {
                     if (hasData) {
                         console.info('[GlobalPlayback] RM2 has data, advancing to RM2');
-                        advanceTo(nextRm2);
+                        advanceToRef.current(nextRm2);
                     } else {
                         console.info('[GlobalPlayback] RM2 no data, skipping to End');
-                        advanceTo(nextEnd);
+                        advanceToRef.current(nextEnd);
                     }
                 }).catch((err: unknown) => {
                     console.warn('[GlobalPlayback] RM2 fetch failed, skipping', err);
-                    advanceTo(nextEnd);
+                    advanceToRef.current(nextEnd);
                 });
                 break;
             }
@@ -190,27 +189,59 @@ export function useGlobalPlaybackController({
                 if (totalLoopCount > 0 && totalLoopRef.current >= totalLoopCount) {
                     console.info('[GlobalPlayback] total loop limit reached, restarting chinaMap and stopping');
                     // 最后一次回到 ChinaMap 后不再推进
-                    advanceTo(node.next!);
+                    advanceToRef.current(node.next!);
                     return;
                 }
-                advanceTo(node.next!);
+                advanceToRef.current(node.next!);
                 break;
             }
         }
-    }, [clearEmptyRetry, onViewChange, rm1GroupCount, rm2GroupCount, currentView, chinaMapRef, fetchRm1Data, fetchRm2Data]);
+    }, [clearEmptyRetry, onViewChange, rm1GroupCount, rm2GroupCount, currentView, chinaMapRef, fetchRm1Data, fetchRm2Data, totalLoopCount]);
+
+    useEffect(() => {
+        advanceToRef.current = advanceTo;
+    }, [advanceTo]);
 
     const advanceToNext = useCallback(() => {
         const next = currentNodeRef.current.next;
         if (next) advanceTo(next);
     }, [advanceTo]);
 
+    const jumpToView = useCallback((targetView: ViewMode) => {
+        const targetKind: GlobalNodeKind = targetView === 'chinaMap'
+            ? 'chinaMap'
+            : targetView === 'roadMap'
+                ? 'rm1'
+                : 'rm2';
+        let target = chain;
+        do {
+            if (target.kind === targetKind) {
+                advanceTo(target);
+                return;
+            }
+            target = target.next!;
+        } while (target !== chain);
+    }, [advanceTo, chain]);
+
     // 监听 RM1/RM2 的 groupCount 变化，组耗尽时推进（含冷却期避免刚进入就误判）
-    const VIEW_COOLDOWN_MS = 5000;
     useEffect(() => {
         if (!enabled) return;
         const node = currentNodeRef.current;
         // 冷却期内不检测：刚切换视图后数据还在加载中
-        if (Date.now() - viewEnteredAtRef.current < VIEW_COOLDOWN_MS) return;
+        const cooldownRemaining = viewCooldownMs - (Date.now() - viewEnteredAtRef.current);
+        if ((node.kind === 'rm1' || node.kind === 'rm2') && cooldownRemaining > 0) {
+            clearEmptyRetry();
+            emptyRetryTimerRef.current = window.setTimeout(() => {
+                emptyRetryTimerRef.current = null;
+                const currentNode = currentNodeRef.current;
+                if (currentNode.kind === 'rm1' && rm1GroupCount === 0) {
+                    advanceTo(currentNode.next!);
+                } else if (currentNode.kind === 'rm2' && rm2GroupCount === 0) {
+                    advanceTo(currentNode.next!);
+                }
+            }, cooldownRemaining);
+            return clearEmptyRetry;
+        }
 
         if (node.kind === 'rm1' && rm1GroupCount === 0 && !advancingRef.current) {
             console.info('[GlobalPlayback] RM1 exhausted, advancing to next');
@@ -233,7 +264,7 @@ export function useGlobalPlaybackController({
                 }
             }, emptyViewRetryMs);
         }
-    }, [rm1GroupCount, rm2GroupCount, enabled, advanceTo, clearEmptyRetry, emptyViewRetryMs, rm1GroupHoldMs]);
+    }, [rm1GroupCount, rm2GroupCount, enabled, advanceTo, clearEmptyRetry, emptyViewRetryMs, rm1GroupHoldMs, viewCooldownMs]);
 
     // 启动：页面首次加载时，在 ChinaMap 就绪后自动开始链条
     useEffect(() => {
@@ -257,5 +288,6 @@ export function useGlobalPlaybackController({
     return {
         currentNodeKind,
         advanceToNext,
+        jumpToView,
     };
 }

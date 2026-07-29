@@ -1129,7 +1129,6 @@ npm run build
 | `hooks/useTruckPositionController.ts` | 631 | 车辆位置管理（createActiveRoute+死推+校准） |
 | `hooks/useRoadGroupsController.ts` | - | RM1路线组控制 |
 | `hooks/useWarehouseController.ts` | - | 仓储巡游控制 |
-| `hooks/useDataFetch.ts` | - | 数据拉取Hook |
 | `modules/RoadMap3D-2/hooks/useRoadControls.ts` | 1184 | 3D路线+车辆渲染（前端最大文件） |
 | `modules/RoadMap3D-2/hooks/useRoadMapScene.ts` | - | 场景初始化+行政边界 |
 | `modules/RoadMap3D-2/hooks/useRoadSelection.ts` | - | 路线选中交互 |
@@ -1211,3 +1210,9 @@ npm run build
 
 > **文档维护**：每次功能变更后请同步更新本文档的相关章节。
 > 项目代码位于：前端 `jushen-digital-twin/`、后端 `jushen-digital-twin-service/`
+
+### 2026-07-29 ChinaMap 维护接口与播放链恢复
+
+- 城市、中心图表结构、图表数据各提供一个外部 POST 接口和一个我方主动 GET 同步接口，共六个；完整协议见后端 `docs/CHINA_MAP_MANAGEMENT_API.md`。
+- 全局环形链保持 `ChinaMap → RM1_Judge → RM1 → RM2_Judge → RM2 → End → ChinaMap`。`viewCooldownMs` 默认 5000；冷却结束会主动复检耗尽状态。
+- `labelLayout.ts/globalPlayback.enabled` 控制自动循环；`directViewButtons.chinaMap/roadMap/roadMap2` 分别控制三个直达按钮，默认全部隐藏。开放按钮后，点击通过 `jumpToView` 同步链表节点。

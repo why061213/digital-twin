@@ -24,6 +24,7 @@ import {
 } from './services/roadApi';
 import { fetchRoadGroupsByStrategy } from './services/roadApi';
 import { fetchRm2ChainStructure } from './services/renderRouteApi';
+import { LABEL_CONFIG } from '@/config/labelLayout';
 
 function DashboardPage() {
     const [isDispatching, setIsDispatching] = useState(false);
@@ -124,7 +125,6 @@ function DashboardPage() {
         routeOrders: rm2RouteOrders,
         isLoading: isLoadingRm2Group,
         loadGroup: loadRm2Group,
-        refreshRm2,
         handleSnapshotChanged,
         handleVehiclePositions: handleRm2VehiclePositions,
     } = useRm2PlaybackController({
@@ -153,7 +153,7 @@ function DashboardPage() {
                 return structure.leafGroupIds.length > 0;
             } catch { return false; }
         },
-        enabled: true,
+        enabled: LABEL_CONFIG.globalPlayback.enabled,
     });
 
     const handleRouteRaise = useCallback(() => {
@@ -305,7 +305,7 @@ function DashboardPage() {
     const viewButtons = (
         <ViewButtons
             view={view}
-            onRequestViewChange={requestViewChange}
+            onRequestViewChange={globalPlayback.jumpToView}
         />
     );
 
@@ -384,7 +384,6 @@ function DashboardPage() {
     return (
         <MainLayout
             header={<Header/>}
-            // leftPanel={<InventoryStats />}
             leftPanel={null}
             centerPanel={
                 <div className="relative h-full w-full">
@@ -409,12 +408,6 @@ function DashboardPage() {
                 </div>
             }
             rightPanel={null}
-            // rightPanel={
-            //     <>
-            //         <VehicleSchedule routeOrders={routeOrders} />
-            //         <TrafficMonitor />
-            //     </>
-            // }
         />
     );
 }

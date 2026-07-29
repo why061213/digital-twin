@@ -1,4 +1,5 @@
 import type { ViewMode } from '../types';
+import { LABEL_CONFIG } from '@/config/labelLayout';
 
 type ViewButtonsProps = {
     view: ViewMode;
@@ -6,11 +7,16 @@ type ViewButtonsProps = {
 };
 
 export function ViewButtons({ view, onRequestViewChange }: ViewButtonsProps) {
-    const buttons: Array<[ViewMode, string]> = [
+    const allButtons: Array<[ViewMode, string]> = [
         ['chinaMap', '全国地图'],
         ['roadMap', 'RM1 长途'],
         ['roadMap2', 'RM2 短途'],
     ];
+    const buttons = allButtons.filter(
+        ([mode]) => LABEL_CONFIG.globalPlayback.directViewButtons[mode],
+    );
+
+    if (buttons.length === 0) return null;
 
     return (
         <div className="absolute bottom-4 left-1/2 z-30 flex -translate-x-1/2 gap-2">

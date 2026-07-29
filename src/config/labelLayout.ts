@@ -84,6 +84,8 @@ export const LABEL_CONFIG = {
         startDelay: 3000,     // 开始到镜头爬升的等待时间
     },
     globalPlayback: {
+        /** 是否启用 ChinaMap → RM1 → RM2 的全局环形播放链。 */
+        enabled: true,
         /** ChinaMap 仓库巡游循环次数，达到后进入 RM1 */
         chinaMapLoopCount: 2,
         /** 整个大循环 (ChinaMap→RM1→RM2→End) 的总次数，0=无限循环 */
@@ -92,5 +94,13 @@ export const LABEL_CONFIG = {
         rm1GroupHoldMs: 0,
         /** RM2 视图中无内容时等待后重试的间隔（ms） */
         emptyViewRetryMs: 5000,
+        /** 进入 RM1/RM2 后暂停耗尽检测，等待首批分组加载完成。 */
+        viewCooldownMs: 5000,
+        /** 底部直达按钮；false 时不渲染，也不会占据点击区域。 */
+        directViewButtons: {
+            chinaMap: false,
+            roadMap: false,
+            roadMap2: false,
+        },
     },
 };
