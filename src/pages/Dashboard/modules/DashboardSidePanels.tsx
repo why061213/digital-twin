@@ -1049,9 +1049,10 @@ function RoadGroupRightPanels({
                         {isCompositeTrip ? `${pickupStops.length} 个装载点` : fromAddress.region}
                     </span>
                     <span className="text-slate-600">→</span>
-                    <span className="truncate font-medium text-emerald-100">
-                        {isCompositeTrip ? `${deliveryStops.length} 个目的地` : toAddress.detail || toAddress.region}
-                    </span>
+                    <OverflowMarquee
+                        value={isCompositeTrip ? `${deliveryStops.length} 个目的地` : toAddress.detail || toAddress.region}
+                        className="min-w-0 font-medium text-emerald-100"
+                    />
                 </div>
                 {isCompositeTrip ? (
                     <TripMilestoneProgress stops={tripStops} progress={progress} accent={tone.color} />
