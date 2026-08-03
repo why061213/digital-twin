@@ -16,6 +16,7 @@ import {
     updateSharedProgressMaterial,
 } from '../../routeVisuals';
 import { syncVehicleAlertRipple } from '../../vehicleAlertRipples';
+import { roadGeometryKey, roadTrackKey } from '../roadIdentity';
 
 // const ORDER_COLORS = [
 //     0x22c55e,
@@ -84,12 +85,11 @@ function cloneTruckTemplate(template: THREE.Object3D) {
 }
 
 function trackKeyFor(id: string, coords: [number, number][], info: RoadObjectInfo) {
-    if (info.isBaselineRoute) return `baseline:${info.pathKey ?? geometryKeyFor(coords)}`;
-    return `route:${id}`;
+    return roadTrackKey(id, coords, info);
 }
 
 function geometryKeyFor(coords: [number, number][]) {
-    return coords.map(([lng, lat]) => `${lng.toFixed(5)},${lat.toFixed(5)}`).join('|');
+    return roadGeometryKey(coords);
 }
 
 function orderKeyFor(lineId: string, info: RoadObjectInfo) {
