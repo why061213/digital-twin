@@ -33,7 +33,9 @@ function DashboardPage() {
     const [isRoadMapVisualReady, setIsRoadMapVisualReady] = useState(false);
     const [isRoadMap2VisualReady, setIsRoadMap2VisualReady] = useState(false);
     const mapRef = useRef<ChinaMap3DHandle>(null);
+    const rm1ExhaustedHandlerRef = useRef<() => void>(() => {});
     const rm2ExhaustedHandlerRef = useRef<() => void>(() => {});
+    const handleRm1Exhausted = useCallback(() => rm1ExhaustedHandlerRef.current(), []);
     const handleRm2Exhausted = useCallback(() => rm2ExhaustedHandlerRef.current(), []);
     const roadMapRef = useRef<RoadMap3D1Handle>(null);
     const roadMap2Ref = useRef<RoadMap3D2Handle>(null);
@@ -117,6 +119,7 @@ function DashboardPage() {
         syncRoadRoute,
         renderTruckPosition,
         setRouteOrders,
+        onExhausted: handleRm1Exhausted,
     });
     useEffect(() => {
         roadGroupFinishedHandlerRef.current = advanceCompletedRoadGroup;
@@ -160,6 +163,7 @@ function DashboardPage() {
         enabled: LABEL_CONFIG.globalPlayback.enabled,
     });
     useEffect(() => {
+        rm1ExhaustedHandlerRef.current = globalPlayback.advanceToNext;
         rm2ExhaustedHandlerRef.current = globalPlayback.advanceToNext;
     }, [globalPlayback.advanceToNext]);
 

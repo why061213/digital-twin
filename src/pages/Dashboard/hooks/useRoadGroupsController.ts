@@ -20,6 +20,7 @@ import {
     mergeVisibleRouteOrders,
     waitMs,
 } from '../utils';
+import { singleRm1GroupAction } from '../playback/rm1GroupAdvance';
 
 const ROAD_PATH_BUFFER_QUIET_MS = 650;
 const ROAD_PATH_BUFFER_MAX_WAIT_MS = 1600;
@@ -225,7 +226,7 @@ export function useRoadGroupsController({
             roadMapRef.current?.clearRoads();
         }
         console.log('[removeRoadGroupFromRing] after remove, head:', ring.head?.groupId, 'current:', ring.current?.groupId);
-    }, [currentRoadGroupRing, currentRoadGroupRouteIds, currentRoadGroupSummaries, normalizeRoadGroupRing, roadMapRef, routeOrdersRef, setRouteOrders]);
+    }, [currentRoadGroupRing, currentRoadGroupRouteIds, currentRoadGroupSummaries, normalizeRoadGroupRing, onExhausted, roadMapRef, routeOrdersRef, setRouteOrders]);
 
     const syncRoadGroupRing = useCallback((groups: RoadGroupSummary[]) => {
         const ring = currentRoadGroupRing();
@@ -540,7 +541,12 @@ export function useRoadGroupsController({
                 const groups = await fetchRoadGroups();
                 currentGroupIds = new Set(groups.map((group) => group.groupId));
             }
-            if (currentGroupIds && !currentGroupIds.has(groupId)) {
+            const action = singleRm1GroupAction(
+                currentGroupIds?.has(groupId) ?? true,
+                isRoadGroupComplete(groupId),
+            );
+            if (action === 'exhaust') {
+                console.info('[advanceRoadGroup] only RM1 group exhausted; leaving RM1', { groupId });
                 removeRoadGroupFromRing(groupId);
                 return;
             }
