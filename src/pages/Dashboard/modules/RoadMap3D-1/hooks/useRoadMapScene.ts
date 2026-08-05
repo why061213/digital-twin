@@ -5,6 +5,7 @@ import { loadCityGeoJson, projection } from '../geo';
 import { useRoadMapRefs } from './useRoadMapRefs';
 import { useRoadControls } from './useRoadControls';
 import { useRoadSelection } from './useRoadSelection';
+import { updateRouteLabelLayout } from '../../routeLabelLayout';
 
 export function useRoadMapScene(
     refs: ReturnType<typeof useRoadMapRefs>,
@@ -134,6 +135,14 @@ export function useRoadMapScene(
             controlsRef.current.updateVehicleScaleForCamera(
                 camera.position.distanceTo(orbitControls.target),
             );
+            const routeLabelLayers: THREE.Group[] = [];
+            refs.roadsMapRef.current.forEach((road) => {
+                road.orders.forEach((lane) => routeLabelLayers.push(lane.endpointLayer));
+            });
+            updateRouteLabelLayout(routeLabelLayers, camera, {
+                width: container.clientWidth,
+                height: container.clientHeight,
+            });
             renderer.render(scene, camera);
         };
         animate();

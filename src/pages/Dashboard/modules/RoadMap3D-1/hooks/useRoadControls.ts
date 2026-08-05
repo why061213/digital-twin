@@ -10,9 +10,11 @@ import {
     createRouteEndpointLayer,
     createRouteVisualLayers,
     createSharedProgressMaterial,
+    configureSharedProgressMaterial,
     updateSharedProgressMaterial,
 } from '../../routeVisuals';
 import { syncVehicleAlertRipple } from '../../vehicleAlertRipples';
+import { branchRouteColors, routeColorFor, VEHICLE_COLOR } from '../../roadVisualTheme';
 
 // const ORDER_COLORS = [
 //     0x22c55e,
@@ -32,21 +34,6 @@ import { syncVehicleAlertRipple } from '../../vehicleAlertRipples';
 //     0xa7f3d0,
 //     0xfed7aa,
 // ];
-const UNIFIED_COLORS = [
-    0x00ff88,   // 亮绿色
-    0x00ccff,   // 亮青色
-    0xffaa00,   // 亮橙色
-    0xff44aa,   // 亮粉红
-    0xaaff00,   // 亮黄绿
-    0x00ffff,   // 纯青色
-    0xff8800,   // 深橙色
-    0x44aaff,   // 亮蓝色
-    0xff0000,   // 纯红色
-    0xffff00,   // 纯黄色
-    0xff00ff,   // 品红色
-    0x00ff00,   // 纯绿色
-];
-
 const TRUCK_MODEL_URL = '/models/rm2-truck.glb';
 const TRUCK_MODEL_SCALE = 0.25;
 const TRUCK_MODEL_Y_OFFSET = -0.31;
@@ -87,20 +74,6 @@ function cloneTruckTemplate(template: THREE.Object3D) {
     return clone;
 }
 
-function vehicleLocatorColor(laneColor: number, lineId: string) {
-    const color = new THREE.Color(laneColor);
-    const hsl = { h: 0, s: 0, l: 0 };
-    color.getHSL(hsl);
-    const variant = Array.from(lineId).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 5;
-    const lightnessOffset = [-0.08, -0.04, 0, 0.05, 0.1][variant];
-    color.setHSL(
-        hsl.h,
-        THREE.MathUtils.clamp(hsl.s * 0.92 + 0.08, 0.58, 1),
-        THREE.MathUtils.clamp(hsl.l + lightnessOffset, 0.42, 0.72),
-    );
-    return color;
-}
-
 function trackKeyFor(id: string, coords: [number, number][], info: RoadObjectInfo) {
     if (info.pathKey) return info.pathKey;
     return coords.map(([lng, lat]) => `${lng.toFixed(4)},${lat.toFixed(4)}`).join('|') || id;
@@ -108,15 +81,6 @@ function trackKeyFor(id: string, coords: [number, number][], info: RoadObjectInf
 
 function orderKeyFor(lineId: string, info: RoadObjectInfo) {
     return info.colorKey ?? info.orderFamilyId ?? info.orderId ?? `order-${lineId}`;
-}
-
-function orderColor(orderId: string, index: number) {
-    let hash = 0;
-    for (const char of orderId) hash += char.charCodeAt(0);
-    if (orderId.startsWith('branch:')) {
-        return UNIFIED_COLORS[3 + ((hash + index) % (UNIFIED_COLORS.length - 3))];
-    }
-    return UNIFIED_COLORS[index % 3];
 }
 
 function drawTubeProgress(tube: THREE.Mesh, progress: number, tubularSegments: number, radialSegments: number) {
@@ -321,7 +285,7 @@ export function useRoadControls(
         const model = cloneTruckTemplate(template);
         model.scale.setScalar(TRUCK_MODEL_SCALE);
         model.position.y = TRUCK_MODEL_Y_OFFSET;
-        const locatorColor = vehicleLocatorColor(laneColor, vehicle.lineId);
+        const locatorColor = new THREE.Color(laneColor);
         const locator = new THREE.Mesh(
             new THREE.RingGeometry(1.05, 1.2, 64),
             new THREE.MeshBasicMaterial({
@@ -419,7 +383,15 @@ export function useRoadControls(
             road.selectionTube.geometry = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, baseRadius + 0.075, road.radialSegments, false);
             road.sharedProgressTube.geometry.dispose();
             road.sharedProgressTube.geometry = new THREE.TubeGeometry(
-                road.pathCurve, road.tubularSegments, Math.max(0.075, baseRadius * 0.72), road.radialSegments, false,
+                road.pathCurve, road.tubularSegments, Math.max(0.22, baseRadius * 1.45), road.radialSegments, false,
+            );
+            road.travelledProgressTube.geometry.dispose();
+            road.travelledProgressTube.geometry = new THREE.TubeGeometry(
+                road.pathCurve, road.tubularSegments, Math.max(0.23, baseRadius * 1.5), road.radialSegments, false,
+            );
+            road.snakeProgressTube.geometry.dispose();
+            road.snakeProgressTube.geometry = new THREE.TubeGeometry(
+                road.pathCurve, road.tubularSegments, Math.max(0.245, baseRadius * 1.58), road.radialSegments, false,
             );
             road.renderedOrderCount = orderCount;
         }
@@ -433,6 +405,15 @@ export function useRoadControls(
             road.sharedProgressTube.material,
             lanes.map((lane) => ({ color: lane.color, progress: lane.maxProgress })),
         );
+        updateSharedProgressMaterial(
+            road.travelledProgressTube.material,
+            lanes.map((lane) => ({ color: lane.color, progress: lane.maxProgress })),
+        );
+        updateSharedProgressMaterial(
+            road.snakeProgressTube.material,
+            lanes.map((lane) => ({ color: lane.color, progress: lane.maxProgress })),
+        );
+        road.snakeProgressTube.material.uniforms.uRouteLength.value = Math.max(0.001, road.totalLength);
 
         lanes.forEach((lane, laneIndex) => {
             lane.laneIndex = laneIndex;
@@ -446,16 +427,7 @@ export function useRoadControls(
                 const isLead = vehicle === leadVehicle;
 
                 // 1. 选择颜色
-                if (isLead) {
-                    material.color.setHex(lane.color);
-                } else {
-                    // 跟随车辆：从统一颜色库中选一个与当前车道颜色不同的颜色
-                    let followerColorIndex = (laneIndex + vehicleIndex) % UNIFIED_COLORS.length;
-                    if (UNIFIED_COLORS[followerColorIndex] === lane.color) {
-                        followerColorIndex = (followerColorIndex + 1) % UNIFIED_COLORS.length;
-                    }
-                    material.color.setHex(UNIFIED_COLORS[followerColorIndex]);
-                }
+                material.color.setHex(VEHICLE_COLOR);
 
                 // 2. 透明度
                 const baseOpacity = isLead ? 1.0 : 0.85;
@@ -463,13 +435,17 @@ export function useRoadControls(
                 material.opacity = vehicle.truckVisual
                     ? 0
                     : baseOpacity * (1 - clamp01(vehicle.upgradeProgress));
+                const locator = vehicle.truckVisual?.userData.locator;
+                if (locator instanceof THREE.Mesh && locator.material instanceof THREE.MeshBasicMaterial) {
+                    locator.material.color.setHex(lane.color);
+                }
 
                 // 3. 缩放（领头车辆稍大）
                 const baseScale = vehicle.upgradeProgress > 0
                     ? { x: 1, y: 1, z: 1 }
                     : isLead
-                        ? { x: 1.08, y: 1.22, z: 1.08 }
-                        : { x: 0.65, y: 0.80, z: 0.65 };
+                        ? { x: 1.25, y: 1.34, z: 1.25 }
+                        : { x: 0.88, y: 0.98, z: 0.88 };
                 vehicle.baseScale.set(baseScale.x, baseScale.y, baseScale.z);
                 vehicle.bar.scale.copy(vehicle.baseScale);
 
@@ -591,7 +567,10 @@ export function useRoadControls(
         if (lane) return lane;
 
         const laneIndex = road.orders.size;
-        const color = orderColor(orderId, laneIndex);
+        const firstLane = [...road.orders.values()][0];
+        const color = laneIndex === 0 || !firstLane
+            ? routeColorFor(orderId, info.routeColorIndex)
+            : branchRouteColors(firstLane.color, orderId).branch;
         const progressGeo = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, 0.072, road.radialSegments, false);
         progressGeo.setDrawRange(0, 0);
         const progressTube = new THREE.Mesh(progressGeo, new THREE.MeshBasicMaterial({
@@ -606,7 +585,7 @@ export function useRoadControls(
         progressTube.renderOrder = 9 + laneIndex;
         progressTube.userData = { roadId: road.pathKey, objectType: '订单进度' };
         progressTube.visible = false;
-        const endpointLayer = createRouteEndpointLayer(road.samples, 'rm1', info, color, laneIndex);
+        const endpointLayer = createRouteEndpointLayer(road.samples, 'rm2', info, color, laneIndex);
         road.group.add(endpointLayer);
 
         lane = {
@@ -691,13 +670,14 @@ export function useRoadControls(
             for (let i = 1; i < samples.length; i++) {
                 cumulativeLengths[i] = cumulativeLengths[i - 1] + samples[i - 1].distanceTo(samples[i]);
             }
+            const totalLength = cumulativeLengths[cumulativeLengths.length - 1] ?? 0;
 
             const grayTube = new THREE.Mesh(
                 new THREE.TubeGeometry(pathCurve, tubularSegments, 0.08, radialSegments, false),
                 new THREE.MeshBasicMaterial({
-                    color: 0x6b7280,       // 更浅的灰（原 0x475569）
+                    color: 0x0f172a,
                     transparent: true,
-                    opacity: 0.45,         // 更透明（原 0.7）
+                    opacity: 0.10,
                     depthWrite: false,
                 })
             );
@@ -713,16 +693,38 @@ export function useRoadControls(
             selectionTube.renderOrder = 12;
             selectionTube.userData = { roadId: pathKey, objectType: '共享路线' };
 
-            const sharedProgressMaterial = createSharedProgressMaterial();
+            const routeColor = routeColorFor(orderId, info.routeColorIndex);
+            const sharedProgressMaterial = createSharedProgressMaterial('untravelled');
+            configureSharedProgressMaterial(sharedProgressMaterial, routeColor, pathKey, 'rm2-synchronized', totalLength);
             const sharedProgressTube = new THREE.Mesh(
-                new THREE.TubeGeometry(pathCurve, tubularSegments, 0.075, radialSegments, false),
+                new THREE.TubeGeometry(pathCurve, tubularSegments, 0.22, radialSegments, false),
                 sharedProgressMaterial,
             );
-            sharedProgressTube.position.y = 0.035;
-            sharedProgressTube.renderOrder = 9;
-            sharedProgressTube.userData = { roadId: pathKey, objectType: '共享订单进度' };
-            sharedProgressTube.onBeforeRender = () => {
-                sharedProgressMaterial.uniforms.uTime.value = performance.now() / 1_000;
+            sharedProgressTube.position.y = 0.04;
+            sharedProgressTube.renderOrder = 8;
+            sharedProgressTube.userData = { roadId: pathKey, objectType: '未走路线' };
+
+            const travelledProgressMaterial = createSharedProgressMaterial('travelled');
+            configureSharedProgressMaterial(travelledProgressMaterial, routeColor, pathKey, 'rm2-synchronized', totalLength);
+            const travelledProgressTube = new THREE.Mesh(
+                new THREE.TubeGeometry(pathCurve, tubularSegments, 0.23, radialSegments, false),
+                travelledProgressMaterial,
+            );
+            travelledProgressTube.position.y = 0.055;
+            travelledProgressTube.renderOrder = 9;
+            travelledProgressTube.userData = { roadId: pathKey, objectType: '已走路线' };
+
+            const snakeProgressMaterial = createSharedProgressMaterial('snake');
+            configureSharedProgressMaterial(snakeProgressMaterial, routeColor, pathKey, 'rm2-synchronized', totalLength);
+            const snakeProgressTube = new THREE.Mesh(
+                new THREE.TubeGeometry(pathCurve, tubularSegments, 0.245, radialSegments, false),
+                snakeProgressMaterial,
+            );
+            snakeProgressTube.position.y = 0.09;
+            snakeProgressTube.renderOrder = 14;
+            snakeProgressTube.userData = { roadId: pathKey, objectType: '路线小蛇顶层' };
+            snakeProgressTube.onBeforeRender = () => {
+                snakeProgressMaterial.uniforms.uTime.value = performance.now() / 1_000;
             };
 
             const labelAnchor = samples[Math.floor(samples.length * 0.58)]?.clone() ?? samples[0].clone();
@@ -732,9 +734,11 @@ export function useRoadControls(
 
             const group = new THREE.Group();
             group.add(
-                createRouteVisualLayers(pathCurve, tubularSegments, radialSegments, samples, 'rm1', info),
+                createRouteVisualLayers(pathCurve, tubularSegments, radialSegments, samples, 'rm2', info),
                 grayTube,
                 sharedProgressTube,
+                travelledProgressTube,
+                snakeProgressTube,
                 selectionTube,
             );
             scene.add(group);
@@ -746,9 +750,11 @@ export function useRoadControls(
                 grayTube,
                 selectionTube,
                 sharedProgressTube,
+                travelledProgressTube,
+                snakeProgressTube,
                 samples,
                 cumulativeLengths,
-                totalLength: cumulativeLengths[cumulativeLengths.length - 1] ?? 0,
+                totalLength,
                 tubularSegments,
                 radialSegments,
                 currentCoords: coords[0],

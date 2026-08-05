@@ -16,6 +16,7 @@ import {
     updateSharedProgressMaterial,
 } from '../../routeVisuals';
 import { syncVehicleAlertRipple } from '../../vehicleAlertRipples';
+import { branchRouteColors, routeColorFor, VEHICLE_COLOR } from '../../roadVisualTheme';
 import { roadGeometryKey, roadTrackKey } from '../roadIdentity';
 
 // const ORDER_COLORS = [
@@ -36,8 +37,6 @@ import { roadGeometryKey, roadTrackKey } from '../roadIdentity';
 //     0xa7f3d0,
 //     0xfed7aa,
 // ];
-const ROUTE_COLORS = [0x3b82f6, 0xf59e0b, 0x22c55e, 0xa78bfa, 0xfb7185, 0x2dd4bf]; // 蓝/黄/绿/紫/粉/青
-const VEHICLE_COLOR = 0xf8fafc;
 // 恢复 64ab698 的顶层蛇效果；蛇的实际沿线速度在 routeVisuals 中统一。
 const SHOW_ROUTE_SNAKES = true;
 
@@ -99,45 +98,6 @@ function orderKeyFor(lineId: string, info: RoadObjectInfo) {
 /** 车道分组键：同一订单的多辆车应共享车道，用 orderFamilyId 或 orderId */
 function laneKeyFor(lineId: string, info: RoadObjectInfo) {
     return info.orderFamilyId ?? info.orderId ?? `lane-${lineId}`;
-}
-
-function stableHash(value: string) {
-    let hash = 2166136261;
-    for (let index = 0; index < value.length; index += 1) {
-        hash ^= value.charCodeAt(index);
-        hash = Math.imul(hash, 16777619);
-    }
-    return hash >>> 0;
-}
-
-function routeColorFor(orderKey: string, routeColorIndex?: number) {
-    if (typeof routeColorIndex === 'number' && Number.isFinite(routeColorIndex)) {
-        return ROUTE_COLORS[Math.abs(Math.trunc(routeColorIndex)) % ROUTE_COLORS.length];
-    }
-    return ROUTE_COLORS[stableHash(orderKey) % ROUTE_COLORS.length];
-}
-
-function branchColors(baseColor: number, branchGroupId: string) {
-    const hash = stableHash(branchGroupId);
-    const base = new THREE.Color(baseColor);
-    const hsl = { h: 0, s: 0, l: 0 };
-    base.getHSL(hsl);
-    const hueShift = ((hash % 2001) / 1000 - 1) * 0.1;
-    const saturationShift = (((hash >>> 7) % 17) - 8) / 100;
-    const lightnessShift = (((hash >>> 13) % 21) - 10) / 100;
-    const branch = new THREE.Color().setHSL(
-        (hsl.h + hueShift + 1) % 1,
-        THREE.MathUtils.clamp(hsl.s + saturationShift, 0.42, 0.96),
-        THREE.MathUtils.clamp(hsl.l + lightnessShift, 0.34, 0.72),
-    );
-    const snakeHsl = { h: 0, s: 0, l: 0 };
-    branch.getHSL(snakeHsl);
-    const snake = new THREE.Color().setHSL(
-        snakeHsl.h,
-        snakeHsl.s,
-        Math.max(0.12, snakeHsl.l * 0.8),
-    );
-    return { branch: branch.getHex(), snake: snake.getHex() };
 }
 
 function createEndpointLayer(
@@ -597,7 +557,7 @@ export function useRoadControls(
             const ranges = analysis.parts.flatMap((part) => {
                 if (part.routeRole !== 'DEVIATION') return [];
                 const groupId = part.branchGroupId ?? part.partId;
-                const colors = branchColors(baseColor, groupId);
+                const colors = branchRouteColors(baseColor, groupId);
                 return [{
                     start: part.fromMeasureM / analysis.totalLengthM,
                     end: part.toMeasureM / analysis.totalLengthM,
@@ -760,7 +720,7 @@ export function useRoadControls(
         const firstLane = [...road.orders.values()][0];
         const color = laneIndex === 0 || !firstLane
             ? routeColorFor(orderId, info.routeColorIndex)
-            : branchColors(firstLane.color, orderId).branch;
+            : branchRouteColors(firstLane.color, orderId).branch;
         const progressGeo = new THREE.TubeGeometry(road.pathCurve, road.tubularSegments, 0.17, road.radialSegments, false);
         progressGeo.setDrawRange(0, 0);
         const progressTube = new THREE.Mesh(progressGeo, new THREE.MeshBasicMaterial({
