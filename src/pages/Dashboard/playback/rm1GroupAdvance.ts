@@ -1,9 +1,6 @@
-export type SingleRm1GroupAction = 'exhaust' | 'replay';
+export type SingleRm1GroupAction = 'exhaust' | 'traverse';
 
-/** 单节点环不能靠 next 推进：节点已完成或已从快照消失时，应结束本轮 RM1。 */
-export function singleRm1GroupAction(
-    groupStillAvailable: boolean,
-    groupComplete: boolean,
-): SingleRm1GroupAction {
-    return groupStillAvailable && !groupComplete ? 'replay' : 'exhaust';
+/** 刷新快照后仍只有一个节点时，本次 advance 应退出 RM1，不能重播当前节点。 */
+export function singleRm1GroupAction(groupCountAfterRefresh: number): SingleRm1GroupAction {
+    return groupCountAfterRefresh <= 1 ? 'exhaust' : 'traverse';
 }

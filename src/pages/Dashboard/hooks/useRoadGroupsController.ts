@@ -504,10 +504,7 @@ export function useRoadGroupsController({
         [flushRoadPathBroadcastBuffer]
     );
 
-    const advanceRoadGroup = useCallback(async (
-        groupsAlreadyRefreshed = false,
-        availableGroupIds?: Set<string>,
-    ) => {
+    const advanceRoadGroup = useCallback(async (groupsAlreadyRefreshed = false) => {
         const ring = currentRoadGroupRing();
         normalizeRoadGroupRing(ring);
         console.log('[advanceRoadGroup] start', {
@@ -536,23 +533,20 @@ export function useRoadGroupsController({
 
         if (ring.nodes.size === 1) {
             const groupId = ring.head.groupId;
-            let currentGroupIds = availableGroupIds;
             if (!groupsAlreadyRefreshed) {
-                const groups = await fetchRoadGroups();
-                currentGroupIds = new Set(groups.map((group) => group.groupId));
+                await fetchRoadGroups();
             }
-            const action = singleRm1GroupAction(
-                currentGroupIds?.has(groupId) ?? true,
-                isRoadGroupComplete(groupId),
-            );
+            normalizeRoadGroupRing(ring);
+            const action = singleRm1GroupAction(ring.nodes.size);
             if (action === 'exhaust') {
-                console.info('[advanceRoadGroup] only RM1 group exhausted; leaving RM1', { groupId });
+                console.info('[advanceRoadGroup] sole RM1 group display completed; leaving RM1', { groupId });
                 removeRoadGroupFromRing(groupId);
                 return;
             }
-            console.log('[advanceRoadGroup] replaying single group:', groupId);
-            await loadRoadGroup(groupId);
-            return;
+            console.info('[advanceRoadGroup] refreshed RM1 snapshot added groups; continuing traversal', {
+                previousGroupId: groupId,
+                ringSize: ring.nodes.size,
+            });
         }
 
         let candidate = ring.current?.next ?? ring.head;
@@ -668,8 +662,8 @@ export function useRoadGroupsController({
         roadGroupAdvanceTimerRef.current = window.setTimeout(() => {
             roadGroupAdvanceTimerRef.current = null;
             void fetchRoadGroups()
-                .then((groups) => {
-                    void advanceRoadGroup(true, new Set(groups.map((group) => group.groupId))).finally(() => {
+                .then(() => {
+                    void advanceRoadGroup(true).finally(() => {
                         setRoadGroupAdvanceTick((tick) => tick + 1);
                     });
                 })
