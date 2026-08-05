@@ -586,6 +586,12 @@ export function useRoadGroupsController({
     const handleRoadGroupRouteFinished = useCallback((lineId: string) => {
         const groupId = routeGroupIdRef.current.get(lineId);
         if (!groupId || groupId !== activeRoadGroupIdRef.current || !isRoadGroupComplete(groupId)) return;
+        const ring = currentRoadGroupRing();
+        normalizeRoadGroupRing(ring);
+        if (ring.nodes.size === 1) {
+            console.info('[RM1 groups] sole group completed early; waiting for minimum display timer', { groupId });
+            return;
+        }
         if (completionAdvanceInFlightRef.current) return;
 
         completionAdvanceInFlightRef.current = true;
@@ -593,7 +599,7 @@ export function useRoadGroupsController({
         void advanceRoadGroup().finally(() => {
             completionAdvanceInFlightRef.current = false;
         });
-    }, [advanceRoadGroup, isRoadGroupComplete]);
+    }, [advanceRoadGroup, currentRoadGroupRing, isRoadGroupComplete, normalizeRoadGroupRing]);
 
     const resetRoadGroupStrategy = useCallback((strategy: RoadGroupStrategy) => {
         console.log('[strategy change] from', roadGroupStrategy, 'to', strategy);
@@ -647,7 +653,7 @@ export function useRoadGroupsController({
             ? currentRoadGroupSummaries().get(activeRoadGroupIdRef.current)
             : null;
         const routeCount = currentGroup?.count ?? routeOrdersRef.current.length;
-        const delay = roadGroupDisplayMs(routeCount);
+        const delay = roadGroupDisplayMs(routeCount, ring.nodes.size === 1);
         console.log('[roadGroupAdvanceTimer] scheduled', {
             delay,
             ringSize: ring.nodes.size,

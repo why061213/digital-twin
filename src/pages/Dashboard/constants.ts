@@ -10,6 +10,7 @@ const DEFAULT_LOW_SPEED_THRESHOLD_KMH = 50;
 const DEFAULT_MAP_VIEW_TRANSITION_MS = 800;
 const DEFAULT_ROAD_GROUP_TRANSITION_MS = 420;
 const ROAD_GROUP_DISPLAY_MAX_MS = 30_000;
+const DEFAULT_RM1_SINGLE_GROUP_DISPLAY_MIN_MS = 20_000;
 
 export const API_BASE_URL = String(import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 
@@ -32,12 +33,19 @@ export const MAP_VIEW_TRANSITION_MS = readPositiveEnv('VITE_MAP_VIEW_TRANSITION_
 export const MAP_VIEW_RELEASE_DELAY_MS = Math.max(220, Math.round(MAP_VIEW_TRANSITION_MS * 0.45));
 export const ROAD_GROUP_TRANSITION_MS = readPositiveEnv('VITE_ROAD_GROUP_TRANSITION_MS', DEFAULT_ROAD_GROUP_TRANSITION_MS);
 export const ROAD_GROUP_SWAP_DELAY_MS = Math.max(120, Math.round(ROAD_GROUP_TRANSITION_MS * 0.45));
+export const RM1_SINGLE_GROUP_DISPLAY_MIN_MS = readPositiveEnv(
+    'VITE_RM1_SINGLE_GROUP_DISPLAY_MIN_MS',
+    DEFAULT_RM1_SINGLE_GROUP_DISPLAY_MIN_MS,
+);
 export const MAX_ROADS_PER_GROUP = 24; // 画布运输上限
 
-export function roadGroupDisplayMs(routeCount: number) {
+export function roadGroupDisplayMs(routeCount: number, singleGroup = false) {
     const safeRouteCount = Math.max(0, routeCount);
     const displayMs = Math.max(1_000, RoadConstant.displayBase + safeRouteCount * RoadConstant.displayAdd);
-    return Math.min(ROAD_GROUP_DISPLAY_MAX_MS, displayMs);
+    const effectiveDisplayMs = singleGroup
+        ? Math.max(displayMs, RM1_SINGLE_GROUP_DISPLAY_MIN_MS)
+        : displayMs;
+    return Math.min(ROAD_GROUP_DISPLAY_MAX_MS, effectiveDisplayMs);
 }
 
 export const ROAD_GROUP_STRATEGIES: Array<{ value: RoadGroupStrategy; label: string; badge?: string }> = [
