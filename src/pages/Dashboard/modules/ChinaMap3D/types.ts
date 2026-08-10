@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-
 export type PanelData = {
     id: string;
     title: string;
@@ -28,18 +27,13 @@ export type ChinaMap3DHandle = {
     updateCityData: (cityName: string, data: Record<string, any> | null) => void;
     focusOnCities: (cityNames: string[], mode: CameraFocusMode) => void;
     isReady: () => boolean;
-    startWarehouseTour: (options?: WarehouseTourOptions) => void;
+    startWarehouseTour: () => void;
+    onTourLoopCompleted: (callback: (() => void) | null) => void;
     showCityPanels: (cityName: string, panels: PanelData[], style?: PanelStyle) => void;
     cacheCityPanels: (cityName: string, panels: PanelData[], style?: PanelStyle) => void;
     showCachedCityPanels: (cityName: string) => boolean;
     clearCityPanels: (cityName: string) => void;
 };
-export type WarehouseTourOptions = {
-    maxLoops?: number;
-    onLoopComplete?: (loop: number) => void;
-    onComplete?: () => void;
-};
-
 export type CameraFocusMode = 'overview' | 'focus';
 export type CameraPose = { position: THREE.Vector3; target: THREE.Vector3 };
 export type PendingCameraControl = { cityNames: string[]; mode: CameraFocusMode };
@@ -57,5 +51,3 @@ export type PanelAttachSide =
     | 'right-top'
     | 'right-bottom';
 export type PanelPlacement = { x: number; y: number; align: 'left' | 'right'; startOffset: [number, number]; attachSide: PanelAttachSide; direction: THREE.Vector2 };
-
-

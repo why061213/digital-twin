@@ -1,54 +1,37 @@
 import type { ViewMode } from '../types';
+import { LABEL_CONFIG } from '@/config/labelLayout';
 
 type ViewButtonsProps = {
     view: ViewMode;
-    isPreparingChinaMap: boolean;
-    isRevealingChinaMap: boolean;
-    isPreparingRoadMap: boolean;
-    isRevealingRoadMap: boolean;
     onRequestViewChange: (nextView: ViewMode) => void;
 };
 
-export function ViewButtons({
-                                view,
-                                isPreparingChinaMap,
-                                isRevealingChinaMap,
-                                isPreparingRoadMap,
-                                isRevealingRoadMap,
-                                onRequestViewChange,
-                            }: ViewButtonsProps) {
-    const buttons: Array<[ViewMode, string]> = [
-        ['warehouse', '仓库视图'],
-        ['chinaMap', '数字孪生地图'],
-        ['roadMap', '道路级地图'],
+export function ViewButtons({ view, onRequestViewChange }: ViewButtonsProps) {
+    const allButtons: Array<[ViewMode, string]> = [
+        ['chinaMap', '全国地图'],
+        ['roadMap', 'RM1 长途'],
+        ['roadMap2', 'RM2 短途'],
     ];
+    const buttons = allButtons.filter(
+        ([mode]) => LABEL_CONFIG.globalPlayback.directViewButtons[mode],
+    );
+
+    if (buttons.length === 0) return null;
 
     return (
         <div className="absolute bottom-4 left-1/2 z-30 flex -translate-x-1/2 gap-2">
             {buttons.map(([mode, label]) => {
-                const isActive =
-                    view === mode ||
-                    (mode === 'chinaMap' && (isPreparingChinaMap || isRevealingChinaMap)) ||
-                    (mode === 'roadMap' && (isPreparingRoadMap || isRevealingRoadMap));
-
-                let displayLabel = label;
-                if (mode === 'chinaMap' && (isPreparingChinaMap || isRevealingChinaMap)) {
-                    displayLabel = '数字孪生准备中...';
-                } else if (mode === 'roadMap' && (isPreparingRoadMap || isRevealingRoadMap)) {
-                    displayLabel = '道路地图准备中...';
-                }
-
                 return (
                     <button
                         key={mode}
                         onClick={() => onRequestViewChange(mode)}
                         className={`rounded-full border px-4 py-2 text-xs shadow-lg backdrop-blur-md transition-all pointer-events-auto ${
-                            isActive
+                            view === mode
                                 ? 'border-cyan-400/50 bg-cyan-500/20 text-cyan-300'
                                 : 'border-white/10 bg-white/10 text-gray-400 hover:bg-white/20'
                         }`}
                     >
-                        {displayLabel}
+                        {label}
                     </button>
                 );
             })}

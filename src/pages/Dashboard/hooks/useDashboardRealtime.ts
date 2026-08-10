@@ -1,4 +1,8 @@
 import { useEffect, useRef } from 'react';
+import type { RouteSnapshotChangedMessage } from '../services/renderRouteApi';
+import { DAILY_KPI_EVENT, isDailyOrderStatistics } from '../services/dashboardKpi';
+import { getDashboardAccessToken } from '../services/dashboardAuth';
+import type { ViewMode } from '../types';
 
 type CityRaiseMessage = {
     type: 'city_raise';
@@ -32,17 +36,110 @@ export type RoadPathMessage = {
     travelDurationMs?: number;
     routeLengthKm?: number;
     speedKmh?: number;
+    plate?: string;
+    cargo?: string;
+    cargoWeight?: number;
+    cargoUnit?: string;
+    status?: string;
+    vehicleId?: string;
+    colorKey?: string;
+    routeColorIndex?: number;
+    isRouteBranch?: boolean;
+    routeRevision?: number;
+    vehicleRole?: 'primary' | 'along';
+    tripId?: string;
+    visualKey?: string;
+    currentLegId?: string;
+    planVersion?: number;
+    targetStopId?: string;
+    targetOrderInstanceId?: string;
+    targetAction?: 'PICKUP' | 'DELIVERY';
+    tripStatusText?: string;
+    tripStops?: TripStop[];
+    tripPhase?: string;
+    tripDecision?: string;
+    positionQuality?: string;
+    pendingOrderCount?: number;
+    onboardOrderCount?: number;
+    completedOrderCount?: number;
+    routeSignature?: string;
+};
+
+export type TripStop = {
+    stopId: string;
+    orderInstanceId: string;
+    action: 'PICKUP' | 'DELIVERY';
+    sequence: number;
+    locationName?: string | null;
+    coordinates?: [number, number] | null;
+    visitState: 'PENDING' | 'ARRIVED' | 'DWELLING' | 'VISITED';
+    currentTarget: boolean;
+    markerColor: string;
 };
 
 export type TruckPositionMessage = {
     type: 'truck_position';
     lineId: string;
-    position: [number, number];
+    position?: [number, number];
     speed?: [number, number];
     velocity?: [number, number];
     speedKmh?: number;
     progress?: number;
     status?: 'running' | 'finished' | string;
+    scope?: 'rm1' | 'rm2';
+    groupId?: string;
+    snapshotVersion?: string;
+    vehicleId?: string;
+    colorKey?: string;
+    routeColorIndex?: number;
+    isRouteBranch?: boolean;
+    vehicleRole?: 'primary' | 'along';
+    plate?: string;
+    source?: string;
+    stale?: boolean;
+    fetchedAt?: string;
+    speedQuality?: 'provider' | 'calculated' | 'fallback' | 'rejected';
+    driverName?: string;
+    address?: string;
+    stateStr?: string;
+    alarmStr?: string;
+    alarmSeverity?: 'none' | 'warning' | 'critical';
+    online?: boolean;
+    directionDeg?: number;
+    directionLabel?: string;
+    routeRevision?: number;
+    routeCoordinates?: [number, number][];
+    deviationCoordinates?: [number, number][];
+    routeLengthKm?: number;
+    travelDurationMs?: number;
+    pathKey?: string;
+    routeDeviationCount?: number;
+    routeDeviationDistanceKm?: number;
+    routeDeviationState?: 'BASELINE' | 'SUSPECTED' | 'ALTERNATIVE' | 'EXPECTED' | 'ANOMALOUS' | 'UNKNOWN';
+    routeDeviationReasonCode?: string;
+    routeDeviationConfidence?: number;
+    routeAnomalyScore?: number;
+    routeDeviationSampleCount?: number;
+    sequence?: number;
+    tripId?: string;
+    visualKey?: string;
+    currentLegId?: string;
+    planVersion?: number;
+    targetAction?: 'PICKUP' | 'DELIVERY';
+    tripPhase?: string;
+    tripDecision?: string;
+    positionQuality?: string;
+    pendingOrderCount?: number;
+    onboardOrderCount?: number;
+    completedOrderCount?: number;
+};
+
+export type VehiclePositionsMessage = {
+    type: 'vehicle_positions';
+    scope: 'rm1' | 'rm2';
+    serverTime: string;
+    snapshotVersion?: string;
+    positions: TruckPositionMessage[];
 };
 
 export type WarehouseFocusPanel = {
@@ -71,33 +168,73 @@ type DashboardMessage =
     | CityFallMessage
     | RoadPathMessage
     | TruckPositionMessage
+    | VehiclePositionsMessage
     | { type?: string; [key: string]: unknown };
 
 export type RouteOrder = {
     lineId: string;
+    orderId?: string;
     from: string;
     to: string;
     fromCoords: [number, number];
     toCoords: [number, number];
+    currentPosition?: [number, number];
     routeLengthKm?: number;
+    travelDurationMs?: number;
+    pathKey?: string;
+    orderFamilyId?: string;
+    orderTotalTons?: number;
     plate: string;
     cargo: string;
+    cargoWeight?: number;
+    cargoUnit?: string;
     status: string;
+    colorKey?: string;
+    routeColorIndex?: number;
+    isRouteBranch?: boolean;
+    vehicleRole?: 'primary' | 'along';
+    tripId?: string;
+    visualKey?: string;
+    currentLegId?: string;
+    planVersion?: number;
+    targetStopId?: string;
+    targetOrderInstanceId?: string;
+    targetAction?: 'PICKUP' | 'DELIVERY';
+    tripStatusText?: string;
+    tripStops?: TripStop[];
+    tripPhase?: string;
+    tripDecision?: string;
+    positionQuality?: string;
+    pendingOrderCount?: number;
+    onboardOrderCount?: number;
+    completedOrderCount?: number;
+    routeSignature?: string;
+    speedKmh?: number | null;
+    driverName?: string;
+    address?: string;
+    stateStr?: string;
+    alarmStr?: string;
+    alarmSeverity?: 'none' | 'warning' | 'critical';
+    online?: boolean;
+    directionDeg?: number;
+    directionLabel?: string;
 };
 
 type UseDashboardRealtimeOptions = {
+    view?: ViewMode;
     onCityRaise: (cityName: string) => void;
     onCityFall: (cityName: string) => void;
     onRouteRaise: (order: RouteOrder) => void;
     onRouteFall?: (lineId: string) => void;
     onRoadPath?: (message: RoadPathMessage) => void;
     onTruckPosition?: (message: TruckPositionMessage) => void;
+    onVehiclePositions?: (message: VehiclePositionsMessage) => void;
     onWarehouseUpdate?: (cityName: string, action: string, displayData: Record<string, any>) => void;
     onWarehouseFocus?: (cityName: string, panels: WarehouseFocusPanel[], style?: WarehouseFocusStyle) => void;
     onCameraControl?: (cityNames: string[], mode: 'overview' | 'focus') => void;
+    onRouteSnapshotChanged?: (message: RouteSnapshotChangedMessage) => void;
 };
 
-const WS_TOKEN = String(import.meta.env.VITE_WS_TOKEN || 'jushen-screen-token');
 const HEADQUARTERS = '\u4f5b\u5c71';
 const CARGO_NAMES = ['\u94dd\u952d', '\u94dc\u6750', '\u94a2\u6750', '\u5316\u5de5\u539f\u6599', '\u5176\u4ed6'];
 const PLATE_PREFIXES = ['\u7ca4A', '\u7ca4B', '\u6e58E', '\u8d63C', '\u82cfE', '\u6d59A'];
@@ -113,11 +250,14 @@ const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 10_000;
 
 function buildRealtimeUrl() {
-    const baseUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws';
+    const accessToken = getDashboardAccessToken();
+    if (!accessToken) return null;
+    const defaultProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const baseUrl = import.meta.env.VITE_WS_URL || `${defaultProtocol}//${window.location.host}/ws`;
     const normalizedBase = String(baseUrl).replace(/\/$/, '');
     const endpoint = normalizedBase.endsWith('/realtime') ? normalizedBase : `${normalizedBase}/realtime`;
     const url = new URL(endpoint);
-    url.searchParams.set('token', WS_TOKEN);
+    url.searchParams.set('token', accessToken);
     return url.toString();
 }
 
@@ -145,6 +285,8 @@ function createRouteOrder(line: CityRaiseMessage): RouteOrder {
 
 export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
     const optionsRef = useRef(options);
+    const socketRef = useRef<WebSocket | null>(null);
+    const subscribedVehiclePositionScopeRef = useRef<'rm1' | 'rm2' | null>(null);
     const activeLinesRef = useRef<Map<string, { from: string; to: string; startedAt: number }>>(new Map());
     const activeCityCountRef = useRef<Map<string, number>>(new Map());
     const cityFallTimersRef = useRef<Map<string, number>>(new Map());
@@ -154,6 +296,24 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
     const lastMessageAtRef = useRef(0);
 
     optionsRef.current = options;
+
+    const syncVehiclePositionSubscription = () => {
+        const socket = socketRef.current;
+        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        const nextScope = optionsRef.current.view === 'roadMap2'
+            ? 'rm2'
+            : optionsRef.current.view === 'roadMap'
+                ? 'rm1'
+                : null;
+        if (subscribedVehiclePositionScopeRef.current === nextScope) return;
+        socket.send(JSON.stringify({
+            type: 'vehicle_position_subscription',
+            scope: nextScope ?? '',
+            active: nextScope !== null,
+            clientTime: Date.now(),
+        }));
+        subscribedVehiclePositionScopeRef.current = nextScope;
+    };
 
     useEffect(() => {
         let socket: WebSocket | null = null;
@@ -228,6 +388,17 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
 
             if (message.type === 'truck_position') {
                 optionsRef.current.onTruckPosition?.(message as TruckPositionMessage);
+                return;
+            }
+
+            if (message.type === 'vehicle_positions') {
+                optionsRef.current.onVehiclePositions?.(message as VehiclePositionsMessage);
+                return;
+            }
+
+            if (message.type === 'daily_kpis' && isDailyOrderStatistics(message)) {
+                window.dispatchEvent(new CustomEvent(DAILY_KPI_EVENT, { detail: message }));
+                return;
             }
 
             if (message.type === 'warehouse_update' && optionsRef.current.onWarehouseUpdate) {
@@ -244,6 +415,10 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
             if (message.type === 'camera_control' && optionsRef.current.onCameraControl) {
                 const { cityNames, mode } = message as any;
                 optionsRef.current.onCameraControl(cityNames, mode);
+                return;
+            }
+            if (message.type === 'route_snapshot_changed' && optionsRef.current.onRouteSnapshotChanged) {
+                optionsRef.current.onRouteSnapshotChanged(message as RouteSnapshotChangedMessage);
                 return;
             }
         };
@@ -288,11 +463,18 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
             if (disposed) return;
             if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
 
-            socket = new WebSocket(buildRealtimeUrl());
+            const realtimeUrl = buildRealtimeUrl();
+            if (!realtimeUrl) {
+                scheduleReconnect();
+                return;
+            }
+            socket = new WebSocket(realtimeUrl);
+            socketRef.current = socket;
 
             socket.onopen = () => {
                 reconnectAttemptRef.current = 0;
                 startHeartbeat(socket as WebSocket);
+                syncVehiclePositionSubscription();
                 console.info('WebSocket connected');
             };
 
@@ -320,6 +502,8 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
                     wasClean: event.wasClean,
                 });
                 socket = null;
+                socketRef.current = null;
+                subscribedVehiclePositionScopeRef.current = null;
                 scheduleReconnect();
             };
         };
@@ -338,4 +522,8 @@ export function useDashboardRealtime(options: UseDashboardRealtimeOptions) {
             socket?.close(1000, 'component unmounted');
         };
     }, []);
+
+    useEffect(() => {
+        syncVehiclePositionSubscription();
+    }, [options.view]);
 }

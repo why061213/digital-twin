@@ -10,11 +10,11 @@ function Panel({ title, children, className = '' }: PanelProps) {
     return (
         <section
             className={`
-                relative h-full overflow-hidden rounded-md border border-cyan-200/10
-                bg-slate-950/58 shadow-[0_18px_48px_rgba(2,8,23,0.42)]
-                backdrop-blur-md
+                relative h-full overflow-hidden rounded-md border border-cyan-100/15
+                bg-slate-950/44 shadow-[0_18px_48px_rgba(2,8,23,0.34)]
+                backdrop-blur-xl backdrop-saturate-125
                 before:pointer-events-none before:absolute before:inset-0 before:rounded-md
-                before:bg-[linear-gradient(135deg,rgba(34,211,238,0.12),transparent_32%,rgba(16,185,129,0.06))]
+                before:bg-[linear-gradient(135deg,rgba(125,211,252,0.11),transparent_34%,rgba(52,211,153,0.045))]
                 after:pointer-events-none after:absolute after:inset-x-4 after:top-0 after:h-px
                 after:bg-gradient-to-r after:from-transparent after:via-cyan-200/45 after:to-transparent
                 ${className}
@@ -22,7 +22,8 @@ function Panel({ title, children, className = '' }: PanelProps) {
         >
             <div className="relative flex h-11 items-center gap-2 border-b border-white/8 px-4">
                 <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_16px_rgba(103,232,249,0.9)]" />
-                <span className="text-sm font-medium text-cyan-100">{title}</span>
+                <span className="text-sm font-semibold text-cyan-50">{title}</span>
+                <span className="h-px flex-1 bg-gradient-to-r from-cyan-300/25 to-transparent" />
             </div>
 
             <div className="relative h-[calc(100%-2.75rem)] p-3">

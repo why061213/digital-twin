@@ -1,4 +1,5 @@
-﻿import type { TruckPositionMessage } from './hooks/useDashboardRealtime';
+﻿import * as THREE from 'three';
+import type { TruckPositionMessage } from './hooks/useDashboardRealtime';
 import type { ActiveRoute, LonLat, RoadGroupRing, RoadGroupStrategy, RouteOrder } from './types';
 import { LOW_SPEED_THRESHOLD_KMH, POSITION_QUERY_INTERVAL_MS, SLOW_POSITION_QUERY_INTERVAL_MS } from './constants';
 
@@ -80,6 +81,130 @@ export function pathLengthKm(coordinates: LonLat[]) {
     return total;
 }
 
+export const FALLBACK_TRUCK_SPEED_KMH = 60;
+export const MAX_TRUSTED_TRUCK_SPEED_KMH = 130;
+const MIN_MEASURED_SPEED_INTERVAL_MS = 5_000;
+
+export function trustedTruckSpeedKmh(value: unknown): number | null {
+    const speed = Number(value);
+    return Number.isFinite(speed) && speed >= 0 && speed <= MAX_TRUSTED_TRUCK_SPEED_KMH
+        ? speed
+        : null;
+}
+
+export function pathSpeedFromKmh(
+    pathLengthValue: number,
+    routeLengthKm: number,
+    speedKmh: number,
+) {
+    if (pathLengthValue <= 0 || routeLengthKm <= 0 || speedKmh <= 0) return 0;
+    return pathLengthValue * speedKmh / routeLengthKm / 3_600_000;
+}
+
+export function safeTravelDurationMs(
+    routeLengthKm: number,
+    suppliedDurationMs: unknown,
+    speedKmh: number,
+) {
+    const duration = Number(suppliedDurationMs);
+    const impliedSpeedKmh = duration > 0 && routeLengthKm > 0
+        ? routeLengthKm / duration * 3_600_000
+        : Number.POSITIVE_INFINITY;
+    if (Number.isFinite(duration)
+        && duration >= 60_000
+        && impliedSpeedKmh <= MAX_TRUSTED_TRUCK_SPEED_KMH) {
+        return duration;
+    }
+    return routeLengthKm > 0
+        ? Math.max(60_000, routeLengthKm / Math.max(1, speedKmh) * 3_600_000)
+        : 60_000;
+}
+
+type RouteCorridorResult = {
+    inside: boolean;
+    nearestSegmentIndex: number;
+    distanceKm: number;
+};
+
+function localKilometers(point: LonLat, referenceLatitude: number): [number, number] {
+    const latitudeRadians = referenceLatitude * Math.PI / 180;
+    return [
+        point[0] * 111.32 * Math.cos(latitudeRadians),
+        point[1] * 110.574,
+    ];
+}
+
+/**
+ * 判断位置是否落在任意节点线段两侧 toleranceKm 的矩形内。
+ * 不使用端点圆帽，超出线段首尾的点会被视为走廊外。
+ */
+export function inspectRouteCorridor(
+    nodes: LonLat[],
+    point: LonLat,
+    toleranceKm: number,
+): RouteCorridorResult {
+    if (nodes.length < 2) {
+        return { inside: false, nearestSegmentIndex: 0, distanceKm: Number.POSITIVE_INFINITY };
+    }
+
+    let inside = false;
+    let nearestSegmentIndex = 0;
+    let nearestDistanceKm = Number.POSITIVE_INFINITY;
+
+    for (let index = 1; index < nodes.length; index += 1) {
+        const start = nodes[index - 1];
+        const end = nodes[index];
+        const referenceLatitude = (start[1] + end[1] + point[1]) / 3;
+        const [startX, startY] = localKilometers(start, referenceLatitude);
+        const [endX, endY] = localKilometers(end, referenceLatitude);
+        const [pointX, pointY] = localKilometers(point, referenceLatitude);
+        const segmentX = endX - startX;
+        const segmentY = endY - startY;
+        const segmentLengthSq = segmentX * segmentX + segmentY * segmentY;
+        if (segmentLengthSq <= Number.EPSILON) continue;
+
+        const rawProgress = ((pointX - startX) * segmentX + (pointY - startY) * segmentY)
+            / segmentLengthSq;
+        const clampedProgress = clamp01(rawProgress);
+        const projectedX = startX + segmentX * clampedProgress;
+        const projectedY = startY + segmentY * clampedProgress;
+        const distanceToSegment = Math.hypot(pointX - projectedX, pointY - projectedY);
+
+        if (distanceToSegment < nearestDistanceKm) {
+            nearestDistanceKm = distanceToSegment;
+            nearestSegmentIndex = index - 1;
+        }
+        if (rawProgress >= 0 && rawProgress <= 1 && distanceToSegment <= toleranceKm) {
+            inside = true;
+        }
+    }
+
+    return { inside, nearestSegmentIndex, distanceKm: nearestDistanceKm };
+}
+
+export function insertRouteNode(nodes: LonLat[], point: LonLat, afterSegmentIndex: number): LonLat[] {
+    const insertionIndex = Math.min(Math.max(1, afterSegmentIndex + 1), nodes.length - 1);
+    return [
+        ...nodes.slice(0, insertionIndex),
+        [point[0], point[1]],
+        ...nodes.slice(insertionIndex),
+    ];
+}
+
+/** 生成经过全部节点的 centripetal Catmull-Rom 曲线采样。 */
+export function buildCentripetalRoute(nodes: LonLat[], samplesPerSegment = 32): LonLat[] {
+    if (nodes.length < 3) return nodes.map((point) => [point[0], point[1]]);
+    const curve = new THREE.CatmullRomCurve3(
+        nodes.map(([lng, lat]) => new THREE.Vector3(lng, lat, 0)),
+        false,
+        'centripetal',
+    );
+    const segmentCount = nodes.length - 1;
+    return curve
+        .getPoints(Math.max(segmentCount * samplesPerSegment, 64))
+        .map((point): LonLat => [point.x, point.y]);
+}
+
 export function positionAtDistance(coordinates: LonLat[], targetDistance: number): LonLat {
     if (coordinates.length === 0) return [0, 0];
     if (coordinates.length === 1 || targetDistance <= 0) return coordinates[0];
@@ -101,8 +226,20 @@ export function positionAtDistance(coordinates: LonLat[], targetDistance: number
     return coordinates[coordinates.length - 1];
 }
 
-export function projectDistanceOnPath(coordinates: LonLat[], point: LonLat) {
+export function projectDistanceOnPath(coordinates: LonLat[], point: LonLat, hintDistance = -1) {
     if (coordinates.length < 2) return 0;
+
+    const totalDistance = pathLength(coordinates);
+    if (totalDistance <= 0) return 0;
+
+    // hintDistance、累计距离和返回值统一使用经纬度路径长度，避免与公里单位混算。
+    let windowStart = 0;
+    let windowEnd = totalDistance;
+    const useWindow = hintDistance >= 0 && hintDistance < totalDistance;
+    if (useWindow) {
+        windowStart = Math.max(0, hintDistance - totalDistance * 0.3);
+        windowEnd = Math.min(totalDistance, hintDistance + totalDistance * 0.3);
+    }
 
     let walked = 0;
     let nearestDistance = 0;
@@ -111,10 +248,18 @@ export function projectDistanceOnPath(coordinates: LonLat[], point: LonLat) {
     for (let i = 1; i < coordinates.length; i++) {
         const start = coordinates[i - 1];
         const end = coordinates[i];
+        const segmentLength = distance(start, end);
+        const segStart = walked;
+        const segEnd = walked + segmentLength;
+
+        // 窗口约束
+        if (useWindow && segEnd < windowStart) { walked = segEnd; continue; }
+        if (useWindow && segStart > windowEnd) break;
+
         const abX = end[0] - start[0];
         const abY = end[1] - start[1];
         const segmentLengthSq = abX * abX + abY * abY;
-        if (segmentLengthSq <= 0) continue;
+        if (segmentLengthSq <= 0) { walked = segEnd; continue; }
 
         const apX = point[0] - start[0];
         const apY = point[1] - start[1];
@@ -127,10 +272,15 @@ export function projectDistanceOnPath(coordinates: LonLat[], point: LonLat) {
 
         if (currentDistanceSq < nearestDistanceSq) {
             nearestDistanceSq = currentDistanceSq;
-            nearestDistance = walked + Math.sqrt(segmentLengthSq) * segmentProgress;
+            nearestDistance = walked + segmentLength * segmentProgress;
         }
 
-        walked += Math.sqrt(segmentLengthSq);
+        walked = segEnd;
+    }
+
+    // 窗口内没找到足够近的点，回退全图搜索
+    if (useWindow && nearestDistanceSq > 0.0001) {
+        return projectDistanceOnPath(coordinates, point, -1);
     }
 
     return nearestDistance;
@@ -162,6 +312,7 @@ export function routeProgressPatch(route: ActiveRoute, now: number) {
     return {
         progress: route.pathLength > 0 ? clamp01(currentDistance / route.pathLength) : 0,
         calibratedDistance: currentDistance,
+        currentPosition: positionAtDistance(route.coordinates, currentDistance),
         pathLength: route.pathLength,
         routeLengthKm: route.routeLengthKm,
         speedKmh: route.speedKmh,
@@ -169,21 +320,25 @@ export function routeProgressPatch(route: ActiveRoute, now: number) {
 }
 
 export function applyTruckPositionToRoute(route: ActiveRoute, message: TruckPositionMessage, now: number) {
-    const pushedVelocity = message.velocity ?? message.speed;
+    if (!message.position) return;
     const elapsedSinceLastCalibration = now - route.calibratedAt;
-    const nextDistance = projectDistanceOnPath(route.coordinates, message.position);
-    const measuredPathSpeed = elapsedSinceLastCalibration > 0
+    const reportedProgress = Number(message.progress);
+    const nextDistance = Number.isFinite(reportedProgress)
+        ? clamp01(reportedProgress) * route.pathLength
+        : projectDistanceOnPath(route.coordinates, message.position, route.calibratedDistance);
+    const measuredPathSpeed = elapsedSinceLastCalibration >= MIN_MEASURED_SPEED_INTERVAL_MS
         ? Math.max(0, (nextDistance - route.calibratedDistance) / elapsedSinceLastCalibration)
-        : route.pathSpeed;
-    const measuredSpeedKmh = elapsedSinceLastCalibration > 0 && route.pathLength > 0
+        : null;
+    const measuredSpeedKmh = measuredPathSpeed !== null && route.pathLength > 0
         ? measuredPathSpeed / route.pathLength * route.routeLengthKm * 3_600_000
         : null;
-    const pushedPathSpeed = pushedVelocity
-        ? Math.sqrt(pushedVelocity[0] * pushedVelocity[0] + pushedVelocity[1] * pushedVelocity[1])
-        : null;
+    const trustedSpeedKmh = trustedTruckSpeedKmh(message.speedKmh)
+        ?? trustedTruckSpeedKmh(measuredSpeedKmh)
+        ?? trustedTruckSpeedKmh(route.speedKmh)
+        ?? FALLBACK_TRUCK_SPEED_KMH;
 
-    route.pathSpeed = pushedPathSpeed ?? measuredPathSpeed ?? route.pathSpeed;
-    route.speedKmh = message.speedKmh ?? measuredSpeedKmh ?? route.speedKmh;
+    route.pathSpeed = pathSpeedFromKmh(route.pathLength, route.routeLengthKm, trustedSpeedKmh);
+    route.speedKmh = trustedSpeedKmh;
     route.calibratedAt = now;
     route.calibratedDistance = nextDistance;
     route.nextCalibrationAt = now + nextQueryInterval(route.speedKmh);

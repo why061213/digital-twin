@@ -11,26 +11,21 @@ export function RoadGroupQueue({ groups, activeGroupId, isLoading, onSelectGroup
     if (groups.length === 0) return null;
 
     return (
-        <div className="absolute left-4 top-4 z-40 flex max-w-[calc(100%-2rem)] gap-2 overflow-x-auto rounded-md border border-white/10 bg-slate-950/65 p-2 text-xs text-slate-300 shadow-xl backdrop-blur-md pointer-events-auto">
-            {groups.map((group) => {
-                const vehicleText = group.vehicleCount !== undefined && group.vehicleCount !== group.count
-                    ? ` · ${group.vehicleCount} 辆`
-                    : '';
-                return (
-                    <button
-                        key={group.groupId}
-                        onClick={() => onSelectGroup(group.groupId)}
-                        disabled={isLoading && activeGroupId === group.groupId}
-                        className={`shrink-0 rounded border px-3 py-1.5 transition-all ${
-                            activeGroupId === group.groupId
-                                ? 'border-cyan-300/50 bg-cyan-400/15 text-cyan-100'
-                                : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
-                        }`}
-                    >
-                        第 {group.index + 1} 组 · {group.count} 条线路{vehicleText}
-                    </button>
-                );
-            })}
+        <div className="absolute left-1/2 top-24 z-40 flex max-w-[46%] -translate-x-1/2 gap-2 overflow-x-auto rounded-md border border-white/10 bg-slate-950/65 p-2 text-xs text-slate-300 shadow-xl backdrop-blur-md pointer-events-auto">
+            {groups.map((group) => (
+                <button
+                    key={group.groupId}
+                    onClick={() => onSelectGroup(group.groupId)}
+                    disabled={isLoading && activeGroupId === group.groupId}
+                    className={`shrink-0 rounded border px-3 py-1.5 transition-all ${
+                        activeGroupId === group.groupId
+                            ? 'border-cyan-300/50 bg-cyan-400/15 text-cyan-100'
+                            : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+                    }`}
+                >
+                    第 {group.index + 1} 组 · {group.count} 条
+                </button>
+            ))}
         </div>
     );
 }

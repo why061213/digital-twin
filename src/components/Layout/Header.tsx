@@ -3,24 +3,22 @@ import KpiCards from '@/pages/Dashboard/modules/KpiCards';
 
 function Header() {
     return (
-        <div className="flex items-center justify-between w-full gap-8 bg-white/[0.03] backdrop-blur-xl rounded-sm px-4 py-2 border border-white/10 shadow-[0_4px_16px_rgba(0,0,0,0.3)]">
-            {/* 左侧标题 */}
-            <div className="flex-shrink-0">
-                <h1 className="text-cyan-300 text-2xl font-bold tracking-wide whitespace-nowrap">
+        <header className="relative grid h-full w-full grid-cols-1 items-center gap-6 overflow-hidden rounded border border-cyan-100/10 bg-slate-950/68 px-4 shadow-[0_12px_34px_rgba(2,8,23,0.38)] backdrop-blur-xl after:pointer-events-none after:absolute after:inset-x-6 after:bottom-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-cyan-300/45 after:to-transparent lg:grid-cols-[minmax(18rem,1fr)_auto_minmax(15rem,1fr)]">
+            <div className="flex min-w-0 items-center gap-3">
+                <span className="h-7 w-1 shrink-0 bg-gradient-to-b from-cyan-300 to-emerald-300 shadow-[0_0_14px_rgba(34,211,238,0.45)]" />
+                <h1 className="truncate text-base font-bold text-cyan-200 lg:text-xl">
                     炬申智慧物流数字孪生大屏
                 </h1>
             </div>
 
-            {/* 中间 KPI 卡片 */}
-            <div className="flex-1 flex justify-center">
+            <div className="hidden justify-center lg:flex">
                 <KpiCards />
             </div>
 
-            {/* 右侧时钟 */}
-            <div className="flex-shrink-0">
+            <div className="hidden shrink-0 justify-end border-l border-white/8 pl-6 lg:flex">
                 <Clock />
             </div>
-        </div>
+        </header>
     );
 }
 
