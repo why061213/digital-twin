@@ -18,7 +18,7 @@ async function loadCityGeoJson() {
             const resp = await fetch(`${BASE_URL}${adcode}_full.json`);
             const data = await resp.json();
             if (data.features) features.push(...data.features);
-        } catch (e) { /* ignore */ }
+        } catch { /* ignore */ }
     });
     await Promise.all(tasks);
     return { type: 'FeatureCollection', features };

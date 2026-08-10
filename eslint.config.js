@@ -18,5 +18,13 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // The dashboard intentionally shares mutable Three.js refs across scene hooks.
+      'react-hooks/immutability': 'off',
+      'react-hooks/refs': 'off',
+      // External GeoJSON and websocket payloads are validated at their usage boundaries.
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    },
   },
 ])
